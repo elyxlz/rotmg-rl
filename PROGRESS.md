@@ -9,7 +9,7 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 |----|-----------|--------|
 | M0 | Repo scaffold + uv env on the GPU box + wandb smoke run | DONE |
 | M1 | PufferLib C sim of Snake Pit (>=1M steps/s/core) + renderer + play.py | in progress |
-| M2 | Cold-start training stack (recurrent PPO + shaping + curriculum + RND + DR) | deps ready |
+| M2 | Cold-start training stack (recurrent PPO + shaping + curriculum + RND + DR) | PPO learns; curriculum+RND+DR next |
 | M3 | Sim milestone: clear simulated Snake Pit >=90% (eval >=200 eps) | not started |
 | M4 | Robustness milestone: >=90% across full domain-randomization range | not started |
 | M5 | Deploy adapters (NR-CORE server + protocol reader + input injector + gap harness) | not started |
@@ -45,10 +45,25 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   (`x[:, :1350].view(B,6,15,15)`, `x[:, 1350:]`) — no `nativize` needed. Action space stays
   `MultiDiscrete([9,9])` (two categorical heads, summed logprob/entropy).
 
-### Next iteration starts here
-- Build `src/rotmg_rl/policy.py` (CNN over grid + MLP over scalars -> fuse -> LSTM -> 2 actor
-  heads + critic) and a CleanRL-style recurrent-PPO `scripts/train.py` over `pufferlib.vector`
-  envs. Verify a short run learns the shrunk-boss case and logs a curve + video to wandb.
+### 2026-06-26 — M2 PPO stack works and LEARNS from cold start
+- Built `policy.py` (CNN grid + MLP scalars -> LSTM -> 2 actor heads + critic) and CleanRL-style
+  recurrent PPO `scripts/train.py` over `pufferlib.vector` (Multiprocessing, 16 workers = 16
+  physical cores; 256 envs). `eval_policy.py` gives ground-truth greedy clear-rate.
+- First real run (boss-hp 50, 5M steps, ~18.7k SPS): cold-start clear-rate (sampling) rose
+  0 -> ~0.20. The stack optimizes the true objective with NO demos. M2 core verified.
+- BUT greedy eval over 200 eps = 0.000 clear (mean_return 26.63, dies ~step 213). Greedy is
+  brittle while sampling's exploration occasionally finishes; policy is only partially
+  converged. Reaching M3 (>=90% greedy clear) needs the full recipe below.
+- Wandb ran offline (no API key on box yet); videos + curves saved locally, syncable later.
+
+### Next iteration starts here (toward M3)
+1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
+   threshold. Add as env config schedule driven by the trainer.
+2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).
+3. Domain randomization knobs in `SnakePitConfig` (bullet speed, HP, spawn, obs noise).
+4. Longer runs; eval greedy each stage; gate M3 at >=90% over >=200 eps on the FULL boss.
+- Cleanups (low pri): numpy 2.x vs a C-ext compiled for numpy 1.x ABI warning during eval
+  (non-fatal); a legacy `gym` import warning (from a dep). Pin/resolve before M5.
 
 ### Blockers needing the user (non-stopping)
 - `WANDB_API_KEY` on the box for ONLINE progress following (offline works meanwhile).

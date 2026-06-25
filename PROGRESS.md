@@ -56,7 +56,15 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   converged. Reaching M3 (>=90% greedy clear) needs the full recipe below.
 - Wandb ran offline (no API key on box yet); videos + curves saved locally, syncable later.
 
-### Next iteration starts here (toward M3)
+### 2026-06-26 — curriculum stage 1 = 100% greedy clear
+- Staged curriculum (`scripts/curriculum.py`) warm-starts each stage from the last and ramps
+  boss HP + fire rate to the full boss (stage 5 = M3 gate). Warm-start + difficulty knobs added
+  to `train.py`; difficulty knobs added to `eval_policy.py`.
+- Stage 1 (hp 40, fire 26, 8M steps, ~19.2k SPS): **greedy clear_rate 1.000 / 200 eps**
+  (mean_return 89.6, mean_length 127). The greedy brittleness earlier was under-convergence +
+  difficulty, not a bug. Stages 2-5 ramp from here; full-boss eval gates M3.
+
+### Recipe queue (add only if a stage stalls)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

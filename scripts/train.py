@@ -14,6 +14,7 @@ import argparse
 import time
 from functools import partial
 
+import imageio.v2 as imageio
 import numpy as np
 import torch
 import torch.nn as nn
@@ -68,7 +69,7 @@ def record_rollout(agent: Agent, cfg: SnakePitConfig, device, seed: int = 0) -> 
         x = torch.tensor(flatten_obs(obs), device=device).unsqueeze(0)
         action, lstm_state = agent.act_greedy(x, lstm_state, done)
         obs, reward, term, trunc, info = env.step(action[0].cpu().numpy())
-        frames.append(env.render().transpose(2, 0, 1))  # wandb wants (T,C,H,W)
+        frames.append(env.render())  # (H,W,C) uint8
         total += reward
         done = torch.tensor([float(term or trunc)], device=device)
         if term or trunc:
@@ -152,7 +153,7 @@ def main() -> None:
             for i in np.where(done)[0]:
                 recent_returns.append(float(ep_return[i]))
                 recent_lengths.append(int(ep_len[i]))
-                recent_clears.append(1.0 if reward[i] > args.boss_hp * 0.0 + 25.0 else 0.0)  # clear bonus dominates terminal reward
+                recent_clears.append(1.0 if reward[i] > 25.0 else 0.0)  # clear bonus (+50) dominates terminal reward
                 ep_return[i] = 0.0
                 ep_len[i] = 0
 
@@ -233,7 +234,9 @@ def main() -> None:
 
         if update % args.video_interval == 0:
             frames, cleared, total = record_rollout(agent, cfg, device, seed=update)
-            log["rollout/video"] = wandb.Video(np.array(frames, np.uint8), fps=30, format="mp4")
+            vid_path = f"videos/{args.name}_u{update}.mp4"
+            imageio.mimsave(vid_path, frames, fps=30)
+            log["rollout/video"] = wandb.Video(vid_path)
             log["rollout/cleared"] = float(cleared)
             log["rollout/return"] = total
 
@@ -252,4 +255,5 @@ if __name__ == "__main__":
     import pathlib
 
     pathlib.Path("checkpoints").mkdir(exist_ok=True)
+    pathlib.Path("videos").mkdir(exist_ok=True)
     main()

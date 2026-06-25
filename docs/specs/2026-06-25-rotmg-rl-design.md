@@ -92,6 +92,34 @@ input-injector command.
   observation tensor.
 - **Input injector**: turns policy actions into mouse/keyboard input on the real client.
 
+### 5. Visualization and progress tracking
+
+The user wants to watch the agent and follow training progress, so this is a first-class
+component, not an afterthought.
+
+- **Training metrics → Weights & Biases**: reward curves, dungeon clear rate, episode
+  length, curriculum stage, RND intrinsic reward, KL/entropy. Remote-accessible so progress
+  is followable from anywhere while training runs on the GPU box. PufferLib has native wandb
+  integration.
+- **Rendered rollout videos**: a render mode for the Snake Pit sim (raylib, as used by
+  PufferLib Ocean envs). Every N updates, record a greedy-policy episode and log it to wandb
+  as video, so the agent's behavior is watchable as it evolves (does it dodge? approach the
+  boss? clear?).
+- **Live local viewer**: a `play.py` that loads a checkpoint and renders an episode in real
+  time on demand, for eyeballing a specific checkpoint.
+- **Progress log**: a `PROGRESS.md` in the repo updated each iteration (milestone reached,
+  current clear rate, what changed, what is next), committed so progress is auditable.
+
+## Training infrastructure
+
+- **Remote GPU box** `baby-ai-ripper` (`ssh -p 62022 audiogen@81.105.49.222`, aliased
+  `ripperred`): 2× RTX 3090 (24 GB), 32 CPU cores, Ubuntu 22.04, gcc + git + docker present.
+- `uv` and `nvcc` are absent: install `uv` for the Python env; no system CUDA toolkit is
+  needed (PyTorch CUDA wheels ship their own runtime; PufferLib speed comes from CPU C envs
+  compiled with gcc across the 32 cores).
+- The git repo is the source of truth; training runs on the box via ssh. Sim throughput
+  target uses all 32 cores; the learner uses the 3090s.
+
 ## Cold-start training recipe (no demos)
 
 Cold-start on a sparse "boss died" reward yields ~0 signal. With supervised data ruled out,
@@ -120,6 +148,8 @@ viable by the unlimited sim step budget.
 3. **Real milestone**: the same policy, via protocol adapter + input injector, completes a
    real Snake Pit on a self-hosted **private server** (NR-CORE) first, before any official
    server.
+4. **Visualization milestone**: a live wandb dashboard tracks every run, and rendered
+   rollout videos of the current policy are logged periodically and on demand.
 
 ## Risks and open questions
 

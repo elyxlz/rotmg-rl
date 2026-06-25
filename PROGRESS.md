@@ -64,7 +64,18 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   (mean_return 89.6, mean_length 127). The greedy brittleness earlier was under-convergence +
   difficulty, not a bug. Stages 2-5 ramp from here; full-boss eval gates M3.
 
-### Recipe queue (add only if a stage stalls)
+### 2026-06-26 — env was unbalanced; rebalanced + adaptive curriculum
+- Old curriculum stage 2 (hp 80) collapsed to 0.045 greedy. Root cause: env balance, not RL.
+  With cd=3/dmg=1.0, killing the hp=600 "full boss" needed ~1800 perfect-shooting steps but
+  max_steps=1200 -> the M3 target was literally impossible, and hp80 was already near the edge.
+- Fix (one root cause): rebalanced DPS so the full boss is killable within the horizon with
+  dodging margin: shoot_cooldown 3->2, player_bullet_dmg 1.0->2.0, full boss_hp 600->250.
+  Tests still green. Killed the broken run, cleared stale checkpoints.
+- Curriculum is now ADAPTIVE (`curriculum.py`): difficulty scalar d in [0,1] ramps hp 50->250
+  and fire 28->18; advance only when a level hits >=0.80 greedy, train more chunks if it
+  stalls; M3 = full boss (d=1.0) greedy clear >=0.90. Relaunched.
+
+### Recipe queue (add only if a level stalls)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

@@ -243,7 +243,11 @@ def main() -> None:
         wandb.log(log, step=global_step)
         if update % 10 == 0 or update == 1:
             cr = log.get("charts/clear_rate", float("nan"))
-            print(f"update {update}/{num_updates} step {global_step} sps {sps} clear_rate {cr:.2f}")
+            ret = log.get("charts/episodic_return", float("nan"))
+            print(
+                f"update {update}/{num_updates} step {global_step} sps {sps} return {ret:.2f} clear_rate {cr:.2f}",
+                flush=True,
+            )
 
     venv.close()
     torch.save(agent.state_dict(), f"checkpoints/{args.name}.pt")

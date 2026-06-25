@@ -60,7 +60,8 @@ class SnakePitEnv(gym.Env):
         self.render_mode = render_mode
         self.observation_space = gym.spaces.Dict(
             {
-                "grid": gym.spaces.Box(0.0, 1.0, GRID_SHAPE, np.float32),
+                # Velocity channels (CH_ENEMY_BULLET_VX/VY) are signed unit components.
+                "grid": gym.spaces.Box(-1.0, 1.0, GRID_SHAPE, np.float32),
                 "scalars": gym.spaces.Box(-1.0, 1.0, (NUM_SCALARS,), np.float32),
             }
         )

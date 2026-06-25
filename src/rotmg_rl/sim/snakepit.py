@@ -1,0 +1,197 @@
+"""Snake Pit: numpy reference simulator (correctness-first; the C port comes later).
+
+A small square arena with one boss (Stheno) that fires bullet patterns at the player.
+The player moves in 8 directions and shoots in 8 directions. Goal: kill the boss without
+dying. Reward is densely shaped so a cold-start policy gets gradient before its first clear.
+
+This env is the ground-truth adapter: its `game_state()` builds the same `GameState` the
+real-game packet adapter will, so `build_observation` yields an identical tensor in both.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import gymnasium as gym
+import numpy as np
+
+from rotmg_rl.observation import GRID_SHAPE, NUM_SCALARS, GameState, build_observation
+
+# 8 unit directions, index 0..7, evenly spaced starting East going counter-clockwise.
+_ANGLES = np.arange(8, dtype=np.float32) * (np.pi / 4.0)
+DIRS = np.stack([np.cos(_ANGLES), np.sin(_ANGLES)], axis=1).astype(np.float32)  # (8,2)
+
+
+@dataclass
+class SnakePitConfig:
+    arena_size: float = 40.0
+    dt: float = 1.0
+    max_steps: int = 1200
+    player_speed: float = 0.9
+    player_hp_max: float = 100.0
+    player_radius: float = 0.6
+    shoot_cooldown: int = 3
+    player_bullet_speed: float = 1.6
+    player_bullet_dmg: float = 1.0
+    player_bullet_radius: float = 0.5
+    boss_hp_max: float = 600.0
+    boss_radius: float = 2.0
+    boss_speed: float = 0.25
+    boss_fire_interval: int = 18
+    boss_burst: int = 12  # bullets per radial burst
+    enemy_bullet_speed: float = 0.7
+    enemy_bullet_dmg: float = 8.0
+    enemy_bullet_radius: float = 0.5
+    max_bullets: int = 4096
+    # Reward shaping.
+    rew_boss_dmg: float = 1.0  # per HP of boss damage
+    rew_survive: float = 0.002  # per tick alive
+    rew_damage_taken: float = 0.05  # per HP lost
+    rew_clear: float = 50.0
+    rew_death: float = 10.0
+
+
+class SnakePitEnv(gym.Env):
+    metadata = {"render_modes": ["rgb_array"]}
+
+    def __init__(self, config: SnakePitConfig | None = None, render_mode: str | None = None):
+        super().__init__()
+        self.cfg = config or SnakePitConfig()
+        self.render_mode = render_mode
+        self.observation_space = gym.spaces.Dict(
+            {
+                "grid": gym.spaces.Box(0.0, 1.0, GRID_SHAPE, np.float32),
+                "scalars": gym.spaces.Box(-1.0, 1.0, (NUM_SCALARS,), np.float32),
+            }
+        )
+        self.action_space = gym.spaces.MultiDiscrete([9, 9])  # move(0=stay,1-8), aim(0=none,1-8)
+        self._rng = np.random.default_rng()
+
+    # --- core loop ---------------------------------------------------------
+
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
+        super().reset(seed=seed)
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+        c = self.cfg
+        self.steps = 0
+        self.shoot_timer = 0
+        self.boss_timer = c.boss_fire_interval
+        self.player_pos = np.array([c.arena_size * 0.5, c.arena_size * 0.85], np.float32)
+        self.player_hp = c.player_hp_max
+        self.boss_pos = np.array([c.arena_size * 0.5, c.arena_size * 0.2], np.float32)
+        self.boss_hp = c.boss_hp_max
+        self.enemy_bullets = np.zeros((0, 4), np.float32)
+        self.player_bullets = np.zeros((0, 4), np.float32)
+        return self._obs(), {}
+
+    def step(self, action):
+        c = self.cfg
+        move_idx, aim_idx = int(action[0]), int(action[1])
+        reward = 0.0
+
+        # Player movement.
+        if move_idx > 0:
+            self.player_pos = self.player_pos + DIRS[move_idx - 1] * c.player_speed * c.dt
+            self.player_pos = np.clip(self.player_pos, 0.0, c.arena_size)
+
+        # Player shooting.
+        self.shoot_timer = max(0, self.shoot_timer - 1)
+        if aim_idx > 0 and self.shoot_timer == 0:
+            vel = DIRS[aim_idx - 1] * c.player_bullet_speed
+            bullet = np.array([[self.player_pos[0], self.player_pos[1], vel[0], vel[1]]], np.float32)
+            self.player_bullets = self._append(self.player_bullets, bullet)
+            self.shoot_timer = c.shoot_cooldown
+
+        # Boss behaviour: drift toward player, fire radial bursts.
+        to_player = self.player_pos - self.boss_pos
+        d = np.linalg.norm(to_player) + 1e-6
+        self.boss_pos = np.clip(self.boss_pos + (to_player / d) * c.boss_speed * c.dt, 0.0, c.arena_size)
+        self.boss_timer -= 1
+        if self.boss_timer <= 0:
+            self.boss_timer = c.boss_fire_interval
+            self.enemy_bullets = self._append(self.enemy_bullets, self._radial_burst())
+
+        # Advance bullets.
+        self.player_bullets = self._advance(self.player_bullets)
+        self.enemy_bullets = self._advance(self.enemy_bullets)
+
+        # Player bullets vs boss.
+        if self.player_bullets.shape[0] > 0:
+            hit = np.linalg.norm(self.player_bullets[:, :2] - self.boss_pos, axis=1) < (c.boss_radius + c.player_bullet_radius)
+            n_hit = int(hit.sum())
+            if n_hit:
+                self.boss_hp -= n_hit * c.player_bullet_dmg
+                reward += n_hit * c.player_bullet_dmg * c.rew_boss_dmg
+                self.player_bullets = self.player_bullets[~hit]
+
+        # Enemy bullets vs player.
+        if self.enemy_bullets.shape[0] > 0:
+            hit = np.linalg.norm(self.enemy_bullets[:, :2] - self.player_pos, axis=1) < (c.player_radius + c.enemy_bullet_radius)
+            n_hit = int(hit.sum())
+            if n_hit:
+                self.player_hp -= n_hit * c.enemy_bullet_dmg
+                reward -= n_hit * c.enemy_bullet_dmg * c.rew_damage_taken
+                self.enemy_bullets = self.enemy_bullets[~hit]
+
+        reward += c.rew_survive
+        self.steps += 1
+
+        terminated = False
+        cleared = False
+        if self.boss_hp <= 0.0:
+            terminated, cleared = True, True
+            reward += c.rew_clear
+        elif self.player_hp <= 0.0:
+            terminated = True
+            reward -= c.rew_death
+        truncated = (not terminated) and self.steps >= c.max_steps
+
+        info = {"cleared": cleared, "boss_hp_frac": max(self.boss_hp, 0.0) / c.boss_hp_max, "steps": self.steps}
+        return self._obs(), float(reward), terminated, truncated, info
+
+    # --- helpers -----------------------------------------------------------
+
+    def _radial_burst(self) -> np.ndarray:
+        c = self.cfg
+        angles = np.arange(c.boss_burst, dtype=np.float32) * (2 * np.pi / c.boss_burst)
+        angles += self._rng.uniform(0.0, 2 * np.pi / c.boss_burst)  # random phase
+        vel = np.stack([np.cos(angles), np.sin(angles)], axis=1).astype(np.float32) * c.enemy_bullet_speed
+        pos = np.tile(self.boss_pos, (c.boss_burst, 1)).astype(np.float32)
+        return np.concatenate([pos, vel], axis=1)
+
+    def _advance(self, bullets: np.ndarray) -> np.ndarray:
+        if bullets.shape[0] == 0:
+            return bullets
+        bullets = bullets.copy()
+        bullets[:, :2] += bullets[:, 2:4] * self.cfg.dt
+        inside = (
+            (bullets[:, 0] >= 0) & (bullets[:, 0] <= self.cfg.arena_size) & (bullets[:, 1] >= 0) & (bullets[:, 1] <= self.cfg.arena_size)
+        )
+        return bullets[inside]
+
+    def _append(self, bullets: np.ndarray, new: np.ndarray) -> np.ndarray:
+        out = np.concatenate([bullets, new], axis=0) if bullets.shape[0] else new
+        if out.shape[0] > self.cfg.max_bullets:
+            out = out[-self.cfg.max_bullets :]
+        return out
+
+    def game_state(self) -> GameState:
+        c = self.cfg
+        return GameState(
+            arena_size=c.arena_size,
+            player_pos=self.player_pos,
+            player_hp=self.player_hp,
+            player_hp_max=c.player_hp_max,
+            player_mp=0.0,
+            player_mp_max=1.0,
+            ability_ready=False,
+            boss_pos=self.boss_pos,
+            boss_hp=max(self.boss_hp, 0.0),
+            boss_hp_max=c.boss_hp_max,
+            enemy_bullets=self.enemy_bullets,
+            player_bullets=self.player_bullets,
+        )
+
+    def _obs(self) -> dict[str, np.ndarray]:
+        return build_observation(self.game_state())

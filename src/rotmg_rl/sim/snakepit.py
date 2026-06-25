@@ -196,3 +196,31 @@ class SnakePitEnv(gym.Env):
 
     def _obs(self) -> dict[str, np.ndarray]:
         return build_observation(self.game_state())
+
+    # --- rendering (headless rgb_array, for video logging) -----------------
+
+    def render(self, px: int = 480):
+        if self.render_mode != "rgb_array":
+            return None
+        c = self.cfg
+        frame = np.full((px, px, 3), 18, np.uint8)  # dark background
+        scale = px / c.arena_size
+
+        def draw(pos: np.ndarray, radius: float, color: tuple[int, int, int]) -> None:
+            cx, cy = int(pos[0] * scale), int(pos[1] * scale)
+            r = max(1, int(radius * scale))
+            y0, y1 = max(0, cy - r), min(px, cy + r + 1)
+            x0, x1 = max(0, cx - r), min(px, cx + r + 1)
+            if y0 >= y1 or x0 >= x1:
+                return
+            ys, xs = np.mgrid[y0:y1, x0:x1]
+            mask = (xs - cx) ** 2 + (ys - cy) ** 2 <= r * r
+            frame[y0:y1, x0:x1][mask] = color
+
+        for b in self.enemy_bullets:
+            draw(b[:2], c.enemy_bullet_radius, (255, 140, 0))
+        for b in self.player_bullets:
+            draw(b[:2], c.player_bullet_radius, (80, 200, 255))
+        draw(self.boss_pos, c.boss_radius, (220, 40, 40))
+        draw(self.player_pos, c.player_radius, (60, 230, 90))
+        return frame

@@ -30,8 +30,24 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 - Next: wire PufferLib recurrent-PPO training on the numpy env to produce the FIRST real
   learning curve + policy rollout video (de-risks M2 cheaply), then C-port the env for speed.
 
+#### M2 implementation plan (decided after introspecting pufferlib 2.0.6)
+- pufferlib 2.0.6 ships NO packaged trainer (`pufferlib.pufferl` is 3.x only). So M2 = a
+  compact, self-contained recurrent PPO loop we own, built on:
+  - `pufferlib.emulation.GymnasiumPufferEnv` to wrap `SnakePitEnv` (flattens the Dict obs).
+  - `pufferlib.vector.make(..., backend=Multiprocessing)` for parallel envs across 32 cores.
+  - a torch policy: CNN over the 6x15x15 grid + MLP over scalars -> fuse -> `pufferlib.pytorch.LSTM`
+    -> actor (MultiDiscrete 9x9) + critic heads.
+- PPO with GAE, entropy bonus, minibatched epochs; wandb logging of reward/clear-rate/ep-len/
+  entropy/KL; periodic greedy rollout video to wandb. Reward shaping + RND + curriculum + DR
+  layer on after the bare loop is verified to learn the shrunk-boss case.
+
 ### Blockers needing the user (non-stopping)
 - `WANDB_API_KEY` on the box for ONLINE progress following (offline works meanwhile).
-- M5/M6 (real game) need infra the headless Linux box can't provide: a running ROTMG client
-  + NR-CORE private server + a host that can inject input. Sim milestones (M0-M4) run fully
-  on the GPU box; real-game deploy will need the user's environment.
+
+### Correction (2026-06-25): M5/M6 ARE fully doable headless on the Linux box
+- Earlier note claimed real-game deploy needs the user's environment. Retracted. The real
+  interface is the network protocol, not a GUI: a headless `nrelay` fork both reads state
+  (incl. `EnemyShoot` packets) and sends actions (`Move`/`PlayerShoot`); the bullet field is
+  reconstructed by locally simulating projectiles. NR-CORE runs headless on Linux. So the
+  whole pipeline (M0-M6) runs on `baby-ai-ripper`. No GUI client, no Wine/Xvfb, no input
+  injection into a window. Spec component 4 updated accordingly.

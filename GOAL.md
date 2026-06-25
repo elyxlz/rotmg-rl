@@ -49,9 +49,11 @@ M2  Cold-start training stack: recurrent PPO + dense reward shaping + curriculum
 M3  Sim milestone: policy clears simulated Snake Pit >=90% of episodes. (verify: eval over
     >=200 episodes; review a rollout video.)
 M4  Robustness milestone: >=90% clear rate across the full domain-randomization range.
-M5  Deploy adapters: NR-CORE private server up; protocol reader -> real observation tensor;
-    input injector for actions; a gap-measurement harness that replays real packet captures
-    through the policy and checks its actions look sane.
+M5  Deploy adapters (ALL headless on the Linux box, protocol I/O only, no GUI/display):
+    NR-CORE private server up on Linux; headless nrelay fork that BOTH reads state
+    (incl. EnemyShoot packets, bullets reconstructed by local sim) and SENDS actions
+    (Move/PlayerShoot); observation+action adapters; a gap-measurement harness that replays
+    real packet captures through the policy and checks its actions look sane.
 M6  Real milestone (DONE): the same policy completes a real Snake Pit on the private server.
     Expect 1-2 iterations of measure-gap-on-real-data -> fix sim fidelity -> retrain.
 

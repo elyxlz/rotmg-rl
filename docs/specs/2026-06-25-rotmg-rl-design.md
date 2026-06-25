@@ -88,9 +88,20 @@ input-injector command.
 
 ### 4. Real-game adapters (deploy-time only, not needed to train)
 
-- **Protocol reader**: fork of `nrelay` or `RealmShark`; turns live packets into the shared
-  observation tensor.
-- **Input injector**: turns policy actions into mouse/keyboard input on the real client.
+The entire real-game loop is **headless protocol I/O** and runs on the Linux GPU box. There
+is no GUI client, no screen capture, no synthetic mouse/keyboard, no display.
+
+- **Headless client (read + write)**: a fork of `nrelay` (Node.js, runs on Linux). It is a
+  real protocol-speaking client that both:
+  - reads state: enemy/boss positions, HP, and `EnemyShoot` packets;
+  - sends actions: `Move` and `PlayerShoot` packets driven by the policy.
+- **Observation adapter**: reconstructs the bullet field by locally simulating projectiles
+  from `EnemyShoot` packets (the same technique vrelay's predictive autonexus uses), then
+  builds the shared `GameState` -> `build_observation` tensor, identical to the sim's.
+- **Action adapter**: maps the policy's MultiDiscrete action (move dir, aim dir) to `Move` /
+  `PlayerShoot` packets sent through the headless client.
+- **Server**: NR-CORE private server runs headless on Linux (dotnet/mono). One open item is
+  confirming its target runtime (.NET Framework via mono vs modern .NET); resolved at M5.
 
 ### 5. Visualization and progress tracking
 

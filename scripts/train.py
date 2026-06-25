@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--vf-coef", type=float, default=0.5)
     p.add_argument("--max-grad-norm", type=float, default=0.5)
     p.add_argument("--boss-hp", type=float, default=120.0)
+    p.add_argument("--boss-fire-interval", type=int, default=18)
+    p.add_argument("--boss-burst", type=int, default=12)
+    p.add_argument("--boss-speed", type=float, default=0.25)
+    p.add_argument("--enemy-bullet-speed", type=float, default=0.7)
+    p.add_argument("--init-checkpoint", default=None, help="warm-start from this checkpoint (curriculum)")
     p.add_argument("--video-interval", type=int, default=10, help="record a rollout every N updates")
     return p.parse_args()
 
@@ -90,7 +95,13 @@ def main() -> None:
 
     wandb.init(project=args.project, name=args.name, config=vars(args))
 
-    cfg = SnakePitConfig(boss_hp_max=args.boss_hp)
+    cfg = SnakePitConfig(
+        boss_hp_max=args.boss_hp,
+        boss_fire_interval=args.boss_fire_interval,
+        boss_burst=args.boss_burst,
+        boss_speed=args.boss_speed,
+        enemy_bullet_speed=args.enemy_bullet_speed,
+    )
     backend = vector.Multiprocessing if args.backend == "multiprocessing" else vector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}
     venv = vector.make(
@@ -104,6 +115,9 @@ def main() -> None:
     act_dtype = venv.single_action_space.dtype
 
     agent = Agent().to(device)
+    if args.init_checkpoint:
+        agent.load_state_dict(torch.load(args.init_checkpoint, map_location=device))
+        print(f"warm-started from {args.init_checkpoint}", flush=True)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     obs = torch.zeros(args.num_steps, args.num_envs, obs_dim, device=device)

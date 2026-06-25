@@ -44,6 +44,9 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--boss-hp", type=float, default=50.0)
+    parser.add_argument("--boss-fire-interval", type=int, default=18)
+    parser.add_argument("--boss-burst", type=int, default=12)
+    parser.add_argument("--enemy-bullet-speed", type=float, default=0.7)
     parser.add_argument("--seed", type=int, default=10_000)
     args = parser.parse_args()
 
@@ -52,7 +55,14 @@ def main() -> None:
     agent.load_state_dict(torch.load(args.checkpoint, map_location=device))
     agent.eval()
 
-    env = SnakePitEnv(SnakePitConfig(boss_hp_max=args.boss_hp))
+    env = SnakePitEnv(
+        SnakePitConfig(
+            boss_hp_max=args.boss_hp,
+            boss_fire_interval=args.boss_fire_interval,
+            boss_burst=args.boss_burst,
+            enemy_bullet_speed=args.enemy_bullet_speed,
+        )
+    )
     clears, returns, lengths = [], [], []
     for i in range(args.episodes):
         cleared, total, length = run_episode(agent, env, device, seed=args.seed + i)

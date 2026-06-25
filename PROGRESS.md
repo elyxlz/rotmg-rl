@@ -40,6 +40,15 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 - PPO with GAE, entropy bonus, minibatched epochs; wandb logging of reward/clear-rate/ep-len/
   entropy/KL; periodic greedy rollout video to wandb. Reward shaping + RND + curriculum + DR
   layer on after the bare loop is verified to learn the shrunk-boss case.
+- OBS LAYOUT (verified on box): `GymnasiumPufferEnv` flattens the Dict to `Box((1356,) f4)`;
+  first 1350 = grid `(6,15,15)`, last 6 = scalars. Policy reconstructs by slice+reshape
+  (`x[:, :1350].view(B,6,15,15)`, `x[:, 1350:]`) — no `nativize` needed. Action space stays
+  `MultiDiscrete([9,9])` (two categorical heads, summed logprob/entropy).
+
+### Next iteration starts here
+- Build `src/rotmg_rl/policy.py` (CNN over grid + MLP over scalars -> fuse -> LSTM -> 2 actor
+  heads + critic) and a CleanRL-style recurrent-PPO `scripts/train.py` over `pufferlib.vector`
+  envs. Verify a short run learns the shrunk-boss case and logs a curve + video to wandb.
 
 ### Blockers needing the user (non-stopping)
 - `WANDB_API_KEY` on the box for ONLINE progress following (offline works meanwhile).

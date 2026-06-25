@@ -30,11 +30,13 @@ class SnakePitConfig:
     player_speed: float = 0.9
     player_hp_max: float = 100.0
     player_radius: float = 0.6
-    shoot_cooldown: int = 3
+    # DPS tuned so the full boss is killable within max_steps with margin for dodging:
+    # ~half the episode spent shooting -> ~(600*0.5/cooldown)*dmg*hit_rate damage capacity.
+    shoot_cooldown: int = 2
     player_bullet_speed: float = 1.6
-    player_bullet_dmg: float = 1.0
+    player_bullet_dmg: float = 2.0
     player_bullet_radius: float = 0.5
-    boss_hp_max: float = 600.0
+    boss_hp_max: float = 250.0  # full Snake Pit boss; feasible (not 600, which exceeds the horizon)
     boss_radius: float = 2.0
     boss_speed: float = 0.25
     boss_fire_interval: int = 18

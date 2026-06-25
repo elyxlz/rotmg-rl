@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# uv
+.uv/
+
+# RL / training artifacts
+wandb/
+checkpoints/
+runs/
+*.pt
+*.ckpt
+videos/
+*.mp4
+*.gif
+
+# C build artifacts
+*.o
+*.so
+*.out
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

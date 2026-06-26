@@ -504,41 +504,53 @@ class DungeonEnv(gym.Env):
         cx, cy = cells[inb, 0], cells[inb, 1]
         grid[ch, cy, cx] = value[inb] if isinstance(value, np.ndarray) else value
 
-    def render(self, px_per_tile: int = 5):
+    def render(self, size: int = 480, pov_radius: float = 16.0):
+        """Player POV (camera follows the player, like the real ROTMG client) + minimap top-right."""
         if self.render_mode != "rgb_array":
             return None
-        img = np.where(self.map.walkable[..., None], np.array([40, 40, 48], np.uint8), np.array([12, 12, 16], np.uint8))
-        img = np.repeat(np.repeat(img, px_per_tile, 0), px_per_tile, 1)
+        h, w = self.map.walkable.shape
+        ppt = size / (2 * pov_radius)  # screen px per world tile
+        center = size / 2.0
+        p = self.player_pos
 
-        def dot(pos, color, r=2):
-            cx, cy = int(pos[0] * px_per_tile), int(pos[1] * px_per_tile)
-            y0, y1 = max(0, cy - r), min(img.shape[0], cy + r + 1)
-            x0, x1 = max(0, cx - r), min(img.shape[1], cx + r + 1)
+        yy, xx = np.mgrid[0:size, 0:size]
+        tx = np.floor(p[0] + (xx - center) / ppt).astype(int)
+        ty = np.floor(p[1] + (yy - center) / ppt).astype(int)
+        inb = (tx >= 0) & (tx < w) & (ty >= 0) & (ty < h)
+        floor = np.zeros((size, size), bool)
+        floor[inb] = self.map.walkable[np.clip(ty, 0, h - 1), np.clip(tx, 0, w - 1)][inb]
+        img = np.where(floor[..., None], np.array([58, 50, 42], np.uint8), np.array([16, 14, 20], np.uint8))
+
+        def dot(world, color, r):
+            sx, sy = int((world[0] - p[0]) * ppt + center), int((world[1] - p[1]) * ppt + center)
+            y0, y1, x0, x1 = max(0, sy - r), min(size, sy + r + 1), max(0, sx - r), min(size, sx + r + 1)
             if y0 < y1 and x0 < x1:
                 img[y0:y1, x0:x1] = color
 
         for g in self.grenades:
-            dot(g[:2], (200, 60, 200), int(g[GRAD] * px_per_tile))  # telegraphed AoE
+            dot(g[:2], (200, 60, 200), max(2, int(g[GRAD] * ppt)))
         for s in self.snakes[self.snakes[:, EHP] > 0]:
-            dot(s[:2], (180, 120, 40), 2)
+            dot(s[:2], (200, 150, 50), max(2, int(0.6 * ppt)))
         for b in self.enemy_bullets:
-            dot(b[:2], (255, 140, 0), 1)
+            dot(b[:2], (255, 140, 0), max(1, int(0.3 * ppt)))
         for b in self.player_bullets:
-            dot(b[:2], (90, 200, 255), 1)
-        if self.fight_active:
-            dot(self.boss_pos, (220, 40, 40), 4)
-        dot(self.player_pos, (60, 230, 90), 3)
+            dot(b[:2], (120, 210, 255), max(1, int(0.25 * ppt)))
+        if np.linalg.norm(self.boss_pos - p) <= pov_radius + self.cfg.boss_radius:
+            dot(self.boss_pos, (230, 50, 50), int(self.cfg.boss_radius * ppt))
+        dot(p, (70, 240, 110), max(2, int(0.6 * ppt)))  # player at screen center
 
-        # box showing the agent's actual local view (31x31, all it can see)
-        px, py = int(self.player_pos[0] * px_per_tile), int(self.player_pos[1] * px_per_tile)
-        r = VIS_RADIUS * px_per_tile
-        for (x0, x1, y0, y1) in [(px - r, px + r, py - r, py - r), (px - r, px + r, py + r, py + r), (px - r, px - r, py - r, py + r), (px + r, px + r, py - r, py + r)]:
-            xa, xb = max(0, min(x0, x1)), min(img.shape[1] - 1, max(x0, x1))
-            ya, yb = max(0, min(y0, y1)), min(img.shape[0] - 1, max(y0, y1))
-            img[ya:yb + 1, xa:xb + 1] = (90, 230, 90)
+        # minimap (whole dungeon) top-right
+        mm = 120
+        mini = np.where(self.map.walkable[..., None], np.array([70, 64, 58], np.uint8), np.array([24, 22, 28], np.uint8))
+        mini = mini[np.clip(np.arange(mm) * h // mm, 0, h - 1)][:, np.clip(np.arange(mm) * w // mm, 0, w - 1)]
+        for (wx, wy, col) in [(self.boss_xy[0], self.boss_xy[1], (230, 50, 50)), (int(p[0]), int(p[1]), (70, 240, 110))]:
+            mx, my = int(wx * mm / w), int(wy * mm / h)
+            mini[max(0, my - 2):my + 3, max(0, mx - 2):mx + 3] = col
+        img[6:6 + mm, size - mm - 6:size - 6] = mini
 
-        # HP (green) and MP (blue) bars, top-left
+        # HP (green) / MP (blue) bars, bottom-left
         c = self.cfg
         for j, (frac, col) in enumerate([(self.player_hp / c.player_hp_max, (60, 220, 60)), (self.player_mp / c.player_mp_max, (60, 120, 255))]):
-            img[4 + j * 7 : 9 + j * 7, 4 : 4 + int(max(0, frac) * 120)] = col
+            yb = size - 18 + j * 8
+            img[yb:yb + 6, 8:8 + int(max(0, frac) * 160)] = col
         return img

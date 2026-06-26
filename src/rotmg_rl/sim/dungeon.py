@@ -37,6 +37,7 @@ class DungeonConfig:
     max_steps: int = 4000
     boss_room_radius: float = 10.0
     activation_range: float = 20.0
+    spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (skip navigation)
     # Wizard (max-level stats, calibrated)
     player_hp_max: float = 670.0
     player_mp_max: float = 385.0
@@ -135,7 +136,15 @@ class DungeonEnv(gym.Env):
             self._rng = np.random.default_rng(seed)
         c = self.cfg
         self.steps = 0
-        self.player_pos = np.array([self.entrance_xy[0] + 0.5, self.entrance_xy[1] + 0.5], np.float32)
+        if self._rng.random() < c.spawn_in_room_prob:
+            # curriculum: spawn near the boss on a walkable tile (practice the fight)
+            bx, by = self.boss_xy
+            ang = self._rng.uniform(0, 2 * np.pi)
+            sx, sy = int(bx + 6 * np.cos(ang)), int(by + 6 * np.sin(ang))
+            sx, sy = _nearest_walkable(self.map.walkable, np.clip(sx, 1, self.map.width - 2), np.clip(sy, 1, self.map.height - 2))
+            self.player_pos = np.array([sx + 0.5, sy + 0.5], np.float32)
+        else:
+            self.player_pos = np.array([self.entrance_xy[0] + 0.5, self.entrance_xy[1] + 0.5], np.float32)
         self.player_hp = c.player_hp_max
         self.player_mp = c.player_mp_max
         self.prev_geodist = self._geodist_at(self.player_pos)

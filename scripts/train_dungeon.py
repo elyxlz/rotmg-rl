@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from functools import partial
 
 import pufferlib.emulation as emulation
 import pufferlib.vector as pvector
@@ -17,7 +18,7 @@ from pufferlib import pufferl
 from pufferlib.ocean import torch as ocean_torch
 
 from rotmg_rl.puffer_policy import DungeonPolicy
-from rotmg_rl.sim.dungeon import DungeonEnv
+from rotmg_rl.sim.dungeon import DungeonConfig, DungeonEnv
 
 
 def main() -> None:
@@ -29,6 +30,7 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--learning-rate", type=float, default=2.5e-4)
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
+    p.add_argument("--spawn-in-room-prob", type=float, default=0.5, help="curriculum: prob of spawning in the boss room")
     args = p.parse_args()
     sys.argv = [sys.argv[0]]  # pufferl.load_config parses sys.argv; keep our args out of its way
 
@@ -48,9 +50,10 @@ def main() -> None:
 
     backend = pvector.Multiprocessing if args.backend == "multiprocessing" else pvector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}
+    env_cfg = DungeonConfig(spawn_in_room_prob=args.spawn_in_room_prob)
     vecenv = pvector.make(
         emulation.GymnasiumPufferEnv,
-        env_kwargs={"env_creator": DungeonEnv},
+        env_kwargs={"env_creator": partial(DungeonEnv, env_cfg)},
         num_envs=args.num_envs,
         backend=backend,
         **vec_kwargs,

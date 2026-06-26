@@ -30,7 +30,14 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--learning-rate", type=float, default=2.5e-4)
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
-    p.add_argument("--spawn-in-room-prob", type=float, default=0.5, help="curriculum: prob of spawning in the boss room")
+    p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
+    p.add_argument("--random-spawn-prob", type=float, default=0.0)
+    p.add_argument("--boss-hp", type=float, default=7500.0)
+    p.add_argument("--n-snakes", type=int, default=40)
+    p.add_argument("--no-grenades", action="store_true")
+    p.add_argument("--no-minions", action="store_true")
+    p.add_argument("--init-checkpoint", default=None, help="warm-start policy from this state_dict")
+    p.add_argument("--save-path", default=None, help="save the trained policy state_dict here")
     args = p.parse_args()
     sys.argv = [sys.argv[0]]  # pufferl.load_config parses sys.argv; keep our args out of its way
 
@@ -50,7 +57,14 @@ def main() -> None:
 
     backend = pvector.Multiprocessing if args.backend == "multiprocessing" else pvector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}
-    env_cfg = DungeonConfig(spawn_in_room_prob=args.spawn_in_room_prob)
+    env_cfg = DungeonConfig(
+        spawn_in_room_prob=args.spawn_in_room_prob,
+        random_spawn_prob=args.random_spawn_prob,
+        boss_hp_max=args.boss_hp,
+        n_snakes=args.n_snakes,
+        enable_grenades=not args.no_grenades,
+        enable_minions=not args.no_minions,
+    )
     vecenv = pvector.make(
         emulation.GymnasiumPufferEnv,
         env_kwargs={"env_creator": partial(DungeonEnv, env_cfg)},
@@ -59,11 +73,20 @@ def main() -> None:
         **vec_kwargs,
     )
 
+    import torch
+
     policy = DungeonPolicy(vecenv.driver_env, hidden_size=args.hidden)
     policy = ocean_torch.Recurrent(vecenv.driver_env, policy, input_size=args.hidden, hidden_size=args.hidden)
     policy = policy.to("cuda")
+    if args.init_checkpoint:
+        policy.load_state_dict(torch.load(args.init_checkpoint, map_location="cuda"))
+        print(f"warm-started from {args.init_checkpoint}", flush=True)
 
     pufferl.train(cfg["env_name"], args=cfg, vecenv=vecenv, policy=policy)
+
+    if args.save_path:
+        torch.save(policy.state_dict(), args.save_path)
+        print(f"saved policy to {args.save_path}", flush=True)
 
 
 if __name__ == "__main__":

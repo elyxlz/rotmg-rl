@@ -5,13 +5,17 @@ PufferLib's stock `pufferl.sweep` assumes an env registered through `train()`'s 
 Protein loop ourselves: suggest -> build vecenv+policy (warm-started) -> train() -> observe, with
 cost = wall-clock uptime (cost-aware, per the PROTEIN method).
 
-The sweep maximizes `environment/score` -- the dense per-episode score (1.0 if cleared, else the
-boss damage fraction dealt) we added to the env, which is independent of the tunable reward scale
-(the guide: "log a score, not raw reward"). Knobs: learning_rate, ent_coef, gamma, gae_lambda,
-vf_coef and the reward balance (rew_clear, rew_death, rew_boss_dmg). Clip coefficients are NOT swept
-(the guide warns against it).
+Metric: by default the sweep maximizes `environment/cleared` -- the per-step clear RATE, which is
+the cautious-finish problem's own symptom (it decays as the agent lingers instead of finishing the
+kill). The per-episode `environment/score` (1.0 if cleared, else the boss damage fraction) we added
+SATURATES on this config: max_steps is 4000, so even a badly cautious agent finishes the kill
+eventually -> every episode clears -> score ~1.0 while cleared has decayed to ~0.003. So `cleared`
+is the metric with real gradient here; `score` stays logged for reference. Both are independent of
+the tunable reward scale (the guide: "log a score, not raw reward"). Knobs: learning_rate, ent_coef,
+gamma, gae_lambda, vf_coef and the reward balance (rew_clear, rew_death, rew_boss_dmg). Clip
+coefficients are NOT swept (the guide warns against it).
 
-    uv run python scripts/sweep_dungeon.py --max-runs 30 --trial-steps 10000000 \
+    uv run python scripts/sweep_dungeon.py --max-runs 24 --trial-steps 15000000 --metric cleared \
         --num-envs 1024 --init-checkpoint checkpoints/passive.pt --wandb-group sweep-shooting
 """
 
@@ -39,12 +43,12 @@ def _space(distribution: str, lo: float, hi: float, mean: float, scale="auto") -
     return {"distribution": distribution, "min": lo, "max": hi, "scale": scale, "mean": mean}
 
 
-def build_sweep_config() -> dict:
+def build_sweep_config(metric: str) -> dict:
     """Protein search space. gamma gets the widest principled attention (the hypothesized cause of
     the cautious finish: the future +clear is over-discounted vs the immediate death risk)."""
     return {
         "method": "Protein",
-        "metric": "score",
+        "metric": metric,
         "goal": "maximize",
         "downsample": 10,
         "train": {
@@ -101,6 +105,7 @@ def main() -> None:
     p.add_argument("--num-envs", type=int, default=1024)
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--boss-hp", type=float, default=300.0)
+    p.add_argument("--metric", default="cleared", help="environment/<metric> to maximize (score saturates here; cleared has gradient)")
     p.add_argument("--init-checkpoint", default="checkpoints/passive.pt", help="warm-start each trial from this policy")
     p.add_argument("--wandb-group", default="sweep-shooting")
     args = p.parse_args()
@@ -120,7 +125,7 @@ def main() -> None:
     cfg["env_name"] = "rotmg_dungeon"
     cfg["env"] = {}  # suggest fills the swept reward params here
 
-    cfg["sweep"] = build_sweep_config()
+    cfg["sweep"] = build_sweep_config(args.metric)
     metric = cfg["sweep"]["metric"]
     points_per_run = cfg["sweep"]["downsample"]
     target_key = f"environment/{metric}"

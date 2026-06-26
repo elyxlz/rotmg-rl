@@ -52,14 +52,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--randomize", action="store_true", help="domain randomization throughout (M4: native robustness)")
     parser.add_argument("--tag", default="", help="checkpoint name tag, e.g. 'dr', to avoid clobbering")
+    parser.add_argument("--start-d", type=float, default=0.0, help="resume at this difficulty")
+    parser.add_argument("--init", default=None, help="warm-start the first chunk from this checkpoint")
+    parser.add_argument("--inc", type=float, default=INC, help="difficulty increment per solved level")
+    parser.add_argument("--chunk-steps", type=int, default=CHUNK_STEPS, help="steps per chunk")
+    parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate per chunk")
     args = parser.parse_args()
     dr_args = ["--randomize"] if args.randomize else []
     tag = f"-{args.tag}" if args.tag else ""
 
     pathlib.Path("checkpoints").mkdir(exist_ok=True)
     py = sys.executable
-    d = 0.0
-    ckpt: str | None = None
+    d = args.start_d
+    ckpt: str | None = args.init
     retries = 0
     for chunk_i in range(1, MAX_CHUNKS + 1):
         hp, fire = difficulty(d)
@@ -67,7 +72,8 @@ def main() -> None:
         train_cmd = [
             py, "scripts/train.py", "--name", name,
             "--boss-hp", f"{hp:.1f}", "--boss-fire-interval", str(fire),
-            "--total-timesteps", str(CHUNK_STEPS), *COMMON_TRAIN, *dr_args,
+            "--total-timesteps", str(args.chunk_steps), "--learning-rate", str(args.lr),
+            *COMMON_TRAIN, *dr_args,
         ]
         if ckpt:
             train_cmd += ["--init-checkpoint", ckpt]
@@ -81,14 +87,14 @@ def main() -> None:
         ])
         m = re.search(r"clear_rate (\d+\.\d+)", eval_out)
         cr = float(m.group(1)) if m else 0.0
-        print(f"\n=== CHUNK {chunk_i} d={d:.3f} hp={hp:.0f} fire={fire} greedy_clear={cr:.3f} retries={retries} ===", flush=True)
+        print(f"\n=== CHUNK {chunk_i} d={d:.3f} hp={hp:.0f} fire={fire} stoch_clear={cr:.3f} retries={retries} ===", flush=True)
 
         at_full = d >= 0.999
         if at_full and cr >= M3_THRESH:
-            print(f"\n*** M3 REACHED: full boss greedy clear={cr:.3f} (checkpoint {ckpt}) ***", flush=True)
+            print(f"\n*** GATE REACHED: full boss stochastic clear={cr:.3f} (checkpoint {ckpt}) ***", flush=True)
             break
         if (not at_full) and cr >= ADVANCE_THRESH:
-            d = min(1.0, round(d + INC, 3))
+            d = min(1.0, round(d + args.inc, 4))
             retries = 0
         else:
             retries += 1  # not solved (or full boss < M3 bar): train another chunk at this d

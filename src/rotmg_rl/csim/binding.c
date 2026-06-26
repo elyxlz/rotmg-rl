@@ -4,6 +4,7 @@
 
 #define Env Dungeon
 #define MY_PUT
+#define MY_GET
 
 #include "env_binding.h"
 
@@ -108,4 +109,17 @@ static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
     if (v) env->boss_hp = (float)PyFloat_AsDouble(v);
     compute_obs(env);
     return 0;
+}
+
+/* Expose internal state for the info-parity test + debugging (env_get). */
+static PyObject* my_get(PyObject* dict, Env* env) {
+    assign_to_dict(dict, "boss_hp", env->boss_hp);
+    assign_to_dict(dict, "boss_hp_max", env->cfg.boss_hp_max);
+    assign_to_dict(dict, "fight_active", (float)env->fight_active);
+    assign_to_dict(dict, "phase", (float)env->phase);
+    assign_to_dict(dict, "player_hp", env->player_hp);
+    assign_to_dict(dict, "steps", (float)env->steps);
+    assign_to_dict(dict, "px", env->px);
+    assign_to_dict(dict, "py", env->py);
+    return dict;
 }

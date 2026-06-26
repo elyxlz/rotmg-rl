@@ -188,6 +188,16 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   RECORDED real packet captures (RealmShark) -> run the gap-measurement harness offline, no
   live server needed. Requires the user to supply captures (or a working server target).
 - Paused for a user decision on how to proceed (see options presented).
+
+### 2026-06-26 — gap-measurement harness built (ready for a real capture)
+- `deploy/capture.py` (JSONL capture format + sim->capture recorder; sim now logs burst events
+  as its EnemyShoot analog) and `deploy/gap.py` (extract boss fire-interval/burst/arc/speed/HP
+  from a capture, diff vs SnakePitConfig, emit a refit config). Round-trip test recovers a
+  known sim's params exactly; 11 tests green.
+- This is the "measure gap on real data -> fix sim -> retrain" tool, fully working on
+  sim-generated captures. ONLY remaining external piece: a thin RealmShark/pcap -> capture
+  schema adapter, written when a real Snake Pit capture is supplied.
+- User is installing ROTMG on their laptop to produce a real capture.
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

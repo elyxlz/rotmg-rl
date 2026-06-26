@@ -59,6 +59,38 @@ class ActionIntent:
     aim: np.ndarray  # (2,) unit vector or zeros
 
 
+def realm_state_from_dict(d: dict) -> RealmState:
+    """Parse a per-tick state dict (as the headless client sends) into a RealmState."""
+    shoots = [
+        EnemyShootEvent(
+            origin=np.array(s["origin"], np.float32),
+            base_angle=float(s["base_angle"]),
+            count=int(s["count"]),
+            arc_gap=float(s["arc_gap"]),
+            speed=float(s["speed"]),
+            spawn_time=float(s["spawn_time"]),
+            lifetime=float(s["lifetime"]),
+        )
+        for s in d.get("enemy_shoots", [])
+    ]
+    pb = d.get("player_bullets")
+    return RealmState(
+        arena_size=float(d["arena_size"]),
+        player_pos=np.array(d["player_pos"], np.float32),
+        player_hp=float(d["player_hp"]),
+        player_hp_max=float(d["player_hp_max"]),
+        player_mp=float(d.get("player_mp", 0.0)),
+        player_mp_max=float(d.get("player_mp_max", 1.0)),
+        ability_ready=bool(d.get("ability_ready", False)),
+        boss_pos=np.array(d["boss_pos"], np.float32),
+        boss_hp=float(d["boss_hp"]),
+        boss_hp_max=float(d["boss_hp_max"]),
+        now=float(d["now"]),
+        enemy_shoots=shoots,
+        player_bullets=np.array(pb, np.float32) if pb else np.zeros((0, 4), np.float32),
+    )
+
+
 def reconstruct_bullets(events: list[EnemyShootEvent], now: float, arena_size: float) -> np.ndarray:
     """Forward-simulate live bullets from shoot events -> (N,4) array of x,y,vx,vy."""
     rows: list[list[float]] = []

@@ -3,28 +3,30 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
-## PufferLib 4.0 migration: INVESTIGATED, NOT ADOPTED (2026-06-26) — 3.0 stays default
+## PufferLib 4.0 migration: ADOPTED + VERIFIED (2026-06-26) — ~12x end-to-end SPS
 
-- **Finding**: 4.0 (GitHub branch `4.0`, "4.0 Experiments") is a near-total native rewrite. The
-  trainer, vectorization, AND the policy forward all live in a compiled `pufferlib/_C` (C/CUDA)
-  backend built by PufferLib's own `build.sh <env>`, with the env **statically compiled into `_C`**.
-  The 4.0 `pufferlib` package is 7 files; `emulation`, `vector`, `ocean` (py), `pytorch`, `spaces`,
-  and `PufferEnv` are **all removed**. `pufferl.train` lost its `vecenv=`/`policy=` args.
-- **Impact**: the exact seam we train through is gone. numpy `DungeonEnv` + `DungeonPolicy` via
-  `GymnasiumPufferEnv` + `vector.make` + `ocean.torch.Recurrent` + `pufferl.train(name,args,vecenv,
-  policy)` has **no 4.0 equivalent** (the numpy-env path is dead). The C env (`csim/dungeon.h`) is
-  already Ocean-contract-shaped so it ports cleanly, BUT only into a PufferLib **fork** (env compiles
-  into `_C`; our custom CNN-LSTM policy must be added to `pufferlib.models`; our standalone `csim`
-  extension + `vendor/puffer/env_binding.h` + `CDungeon` wrapper become obsolete).
-- **Speed**: not switching is cheap here — on 3.0 the C env is already ~3% of step time (we're
-  GPU/policy-bound), so 4.0's native env stepping barely helps our actual bottleneck. The native
-  `_C` build was **deferred for safety** (box had a live 3.0 job on `.venv` + `/home` at 98%/50 GB;
-  a torch>=2.9 + CUDA build would contend and risk the disk). The architectural blocker stands
-  regardless of build timing.
-- **Recommendation**: stay on 3.0 (it gives us custom-env + injected-policy, which 4.0 removes).
-  Revisit only if training becomes env-bound, or we accept maintaining a PufferLib fork, or 4.0
-  ships a stable release with a custom-env API. Full analysis: `docs/pufferlib4-migration.md`.
-  Deferred provisioning recipe: `scripts/setup_box_puffer4.sh`.
+- **What**: ported our env + CNN-LSTM policy onto PufferLib 4.0's native C/CUDA trainer (GitHub branch
+  `4.0`, "4.0 Experiments"). 4.0 is a near-total rewrite: trainer + vectorization + policy forward all
+  live in a compiled `pufferlib/_C`, with the env **statically compiled in** via `build.sh <env>`.
+  The whole 3.0 seam (`emulation`/`vector`/`ocean.torch`/`pytorch`/`spaces`/`PufferEnv`,
+  `pufferl.train(name,args,vecenv,policy)`) is gone.
+- **No fork**: we pin commit `9a4eb87e` and vendor a clone at `.pufferlib4` that `setup_box_puffer4.sh`
+  assembles our env into (`ocean/dungeon/` + `config/dungeon.ini` + a `DungeonEncoder` appended to
+  `pufferlib/models.py`). Env C stays one source of truth: `csim/dungeon.h` carries `#ifdef PUFFER4`
+  guards (4.0 wires `float*` action/terminal buffers + `num_agents`/`rng`); the 3.0 build + parity
+  test are byte-unchanged.
+- **Verified (box, GPU 1, passive-boss smoke, 1024 envs, 5M steps)**: trains end-to-end, metrics flow
+  (boss_hp_frac/in_room/cleared/...), and it learns (boss_hp_frac 0.54->0.38, entropy 7.0->4.9).
+  **End-to-end SPS ~565-600K vs the 3.0 baseline ~49K (~12x)**; env stepping ~6% of time (~2.3M
+  env-SPS) — the win is the fused native rollout/learn pipeline (we were already GPU-bound). Ran in
+  `.venv4` without touching the live 3.0 job (GPU 0) or `.venv`.
+- **Build gotchas solved** (in `setup_box_puffer4.sh`): pin a CUDA-12.x torch wheel (box nvcc is 12.4,
+  default torch is now cu130); a transparent `ccache` shim (no ccache/sudo on box); unversioned
+  `libcudnn.so`/`libnccl.so` symlinks + the CUDA `stubs` dir on `LIBRARY_PATH` (for `-lcudnn -lnccl
+  -lnvidia-ml`).
+- **Follow-up**: only a 5M smoke is done — keep `scripts/train_dungeon.py` (3.0) as a fallback until a
+  full passive->full-boss 4.0 run confirms it clears like 3.0. Full writeup:
+  `docs/pufferlib4-migration.md`; integration files: `puffer4/`; launcher: `scripts/train_dungeon4.py`.
 
 ## M4 DONE (2026-06-26): C (PufferLib Ocean) env port — blazing fast, parity-verified
 

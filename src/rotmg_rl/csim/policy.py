@@ -11,10 +11,11 @@ import pufferlib.spaces
 import torch
 from torch import nn
 
-from rotmg_rl.sim.dungeon import GRID, NUM_CH, NUM_SCALARS
+from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS
 
 _li = pufferlib.pytorch.layer_init
 _GRID_FLAT = NUM_CH * GRID * GRID
+_MM_FLAT = NUM_MM_CH * MM * MM
 
 
 class CDungeonPolicy(nn.Module):
@@ -33,8 +34,18 @@ class CDungeonPolicy(nn.Module):
             nn.Flatten(),
         )
         self.grid_fc = nn.Sequential(_li(nn.Linear(32 * GRID * GRID, 256)), nn.GELU())
+        # global fog-of-war minimap: a shallow CNN giving the policy navigation context (where it is,
+        # where the boss is once seen) that the local 31x31 window cannot carry.
+        self.mm_cnn = nn.Sequential(
+            _li(nn.Conv2d(NUM_MM_CH, 16, 3, padding=1)),
+            nn.GELU(),
+            _li(nn.Conv2d(16, 16, 3, padding=1)),
+            nn.GELU(),
+            nn.Flatten(),
+        )
+        self.mm_fc = nn.Sequential(_li(nn.Linear(16 * MM * MM, 128)), nn.GELU())
         self.scalar_fc = nn.Sequential(_li(nn.Linear(NUM_SCALARS, 64)), nn.GELU())
-        self.fuse = nn.Sequential(_li(nn.Linear(256 + 64, hidden_size)), nn.GELU())
+        self.fuse = nn.Sequential(_li(nn.Linear(256 + 128 + 64, hidden_size)), nn.GELU())
         self.decoder = _li(nn.Linear(hidden_size, sum(self.action_nvec)), std=0.01)
         self.value = _li(nn.Linear(hidden_size, 1), std=1.0)
 
@@ -42,10 +53,12 @@ class CDungeonPolicy(nn.Module):
         b = observations.shape[0]
         obs = observations.float()
         grid = obs[:, :_GRID_FLAT].view(b, NUM_CH, GRID, GRID)
-        scalars = obs[:, _GRID_FLAT:]
+        minimap = obs[:, _GRID_FLAT : _GRID_FLAT + _MM_FLAT].view(b, NUM_MM_CH, MM, MM)
+        scalars = obs[:, _GRID_FLAT + _MM_FLAT :]
         g = self.grid_fc(self.cnn(grid))
+        m = self.mm_fc(self.mm_cnn(minimap))
         s = self.scalar_fc(scalars)
-        return self.fuse(torch.cat([g, s], dim=1))
+        return self.fuse(torch.cat([g, m, s], dim=1))
 
     def decode_actions(self, hidden):
         logits = self.decoder(hidden).split(self.action_nvec, dim=1)

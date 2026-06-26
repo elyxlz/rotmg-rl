@@ -1,8 +1,9 @@
 """CNN-LSTM policy for the whole-dungeon env, in PufferLib's encode/decode convention.
 
 The default PufferLib policy flattens the obs (losing the spatial grid). This one nativizes the
-emulated Dict obs back to {grid (6x15x15), scalars (8)}, runs a CNN over the grid + MLP over the
-scalars, and decodes the MultiDiscrete [move, aim] action + value. Wrap with PufferLib's LSTM.
+emulated Dict obs back to {grid (7x31x31), minimap (3x32x32), scalars (8)}, runs a CNN over the
+local grid + a shallow CNN over the global fog-of-war minimap + an MLP over the scalars, and decodes
+the MultiDiscrete [move, aim, shoot, cast] action + value. Wrap with PufferLib's LSTM.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import pufferlib.spaces
 import torch
 from torch import nn
 
-from rotmg_rl.sim.dungeon import GRID, NUM_CH, NUM_SCALARS
+from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS
 
 _li = pufferlib.pytorch.layer_init
 
@@ -36,8 +37,18 @@ class DungeonPolicy(nn.Module):
             nn.Flatten(),
         )
         self.grid_fc = nn.Sequential(_li(nn.Linear(32 * GRID * GRID, 256)), nn.GELU())
+        # global fog-of-war minimap: a shallow CNN giving the policy navigation context (where it is,
+        # where the boss is once seen) that the local 31x31 window cannot carry.
+        self.mm_cnn = nn.Sequential(
+            _li(nn.Conv2d(NUM_MM_CH, 16, 3, padding=1)),
+            nn.GELU(),
+            _li(nn.Conv2d(16, 16, 3, padding=1)),
+            nn.GELU(),
+            nn.Flatten(),
+        )
+        self.mm_fc = nn.Sequential(_li(nn.Linear(16 * MM * MM, 128)), nn.GELU())
         self.scalar_fc = nn.Sequential(_li(nn.Linear(NUM_SCALARS, 64)), nn.GELU())
-        self.fuse = nn.Sequential(_li(nn.Linear(256 + 64, hidden_size)), nn.GELU())
+        self.fuse = nn.Sequential(_li(nn.Linear(256 + 128 + 64, hidden_size)), nn.GELU())
         self.decoder = _li(nn.Linear(hidden_size, sum(self.action_nvec)), std=0.01)
         self.value = _li(nn.Linear(hidden_size, 1), std=1.0)
 
@@ -45,10 +56,12 @@ class DungeonPolicy(nn.Module):
         b = observations.shape[0]
         obs = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
         grid = obs["grid"].view(b, NUM_CH, GRID, GRID).float()
+        minimap = obs["minimap"].view(b, NUM_MM_CH, MM, MM).float()
         scalars = obs["scalars"].view(b, NUM_SCALARS).float()
         g = self.grid_fc(self.cnn(grid))
+        m = self.mm_fc(self.mm_cnn(minimap))
         s = self.scalar_fc(scalars)
-        return self.fuse(torch.cat([g, s], dim=1))
+        return self.fuse(torch.cat([g, m, s], dim=1))
 
     def decode_actions(self, hidden):
         logits = self.decoder(hidden).split(self.action_nvec, dim=1)

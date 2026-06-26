@@ -142,10 +142,8 @@ def main() -> None:
         vecenv, _ = make_trial_vecenv(args, args.num_envs)
         policy = make_trial_policy(vecenv, args.hidden, args.init_checkpoint)
         t0 = time.time()
-        try:
-            all_logs = pufferl.train(cfg["env_name"], args=cfg, vecenv=vecenv, policy=policy)
-        finally:
-            vecenv.close()
+        # train() closes the vecenv itself via PuffeRL.close(); a second close double-frees the C env.
+        all_logs = pufferl.train(cfg["env_name"], args=cfg, vecenv=vecenv, policy=policy)
         elapsed = max(time.time() - t0, 1.0)  # cost (seconds); Protein takes log(cost), so keep it > 0
 
         all_logs = [e for e in all_logs if target_key in e]

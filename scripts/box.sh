@@ -29,8 +29,14 @@ case "$cmd" in
   follow)
     pkill -9 -f scripts/follow_along.py 2>/dev/null
     sleep 2
-    PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --interval 180 </dev/null >logs/follow.log 2>&1 &
-    echo "follow launched pid $!"
+    rid=""  # resume the training run so POV videos share its wandb dashboard
+    for _ in $(seq 1 30); do
+      rid=$(grep -aoE 'runs/[a-z0-9]+' logs/train.log 2>/dev/null | tail -1 | cut -d/ -f2)
+      [ -n "$rid" ] && break
+      sleep 2
+    done
+    PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --run-id "$rid" --interval 180 </dev/null >logs/follow.log 2>&1 &
+    echo "follow launched pid $! (resuming run $rid)"
     ;;
   status)
     echo "procs: train=$(pgrep -cf scripts/train_dungeon.py) follow=$(pgrep -cf scripts/follow_along.py)  load:$(uptime | grep -oE 'average.*')"

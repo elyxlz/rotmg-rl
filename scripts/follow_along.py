@@ -62,6 +62,7 @@ def main() -> None:
     p.add_argument("--max-frames", type=int, default=1500)
     p.add_argument("--boss-hp", type=float, default=2500.0)
     p.add_argument("--wandb", action="store_true", help="also log rollouts to wandb (needs `wandb login`)")
+    p.add_argument("--run-id", default=None, help="resume this wandb run id so videos land in the training run")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,7 +72,10 @@ def main() -> None:
     policy = ocean_torch.Recurrent(venv.driver_env, policy, input_size=args.hidden, hidden_size=args.hidden).to(device)
 
     if args.wandb:
-        wandb.init(project="rotmg-dungeon", name="rollouts", job_type="eval")
+        if args.run_id:  # resume the training run so videos share its dashboard
+            wandb.init(project="rotmg-dungeon", id=args.run_id, resume="allow")
+        else:
+            wandb.init(project="rotmg-dungeon", name="rollouts", job_type="eval")
     pathlib.Path("videos").mkdir(exist_ok=True)
     # show the fight (where the action is): spawn in the boss room
     cfg = DungeonConfig(boss_hp_max=args.boss_hp, spawn_in_room_prob=1.0)

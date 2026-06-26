@@ -61,6 +61,7 @@ def main() -> None:
     cfg["neptune"] = False
     cfg["env_name"] = "rotmg_dungeon"
 
+    print(f"CONFIG lr={t['learning_rate']} batch={t['batch_size']} minibatch={t['minibatch_size']} bptt={t['bptt_horizon']} ent_coef={t['ent_coef']} vf_coef={t['vf_coef']}", flush=True)
     backend = pvector.Multiprocessing if args.backend == "multiprocessing" else pvector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}
     env_cfg = DungeonConfig(

@@ -198,6 +198,20 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   sim-generated captures. ONLY remaining external piece: a thin RealmShark/pcap -> capture
   schema adapter, written when a real Snake Pit capture is supplied.
 - User is installing ROTMG on their laptop to produce a real capture.
+
+### 2026-06-26 — deploy stack complete; M6-ready, awaiting a real capture
+- Inspected RealmShark: real `EnemyShoot` packet = startingPos, angle, numShots, angleInc,
+  ownerId, bulletType, damage, time. Bullets fan as `angle + i*angleInc` (NOT centered like the
+  sim); speed/lifetime come from the projectile asset (bulletType -> Objects.xml), not the packet.
+- `deploy/realmshark.py`: maps real EnemyShoot -> our EnemyShootEvent with the angle-convention
+  conversion (verified reproducing the real fan geometry). `deploy/policy_server.py`: the
+  inference bridge (RealmState in -> action intent out, LSTM carried). `docs/CAPTURE.md`: exact
+  capture spec + RealmShark steps for the user. 14 tests green.
+- Deploy half is now fully built and tested headless: bridge + bullet reconstruction + gap
+  harness + RealmShark adapter + policy server. The ONLY remaining input is a real Snake Pit
+  capture (user producing it). Then: measure gap -> refit sim -> retrain -> wire live client.
+- Visualization: `scripts/record_policy.py` renders the trained policy; m3-final clears the full
+  boss on video (copied to the user's machine).
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

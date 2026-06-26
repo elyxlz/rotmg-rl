@@ -101,6 +101,11 @@ class CDungeon(pufferlib.PufferEnv):
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs, seed, **config_to_kwargs(self.cfg))
 
+    @property
+    def agents_per_batch(self) -> int:
+        # PuffeRL reads this (plural); the native PufferEnv backend only provides the singular alias.
+        return self.num_agents
+
     def reset(self, seed: int = 0):
         binding.vec_reset(self.c_envs, seed)
         self.tick = 0

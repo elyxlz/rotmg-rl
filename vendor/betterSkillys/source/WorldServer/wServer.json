@@ -1,0 +1,33 @@
+﻿{
+    "dbInfo": {
+        "host": "127.0.0.1",
+        "port": 6379,
+        "auth": "",
+        "index": 0
+    },
+    "serverInfo": {
+        "type": "World",
+        "name": "Netherlands",
+        "address": "127.0.0.1",
+        "port": 2050,
+        "coordinates": {
+            "latitude": 0,
+            "longitude": 0
+        },
+        "adminOnly": false
+    },
+    "serverSettings": {
+        "logFolder": "./logs",
+        "resourceFolder": "./resources",
+        "version": "3.0.0",
+        "maxConnections": 300,
+        "maxPlayers": 300,
+        "maxRealms": 2,
+        "supporterOnly": false,
+        "restartTime": 2,
+        "whitelist": [],
+        "lootEvent": 0.25,
+        "expEvent": 0.25,
+        "wkndBoost": 0.3
+    }
+}

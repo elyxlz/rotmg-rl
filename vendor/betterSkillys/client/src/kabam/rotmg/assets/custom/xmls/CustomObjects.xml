@@ -1,0 +1,19 @@
+﻿<Objects>
+	<Object type="0x4969" id="Potion Storage">
+		<Class>PotionStorage</Class>
+		<Texture>
+			<File>lofiCharBig</File>
+			<Index>0x0c</Index>
+		</Texture>
+		<Static />
+		<ShadowSize>75</ShadowSize>
+	</Object>
+	<Object type="0x4970" id="Market Object">
+		<Class>MarketNPC</Class>
+		<Texture>
+			<File>invisible</File>
+			<Index>0</Index>
+		</Texture>
+		<Static />
+	</Object>
+</Objects>

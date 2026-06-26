@@ -1,0 +1,26 @@
+﻿[
+  {
+    "slot": 1,
+    "linkType": 1,
+    "title": "Join the Discord!",
+    "image": "https://i.ibb.co/xfW8Mn8/slot-1.png",
+    "linkDetail": "https://discord.gg/DzMRzUPZ",
+    "priority": 0
+  },
+  {
+    "slot": 2,
+    "linkType": 0,
+    "title": "small cato 1",
+    "image": "",
+    "linkDetail": "",
+    "priority": 0
+  },
+  {
+    "slot": 3,
+    "linkType": 0,
+    "title": "small cato 2",
+    "image": "",
+    "linkDetail": "",
+    "priority": 0
+  }
+]

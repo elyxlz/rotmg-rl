@@ -27,8 +27,8 @@ from rotmg_rl.puffer_policy import DungeonPolicy
 from rotmg_rl.sim.dungeon import DungeonConfig, DungeonEnv
 
 
-def flatten(obs) -> np.ndarray:
-    return np.concatenate([obs["grid"].ravel(), obs["scalars"]]).astype(np.float32)
+def flatten(obs) -> np.ndarray:  # must match the C obs layout: [grid, minimap, scalars]
+    return np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
 
 
 @torch.no_grad()

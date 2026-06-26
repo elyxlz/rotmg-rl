@@ -222,6 +222,17 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 - VIABLE M6 path: user supplies (a) a RealmShark capture -> measure gap + refit sim + retrain
   (most value), and (b) a DIFFERENT working/controllable server (a maintained private server the
   user can reach, or their own setup) for the live action-injection clear. NR-CORE is out.
+
+### 2026-06-26 — deploy pipeline PROVEN end-to-end (0.88 through the full bridge)
+- `deploy/loop.py` drives the sim entirely through the deploy bridge: sim state -> RealmState
+  dict (EnemyShoot events) -> PolicyRunner (reconstruct bullets + policy) -> ActionIntent ->
+  intent_to_action -> sim. `intent_to_action` round-trips all 81 actions (test).
+- Champion m3-final through the FULL bridge: **clear_rate 0.880 / 100 eps** (vs 0.92 direct).
+  The 0.92->0.88 drop is bullet-reconstruction timing fidelity -> the whole software deploy loop
+  is proven and the policy still clears. 16 tests green.
+- M6 readiness: everything downstream of packet-parsing is now proven in software. When a real
+  server exists, ONLY the protocol packets->RealmState-dict parser is new; the bridge, bullet
+  reconstruction, inference server, and action path are validated end-to-end.
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

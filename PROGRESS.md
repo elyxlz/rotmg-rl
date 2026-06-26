@@ -32,8 +32,12 @@ rendered .mp4 of a full run, plus a live completion on the server.
   direction CHEAT), fine mouse-aim (32 dirs), action MultiDiscrete([9,32,2,2]) (move,aim,shoot,
   cast), EXPLORATION reward (visit new tiles + kills, no path breadcrumb), snake enemies (HP 5,
   wander+shoot) populating the dungeon, Wizard staff+spell, 3-phase boss. 5 tests pass.
-- REMAINING fidelity: boss grenades + Confused/Petrify status, Stheno Swarm minions. Then retrain
-  on the faithful env (much harder: explore + fight with local vision only). Then real-client deploy.
+- Boss fidelity ADDED: grenades (telegraphed AoE -> Confused reverses move / Petrify blocks move),
+  Stheno Swarm minions (Reproduce), status-effect mechanics, grenade channel in obs (7 ch) +
+  status scalars (6). 6 tests pass. The faithful sim is now COMPLETE.
+- NEXT: retrain the policy on the faithful env (auto-adapts to action [9,32,2,2] + 7ch/6scalar
+  obs). Much harder than v1/v2 (explore + fight with local vision); expect to need curriculum +
+  intrinsic motivation. Then real-client deploy + recording.
 - NOTE: `record_dungeon.py` (old geodesic demo) needs updating to the v3 action/no-geodesic.
 
 ## v2 build log (whole dungeon)

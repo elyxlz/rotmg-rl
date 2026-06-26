@@ -5,20 +5,20 @@ import numpy as np
 from rotmg_rl.sim.dungeon import DIRS, DungeonEnv
 
 
+# 8 neighbour-tile offsets in DIRS order (descend the geodesic gradient by tile, not sub-tile).
+_TILE_OFFSETS = [(int(round(d[0])), int(round(d[1]))) for d in DIRS]
+
+
 def _oracle_move(env: DungeonEnv) -> int:
-    """Pick the move that most decreases geodesic distance to the boss."""
+    """Move toward the neighbouring tile with the lowest geodesic distance to the boss."""
+    px, py = int(env.player_pos[0]), int(env.player_pos[1])
+    h, w = env.geodist.shape
     best_a, best_gd = 0, env._geodist_at(env.player_pos)
     for a in range(1, 9):
-        cand = env.player_pos.copy()
-        sv = DIRS[a - 1] * env.cfg.player_speed
-        for axis in (0, 1):
-            c2 = cand.copy()
-            c2[axis] += sv[axis]
-            if env._walkable_at(c2):
-                cand = c2
-        gd = env._geodist_at(cand)
-        if gd < best_gd:
-            best_gd, best_a = gd, a
+        ox, oy = _TILE_OFFSETS[a - 1]
+        nx, ny = px + ox, py + oy
+        if 0 <= nx < w and 0 <= ny < h and np.isfinite(env.geodist[ny, nx]) and env.geodist[ny, nx] < best_gd:
+            best_gd, best_a = float(env.geodist[ny, nx]), a
     return best_a
 
 

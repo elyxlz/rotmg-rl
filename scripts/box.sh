@@ -22,6 +22,12 @@ case "$cmd" in
   metrics)
     uv run --extra train python scripts/wandb_metrics.py "$@"
     ;;
+  wait)  # block until the training run finishes/dies, then print final metrics (run in background -> notifies)
+    while pgrep -f scripts/train_dungeon.py >/dev/null; do sleep 60; done
+    rid=$(grep -aoE 'runs/[a-z0-9]+' logs/train.log 2>/dev/null | tail -1 | cut -d/ -f2)
+    echo "=== TRAINING RUN FINISHED (run $rid) ==="
+    uv run --extra train python scripts/wandb_metrics.py "$rid" 2>/dev/null | grep -iaE "cleared|boss_hp|entropy|learning_rate|epoch|steps" | grep -viaE "wandb:" | tail -8
+    ;;
   train)  # launch ONE clean run; kills any existing first
     pkill -9 -f scripts/train_dungeon.py 2>/dev/null
     pkill -9 -f scripts/curriculum_dungeon.py 2>/dev/null

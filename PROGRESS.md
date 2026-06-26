@@ -10,7 +10,7 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 | M0 | Repo scaffold + uv env on the GPU box + wandb smoke run | DONE |
 | M1 | PufferLib C sim of Snake Pit (>=1M steps/s/core) + renderer + play.py | in progress |
 | M2 | Cold-start training stack (recurrent PPO + shaping + curriculum + RND + DR) | PPO learns; curriculum+RND+DR next |
-| M3 | Sim milestone: clear simulated Snake Pit >=90% (eval >=200 eps) | not started |
+| M3 | Sim milestone: clear simulated Snake Pit >=90% (eval >=200 eps) | DONE (0.920 stochastic, 300 eps) |
 | M4 | Robustness milestone: >=90% across full domain-randomization range | not started |
 | M5 | Deploy adapters (NR-CORE server + protocol reader + input injector + gap harness) | not started |
 | M6 | Real milestone: clear a real Snake Pit on the private server (DONE) | not started |
@@ -97,7 +97,15 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   low LR it holds ~0.98 sampling from the start (no dip). Chained stochastic eval gates M3.
 - NOTE: M3/M4 acceptance + deployment use STOCHASTIC action sampling, not greedy.
 
-### Recipe queue (add only if the final push plateaus < 0.90)
+### 2026-06-26 — M3 REACHED
+- `m3-final` (low-LR 1e-4 finetune, 25M steps from m3-finetune): stochastic eval over 300 eps
+  = **clear_rate 0.920** (mean_return 290, mean_length 248) on the full boss (hp250/fire18).
+  Cold-start RL, zero demonstrations, clears the simulated Snake Pit >=90%. M3 DONE.
+- Champion checkpoint: `checkpoints/m3-final.pt`.
+- Next: M4 robustness = domain randomization (bullet speed, HP, spawn, obs noise) + retrain,
+  require >=0.90 across the full DR range. Then M5 deploy adapters (headless protocol I/O).
+
+### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

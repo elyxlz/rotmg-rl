@@ -212,6 +212,16 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   capture (user producing it). Then: measure gap -> refit sim -> retrain -> wire live client.
 - Visualization: `scripts/record_policy.py` renders the trained policy; m3-final clears the full
   boss on video (copied to the user's machine).
+
+### 2026-06-26 — NR-CORE server path confirmed DEAD (probed)
+- Attempted the NR-CORE Docker build (mono:4.2.2.30 base). `nuget restore` FAILS: ~8 deps no
+  longer resolve (Rx-PlatformServices 2.2.5, SendGrid 8.0.2, StackExchange.Redis.Mono 1.0.0,
+  BouncyCastle 1.8.1, taglib 2.1.0.0, Zlib.Portable 1.11.0, ...). The CODE won't even build.
+- So NR-CORE is blocked on THREE walls: (1) dead build deps, (2) missing account-gated
+  assets+behaviors, (3) client protocol mismatch. Not a viable M6 server target.
+- VIABLE M6 path: user supplies (a) a RealmShark capture -> measure gap + refit sim + retrain
+  (most value), and (b) a DIFFERENT working/controllable server (a maintained private server the
+  user can reach, or their own setup) for the live action-injection clear. NR-CORE is out.
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

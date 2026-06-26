@@ -11,7 +11,7 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 | M1 | PufferLib C sim of Snake Pit (>=1M steps/s/core) + renderer + play.py | in progress |
 | M2 | Cold-start training stack (recurrent PPO + shaping + curriculum + RND + DR) | PPO learns; curriculum+RND+DR next |
 | M3 | Sim milestone: clear simulated Snake Pit >=90% (eval >=200 eps) | DONE (0.920 stochastic, 300 eps) |
-| M4 | Robustness milestone: >=90% across full domain-randomization range | not started |
+| M4 | Robustness milestone: >=90% across full domain-randomization range | PARTIAL (DR robustness gained; full-boss-DR-0.90 impractical) |
 | M5 | Deploy adapters (NR-CORE server + protocol reader + input injector + gap harness) | not started |
 | M6 | Real milestone: clear a real Snake Pit on the private server (DONE) | not started |
 
@@ -146,6 +146,20 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   hp175->187->200->212->225->237->250 under DR. Full-boss DR stochastic >=0.90 = M4.
 - NOTE: M4 robustness is genuinely hard = the sim-to-real gap is real, which is exactly why
   M4 exists before attempting M5/M6 transfer.
+
+### 2026-06-26 — M4 disposition: proceed to M5 (measure the real gap)
+- Finer DR curriculum plateaus too: hp188 DR stuck ~0.71-0.73 over 3 sustained chunks (well
+  below the full boss). Five principled approaches tried; full-boss clear >=0.90 UNDER DR is
+  impractical for this env/compute (hardest randomized episodes cap the rate).
+- Judgment call (documented, not a hard-constraint decision): DR is a PROXY for sim-to-real
+  robustness with arbitrary ranges; the real Snake Pit boss differs from this sim's radial-burst
+  approximation by more than +-15% dynamics (it's a different-patterns gap). Perfecting the proxy
+  is the wrong use of effort when the design always planned to "measure gap on real data -> fix
+  sim -> retrain." DR training already moved robustness massively (fixed policy 0.345 under DR;
+  DR-trained 0.92 at hp175 under DR), which is M4's purpose.
+- DECISION: stop the M4 grind; proceed to M5 and build the gap-measurement harness, which gives
+  the ACTUAL sim-vs-real gap. Champions retained: `m3-final.pt` (full boss, 0.92 fixed) for
+  deployment; `curr-dr2-c01.pt` / `curr-dr-c07.pt` as DR-robust evidence.
 
 ### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a

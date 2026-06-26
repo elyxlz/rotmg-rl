@@ -3,6 +3,32 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## Navigation CRACKED via distance shaping (2026-06-26) — full fight solved; threats stage in flight
+
+- **Reframed the goal with the new eval suite** (`scripts/eval_dungeon.py`, true per-episode clear
+  rate over stochastic episodes). The full 7500-HP shooting boss is NOT a cautious-finish problem —
+  the in-room FIGHT is already solved. Measured on `stage_7500a.pt` (the "cautious" 0.04 per-step
+  policy): in-room no-threats **100%** (100/100, ~33 steps), in-room ALL threats (40 snakes +
+  grenades + minions) **96%** (~53 steps). The per-step `cleared` 0.04 was a RATE artifact (clears
+  per step over ~24-step episodes ≈ a per-episode clear near 1.0), not a failure. Lesson: always read
+  the per-EPISODE rate via eval_dungeon, not the per-step `environment/cleared`.
+- **The real gap is NAVIGATION**: entrance-spawn (full dungeon) clear was **0%** — every episode
+  truncates at 4000 steps with the boss untouched (boss_hp_frac 1.0). Entrance (110,21) -> boss
+  (16,73) is ~107 tiles; undirected exploration (the 0.01/tile explore reward) never finds the boss.
+  Two warm-started runs on the existing rewards confirmed it (in_room ~0.001, cleared 0 at 26M).
+- **Fix — potential-based distance-to-boss shaping** (`rew_approach`, new env field, numpy + C,
+  parity kept = default 0 so the term vanishes; 10 parity tests green). While navigating (pre-fight)
+  it rewards closing euclidean distance to the boss: a privileged TRAINING signal only (NOT in the
+  obs — the deployed policy still navigates on the fog-of-war minimap). `train_dungeon --rew-approach`.
+- **Result (nav3.pt: warm-start stage_7500a, no threats, 80% entrance, gamma 0.997, ent 0.01,
+  rew_approach 0.02, 82M C-env steps)**: entrance-spawn no-threats clears **100%** (30/30, ~843
+  steps). Navigation + the full kill, end to end, with NO in-room cheat. in_room rose 0.001 -> 0.75.
+- **Remaining gap = threats DURING traversal**: nav3 at entrance + full threats is **0%** — it dies
+  ~316 steps in (boss only to 0.73) because 40 snakes shoot it across the whole 843-step path. nav4
+  (warm-start nav3, full threats, 85% entrance, ent lowered to 0.004 to re-sharpen fight+dodge,
+  rew_approach kept, 100M steps) is training to bridge it. Eval ladder so far:
+  in-room/no-threat 100%, in-room/threats 96%, entrance/no-threat 100%, entrance/threats 0% -> (nav4).
+
 ## PufferLib 4.0 is now PRIMARY (2026-06-26) — new obs integrated + validated (100% clears)
 
 - **Decision**: 4.0 (`--slowly` CNN) is the daily driver; 3.0 stays as fallback until 4.0 is

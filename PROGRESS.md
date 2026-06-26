@@ -68,6 +68,17 @@ rendered .mp4 of a full run, plus a live completion on the server.
 - NEXT brick: layer the faithful 3-phase Stheno fight onto this env (activates in the boss room) —
   aimed/rotating spreads, grenades+status (Confused/Petrify), minions. Then the game renderer.
 
+### 2026-06-26 — M1 brick: core whole-dungeon env (navigate + fight + complete), tested
+- `sim/dungeon.py` now does the WHOLE dungeon: navigate entrance->boss room (geodesic reward),
+  then the faithful 3-phase Stheno fight. MultiDiscrete([9,9]) action (move,aim); 6-channel obs
+  (walls/boss/enemy-bullets+vel/player-bullets) + 8 scalars. Phases HP-gated (66%/33%) with
+  invuln transitions; aimed spreads (P1), rotating spreads (P2), both (P3); player shoots the
+  boss; completion = boss dead = dungeon cleared.
+- 3 dungeon tests pass (nav reaches room, boss dies when shot, obs in space). Full suite 20 green.
+- Bug fixed along the way: player bullets were storing radius in the life field -> died in 1 tick.
+- REMAINING M1: faithful layers (grenades+Confused/Petrify, minions) + game-faithful renderer
+  (real sprites). Then M2 PuffeRL training on this env.
+
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |

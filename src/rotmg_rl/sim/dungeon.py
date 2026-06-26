@@ -97,9 +97,9 @@ class DungeonConfig:
     # rewards (exploration-based, no global pathfinding)
     rew_explore: float = 0.05  # per newly-visited tile
     rew_kill: float = 1.0  # per snake killed
-    rew_boss_dmg: float = 0.02  # strong: reward engaging/damaging the boss (was 0.004 -> learned to flee)
+    rew_boss_dmg: float = 0.02  # strong: reward engaging/damaging the boss
     rew_reach: float = 20.0
-    rew_survive: float = 0.0  # no reward for just existing (it learned to flee)
+    rew_survive: float = 0.003  # small dense signal so cold-start has a gradient (don't remove)
     rew_damage_taken: float = 0.005  # mild, so it's not too scared to engage
     rew_clear: float = 200.0
     rew_death: float = 20.0

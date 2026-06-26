@@ -12,9 +12,9 @@ import numpy as np
 import pufferlib
 
 from rotmg_rl.csim import binding
-from rotmg_rl.sim.dungeon import GRID, N_AIM, NUM_CH, NUM_SCALARS, DungeonConfig
+from rotmg_rl.sim.dungeon import GRID, MM, N_AIM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig
 
-OBS_SIZE = NUM_CH * GRID * GRID + NUM_SCALARS
+OBS_SIZE = NUM_CH * GRID * GRID + NUM_MM_CH * MM * MM + NUM_SCALARS
 
 
 def config_to_kwargs(cfg: DungeonConfig) -> dict:

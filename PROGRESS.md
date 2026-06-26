@@ -54,6 +54,29 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   can't be one-shot, so the finish there is a genuinely different (sustained-fight) problem -- treat
   low gamma as the validated anti-caution lever, re-sweep gamma when the boss HP scales up.
 
+## PufferLib 4.0: native CUDA CNN encoder — built + parity-verified; 12x-with-CNN impossible (2026-06-26)
+
+- **Goal**: get 4.0's ~12x native speed WITH our CNN (not the flat encoder, not the ~63K --slowly
+  torch path). Implemented our DungeonEncoder directly in the native `_C` backend.
+- **Built** (`puffer4/dungeon_encoder.cu`, wired via `ocean.cu` `create_custom_encoder`): conv1+conv2
+  (k3/pad1/GELU) + grid_fc + scalar_fc + fuse, **forward AND backward** (im2col/col2im conv via
+  `puf_mm` GEMM, GELU fwd/bwd, bias grads, concat/split) + allocator registration. 4.0 has a clean
+  per-env encoder vtable; modeled on the NMMO3 conv encoder.
+- **Correct (verified)**: `scripts/check_encoder_parity.py` + `puffer4/test_encoder.cu` vs torch
+  DungeonEncoder: forward 1.5e-8 abs err, backward (all 10 grads) 1.5e-5 rel. Trains + learns
+  natively (8.2M params, boss_hp_frac 0.54->0.37).
+- **Speed finding (the punchline)**: native flat ~600K (12x, wrong arch) > --slowly CNN ~63K > native
+  CNN im2col **~20K**. The 600K is the flat encoder being ~10x cheaper compute; the CNN's cost (esp.
+  the 30752->256 grid_fc GEMM, identical in torch) caps ANY CNN near the --slowly level. **So
+  12x-with-CNN is physically impossible.** Our im2col version is even below --slowly (it materializes
+  a >1GB col buffer/conv); cuDNN convs (`src/cudnn_conv2d.cu` exists) would lift it toward ~2-3x over
+  --slowly (~130-190K), never 600K.
+- **Open**: (1) im2col->cuDNN for speed; (2) a large-minibatch NaN (stable+learns at mb<=1024, NaN at
+  4096; correct under compute-sanitizer -> a size-dependent cuBLAS/async hazard). `dungeon.ini` pins
+  mb=1024 so native-CNN is stable by default.
+- **Disposition**: hard kernel work done + proven, but native-CNN isn't a win over --slowly yet (and
+  12x is unreachable). **--slowly stays the CNN daily driver.** Full analysis: docs §7.
+
 ## PufferLib 4.0 migration: ADOPTED + VALIDATED (2026-06-26) — clears; CNN daily driver
 
 - **What**: ported our env + CNN-LSTM policy onto PufferLib 4.0 (GitHub `4.0`, "4.0 Experiments"), a

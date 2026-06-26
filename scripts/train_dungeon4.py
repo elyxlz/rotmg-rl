@@ -5,11 +5,14 @@ scripts/setup_box_puffer4.sh, which bakes our env into the pinned clone at .puff
 thin launcher: it maps our familiar knobs to 4.0's `--section.key` overrides and execs the .venv4
 `puffer` CLI inside the clone. The 3.0 path stays `scripts/train_dungeon.py` (untouched).
 
-Two backends (see docs/pufferlib4-migration.md):
-  default (native _C): fastest (~12x), but uses puffernet's flat Linear encoder, NOT our CNN, and
-    saves opaque flat-weight checkpoints (not renderable by follow_along4).
-  --slowly (torch):    uses OUR DungeonEncoder CNN (pufferlib.models) + torch state_dict checkpoints
-    that follow_along4.py can render. Still uses the fast native env + CUDA kernels.
+Three encoder paths (see docs/pufferlib4-migration.md):
+  --slowly (torch):  OUR DungeonEncoder CNN (pufferlib.models) + renderable torch checkpoints, ~63K
+    SPS. The recommended CNN daily driver (follow_along4 renders it).
+  default (native _C, OUR CNN): a native CUDA port of the CNN (puffer4/dungeon_encoder.cu, im2col
+    conv) compiled into _C. Parity-verified vs torch and learns, but ~20K SPS (im2col-bound, slower
+    than --slowly) and needs minibatch <=1024 (NaN above). Opaque flat checkpoints.
+  native flat (set [torch] encoder=DefaultEncoder): puffernet's flat Linear encoder, ~600K SPS but
+    the WRONG architecture for the spatial grid. The 12x is ONLY this flat path.
 
     .venv4/bin/python scripts/train_dungeon4.py --total-timesteps 2000000 --slowly --wandb
 

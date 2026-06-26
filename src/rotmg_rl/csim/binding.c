@@ -127,5 +127,6 @@ static PyObject* my_get(PyObject* dict, Env* env) {
     assign_to_dict(dict, "steps", (float)env->steps);
     assign_to_dict(dict, "px", env->px);
     assign_to_dict(dict, "py", env->py);
+    assign_to_dict(dict, "boss_seen", (float)env->boss_seen);
     return dict;
 }

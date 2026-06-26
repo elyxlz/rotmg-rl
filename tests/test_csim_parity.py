@@ -13,12 +13,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rotmg_rl.sim.dungeon import GRID, NUM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
+from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
 
 binding = pytest.importorskip("rotmg_rl.csim.binding")
 from rotmg_rl.csim.dungeon import OBS_SIZE, config_to_kwargs  # noqa: E402
 
 GRID_FLAT = NUM_CH * GRID * GRID
+MM_FLAT = NUM_MM_CH * MM * MM
 DET = dict(n_snakes=0, enable_minions=False, staff_dmg=(65.0, 65.0), spell_dmg=(157.0, 157.0))
 
 
@@ -49,7 +50,20 @@ class CEnv:
 
 
 def _oracle_flat(obs: dict) -> np.ndarray:
-    return np.concatenate([obs["grid"].reshape(-1), obs["scalars"]]).astype(np.float32)
+    # obs layout matches the C env: [grid, minimap, scalars].
+    return np.concatenate([obs["grid"].reshape(-1), obs["minimap"].reshape(-1), obs["scalars"]]).astype(np.float32)
+
+
+def _discovered_cells(oracle) -> np.ndarray:
+    """Boolean (MM, MM) mask: which minimap terrain cells overlap at least one discovered tile (the
+    only cells allowed to be non-zero). Everything else is fog and must read exactly 0."""
+    h, w = oracle.map.walkable.shape
+    cx = (np.arange(w) * MM) // w
+    cy = (np.arange(h) * MM) // h
+    cell = cy[:, None] * MM + cx[None, :]
+    out = np.zeros(MM * MM, bool)
+    out[cell[oracle.discovered]] = True
+    return out.reshape(MM, MM)
 
 
 def _first_divergence(a: np.ndarray, b: np.ndarray, atol: float):
@@ -61,8 +75,12 @@ def _first_divergence(a: np.ndarray, b: np.ndarray, atol: float):
         ch, rem = divmod(idx, GRID * GRID)
         row, col = divmod(rem, GRID)
         where = f"grid ch={ch} row={row} col={col}"
+    elif idx < GRID_FLAT + MM_FLAT:
+        ch, rem = divmod(idx - GRID_FLAT, MM * MM)
+        row, col = divmod(rem, MM)
+        where = f"minimap ch={ch} row={row} col={col}"
     else:
-        where = f"scalar[{idx - GRID_FLAT}]"
+        where = f"scalar[{idx - GRID_FLAT - MM_FLAT}]"
     return f"{where}: oracle={a[idx]:.6f} c={b[idx]:.6f} (|d|={diff[idx]:.6f})"
 
 
@@ -80,6 +98,9 @@ def _run(cfg: DungeonConfig, seed: int, actions: np.ndarray, inject: dict | None
         if "boss_hp" in inject:
             oracle.boss_hp = float(inject["boss_hp"])
         c.put(**inject)
+        # C's env_put recomputes obs (marking the injected position's fog disk + boss_seen); mirror that
+        # in the oracle so the discovered masks stay symmetric before the step loop begins.
+        oracle._obs()
 
     compared = 0
     for t in range(steps):
@@ -93,6 +114,13 @@ def _run(cfg: DungeonConfig, seed: int, actions: np.ndarray, inject: dict | None
             break
         msg = _first_divergence(_oracle_flat(o_obs), c.obs, obs_atol)
         assert msg is None, f"step {t}: obs divergence {msg}"
+        # fog of war: undiscovered minimap terrain cells read exactly 0 (no leak of unexplored map),
+        # and the boss channel is all-zero until the boss has actually been seen.
+        mm_terr = o_obs["minimap"][0]
+        assert mm_terr[~_discovered_cells(oracle)].max(initial=0.0) == 0.0, f"step {t}: fog leak in undiscovered minimap cell"
+        if not oracle.boss_seen:
+            assert o_obs["minimap"][2].sum() == 0.0, f"step {t}: boss on minimap before being seen"
+            assert c.get()["boss_seen"] == 0.0, f"step {t}: C boss_seen set before the boss was seen"
         # info-field parity (the bug the obs/reward checks missed): on non-terminal steps the C env
         # has not auto-reset, so its live state must reproduce the oracle's per-step info dict.
         g = c.get()
@@ -139,6 +167,37 @@ def test_parity_boss_fight():
     assert compared == 150  # survives the window: 150 matched steps
     assert oracle.phase >= 2  # at least one phase transition (+ invuln) was exercised
     assert oracle.confused_timer > 0 or oracle.petrify_timer > 0 or oracle.steps > 0  # status exercised
+
+
+def test_minimap_fog_and_boss_reveal():
+    """Fog of war end to end: wandering from the entrance (boss far away) the boss minimap channel
+    stays all-zero and boss_seen never sets; injecting the player next to the boss reveals it on the
+    minimap (boss channel non-zero) once seen -- and the C env tracks boss_seen identically."""
+    # 1) Entrance wander: boss never seen -> boss channel all-zero, fog covers most cells.
+    cfg = DungeonConfig(**DET)
+    oracle = DungeonEnv(cfg)
+    obs, _ = oracle.reset(seed=11)
+    c = CEnv(cfg, 11)
+    c.reset(11)
+    actions = _fixed_actions(11, 60)
+    for t in range(60):
+        obs, *_ = oracle.step(actions[t].tolist())
+        c.step(actions[t])
+        assert not oracle.boss_seen
+        assert obs["minimap"][2].sum() == 0.0  # no boss dot before it is seen
+        assert c.get()["boss_seen"] == 0.0
+        # undiscovered terrain cells are exactly fog (0)
+        assert obs["minimap"][0][~_discovered_cells(oracle)].max(initial=0.0) == 0.0
+    assert _discovered_cells(oracle).sum() < MM * MM  # genuinely partial knowledge (fog remains)
+
+    # 2) Inject next to the boss: it must now appear on the minimap, and parity holds.
+    inject = {"player_x": 16 + 3.5, "player_y": 73 + 0.5, "fight_active": 1, "phase": 1}
+    actions = _fixed_actions(12, 5)
+    actions[:, 2] = actions[:, 3] = 0  # don't kill it; just observe the reveal
+    compared, oracle2, c2 = _run(DungeonConfig(boss_hp_max=1e9, player_hp_max=1e9, **DET), seed=12, actions=actions, inject=inject, steps=5)
+    assert compared == 5
+    assert oracle2.boss_seen and c2.get()["boss_seen"] == 1.0
+    assert oracle2._minimap()[2].sum() == 1.0  # exactly one boss cell lit once seen
 
 
 def test_parity_boss_to_death():

@@ -22,9 +22,15 @@
 #define N_MOVE 8
 #define N_AIM 32
 #define NUM_CH 7
-#define NUM_SCALARS 6
+#define NUM_SCALARS 8
 #define GRID_SIZE (NUM_CH * GRID * GRID)
-#define OBS_SIZE (GRID_SIZE + NUM_SCALARS)
+/* Fog-of-war global minimap: MM x MM cells, 3 channels (terrain, player, boss). Obs layout is
+ * [grid, minimap, scalars] to match the numpy oracle's flattened Dict order. */
+#define MM 32
+#define NUM_MM_CH 3
+#define MM_SIZE (NUM_MM_CH * MM * MM)
+#define SCALAR_OFF (GRID_SIZE + MM_SIZE)
+#define OBS_SIZE (GRID_SIZE + MM_SIZE + NUM_SCALARS)
 
 #define CH_WALL 0
 #define CH_ENEMY 1
@@ -149,6 +155,9 @@ typedef struct {
     int n_gren;
 
     unsigned char visited[MAP_H * MAP_W];
+    unsigned char discovered[MAP_H * MAP_W]; /* fog-of-war: tiles ever within VIS_RADIUS of the player */
+    float mm_terr[MM * MM]; /* minimap terrain pool, accumulated as tiles are discovered (+1/-1/0) */
+    int boss_seen;          /* boss has been within vision at least once */
     int steps;
     uint64_t rng_state; /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
@@ -563,10 +572,37 @@ static void scatter_f(float* obs, int ch, float relx, float rely, float v) {
     if (col >= 0 && col < GRID && row >= 0 && row < GRID) set_cell(obs, ch, row, col, v);
 }
 
+/* Fog of war: mark the disk of tiles within VIS_RADIUS of the player as discovered (integer tile
+ * arithmetic, matching the numpy oracle), accumulate the minimap terrain pool for newly-seen tiles,
+ * and flag whether the boss has been seen. The boss only enters the minimap once seen (no cheat). */
+static void update_visibility(Dungeon* env) {
+    int ipx = (int)env->px, ipy = (int)env->py;
+    for (int dy = -VIS_RADIUS; dy <= VIS_RADIUS; dy++) {
+        int y = ipy + dy;
+        if (y < 0 || y >= MAP_H) continue;
+        for (int dx = -VIS_RADIUS; dx <= VIS_RADIUS; dx++) {
+            if (dx * dx + dy * dy > VIS_RADIUS * VIS_RADIUS) continue;
+            int x = ipx + dx;
+            if (x < 0 || x >= MAP_W) continue;
+            int idx = y * MAP_W + x;
+            if (env->discovered[idx]) continue;
+            env->discovered[idx] = 1;
+            int cell = (y * MM / MAP_H) * MM + (x * MM / MAP_W);
+            /* priority: discovered walkable (+1) over discovered wall (-1) over fog (0) */
+            if (MAP_WALKABLE[idx])
+                env->mm_terr[cell] = 1.0f;
+            else if (env->mm_terr[cell] != 1.0f)
+                env->mm_terr[cell] = -1.0f;
+        }
+    }
+    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) <= VIS_RADIUS) env->boss_seen = 1;
+}
+
 static void compute_obs(Dungeon* env) {
     Config* c = &env->cfg;
     float* obs = env->observations;
     int ipx = (int)env->px, ipy = (int)env->py;
+    update_visibility(env);
 
     /* Wall channel (0) depends only on the player's tile; the dynamic channels (1..6) + scalars
      * change every step. Clear/refill walls only when the tile changes; always clear the rest. */
@@ -615,13 +651,26 @@ static void compute_obs(Dungeon* env) {
         scatter_f(obs, CH_GRENADE, env->grenades[i].x - env->px, env->grenades[i].y - env->py, urgency);
     }
 
+    /* minimap (offset GRID_SIZE): terrain pool fresh from mm_terr, plus single player/boss cells. The
+     * GRID_SIZE..OBS_SIZE region was already zeroed above, so player/boss channels start clean. */
+    float* mmobs = obs + GRID_SIZE;
+    for (int i = 0; i < MM * MM; i++) mmobs[i] = env->mm_terr[i];
+    int pmx = (int)env->px * MM / MAP_W, pmy = (int)env->py * MM / MAP_H;
+    mmobs[MM * MM + pmy * MM + pmx] = 1.0f;
+    if (env->boss_seen) {
+        int bmx = (int)env->boss_x * MM / MAP_W, bmy = (int)env->boss_y * MM / MAP_H;
+        mmobs[2 * MM * MM + bmy * MM + bmx] = 1.0f;
+    }
+
     int spell_ready = (env->player_mp >= c->spell_cost && env->spell_timer == 0);
-    obs[GRID_SIZE + 0] = env->player_hp / c->player_hp_max;
-    obs[GRID_SIZE + 1] = env->player_mp / c->player_mp_max;
-    obs[GRID_SIZE + 2] = spell_ready ? 1.0f : 0.0f;
-    obs[GRID_SIZE + 3] = boss_visible ? 1.0f : 0.0f;
-    obs[GRID_SIZE + 4] = env->confused_timer > 0 ? 1.0f : 0.0f;
-    obs[GRID_SIZE + 5] = env->petrify_timer > 0 ? 1.0f : 0.0f;
+    obs[SCALAR_OFF + 0] = env->player_hp / c->player_hp_max;
+    obs[SCALAR_OFF + 1] = env->player_mp / c->player_mp_max;
+    obs[SCALAR_OFF + 2] = spell_ready ? 1.0f : 0.0f;
+    obs[SCALAR_OFF + 3] = boss_visible ? 1.0f : 0.0f;
+    obs[SCALAR_OFF + 4] = env->confused_timer > 0 ? 1.0f : 0.0f;
+    obs[SCALAR_OFF + 5] = env->petrify_timer > 0 ? 1.0f : 0.0f;
+    obs[SCALAR_OFF + 6] = env->fight_active ? (float)((env->boss_hp > 0.0 ? env->boss_hp : 0.0) / c->boss_hp_max) : 0.0f;
+    obs[SCALAR_OFF + 7] = env->invuln_timer > 0 ? 1.0f : 0.0f;
 }
 
 /* --- required Ocean API --- */
@@ -670,6 +719,9 @@ static void c_reset(Dungeon* env) {
     env->confused_timer = env->petrify_timer = env->minion_timer = 0;
     env->n_pbul = env->n_ebul = env->n_gren = 0;
     memset(env->visited, 0, sizeof(env->visited));
+    memset(env->discovered, 0, sizeof(env->discovered));
+    memset(env->mm_terr, 0, sizeof(env->mm_terr));
+    env->boss_seen = 0;
     spawn_snakes(env);
     compute_obs(env);
 }

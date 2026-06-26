@@ -14,6 +14,11 @@ The CNN path (`--slowly`) is the **daily driver** (correct architecture + full o
 Validated on the box: it learns and **clears** (eval rollouts `cleared=True`). The 3.0 path
 (`scripts/train_dungeon.py`) stays as a fallback.
 
+We also implemented our CNN **natively in the `_C` backend** to chase "12x WITH the CNN" (§7): it's
+parity-verified and trains, but **12x-with-CNN turns out to be physically impossible** — the CNN's
+compute (esp. the 30752->256 grid_fc GEMM, identical in torch) caps any CNN near the `--slowly` level,
+not 600K. So `--slowly` remains the recommendation.
+
 Pinned PufferLib commit: `9a4eb87e6b58c0aa5f22affefb65c7006d384972` (branch `4.0`, release "4.0
 Experiments"). PyPI is still 3.0.0 — 4.0 is GitHub-only.
 
@@ -156,3 +161,59 @@ Measured (GPU 1, `.venv4`, passive boss `--boss-hp 300`, no snakes/grenades/mini
 - **Full-boss validation still pending.** Confirmed clearing on the passive-boss bootstrap (matching
   3.0's M-progression); a full passive->shooting-boss curriculum on 4.0 hasn't been run. Keep
   `train_dungeon.py` (3.0) until it has.
+
+## 7. Native CUDA CNN encoder — the "12x WITH the CNN" attempt
+
+Goal: get the ~12x native speed WITH our CNN (not the flat encoder, not the ~63K `--slowly` torch
+path). We implemented our `DungeonEncoder` directly in 4.0's native `_C` backend.
+
+**What was built (`puffer4/dungeon_encoder.cu`, wired into `ocean.cu`'s `create_custom_encoder`):**
+the full encoder — conv1(7->32) + conv2(32->32), k3/pad1/GELU; grid_fc(30752->256)+GELU;
+scalar_fc(6->64)+GELU; fuse(320->hidden)+GELU — with **forward AND backward** (im2col/col2im padded
+conv via `puf_mm` GEMM; GELU fwd/bwd; bias grads; concat/split), weight + activation registration in
+4.0's allocator model. 4.0 exposes a clean per-env encoder vtable (`Encoder` struct of fn pointers +
+`create_custom_encoder(env_name, enc)`); the NMMO3 encoder in `ocean.cu` is a worked conv example.
+
+**Correctness — VERIFIED (acceptance #2).** `scripts/check_encoder_parity.py` + `puffer4/test_encoder.cu`
+load identical weights into the native encoder and the torch `DungeonEncoder` and compare on a fixed
+input: **forward max-abs-err 1.5e-8 (rel 1e-7); backward (all 10 weight grads) rel 1.5e-5.** It is the
+exact same architecture, fully differentiated — not a flat fallback. It also **trains and learns**
+natively (acceptance #1): 8.2M-param CNN, `boss_hp_frac` 0.54 -> 0.37 on the passive-boss smoke,
+value/entropy finite.
+
+**Speed — the prize is not physically attainable (acceptance #3).** Measured (GPU 1, passive boss,
+1024 envs, hidden 256):
+
+| path | encoder | SPS | note |
+|---|---|---|---|
+| native flat | puffernet Linear | ~600K | the 12x — but wrong architecture |
+| `--slowly` torch | our CNN (cuDNN) | ~63K | renderable; recommended |
+| **native (this work)** | **our CNN (im2col)** | **~20K** | parity-correct, learns; im2col-bound |
+
+The 600K (12x) comes from the flat encoder being **~10x cheaper compute** than the CNN. The CNN's
+cost — dominated by the **30752->256 grid_fc GEMM, identical in torch** — caps *any* CNN
+implementation far below 600K. So **"12x WITH the CNN" is not possible**: the realistic ceiling for a
+native CNN is roughly the `--slowly` level (a well-optimized native CNN might reach ~2-3x of 63K from
+the fused trainer, i.e. ~130-190K, but never 600K). Our im2col version lands at ~20K — *below*
+`--slowly` — because it materializes a >1GB im2col column buffer per conv (pure memory bandwidth),
+which our 31x31 grid makes expensive.
+
+**Two issues remain for native-CNN to be worth it over `--slowly`:**
+1. **Speed: replace im2col with cuDNN.** `src/cudnn_conv2d.cu` already ships cuDNN conv fwd/bwd with
+   fused bias+activation (the build links `-lcudnn`). Swapping our two im2col convs for cuDNN
+   `ConvWeights` should remove the col-buffer bottleneck and lift native-CNN toward its ~2-3x-over-
+   `--slowly` ceiling. (The grid_fc GEMM stays — it's the same in torch.)
+2. **A large-minibatch numerical hazard.** Native-CNN is stable + learns at `minibatch_size <= 1024`
+   but NaNs after a few updates at 4096. It is **correct under `compute-sanitizer`** (memcheck +
+   serialized: finite, decreasing loss, no OOB) — a size-dependent async/uninitialized hazard
+   (suspected: a cuBLAS GEMM workspace/algorithm interaction at large M/K that the serialized
+   sanitizer run avoids; `cublasGemmExDense` ignores the status return). `dungeon.ini` pins
+   `minibatch_size = 1024` so native-CNN is stable by default.
+
+**Disposition.** The hard kernel work is done and proven (native conv2d forward+backward, parity-
+verified, trains). But native-CNN via im2col is *slower* than `--slowly`, and the 12x is unreachable
+with the CNN. **Recommendation: keep `--slowly` as the CNN daily driver** (63K, renderable, simple).
+The native CNN is committed as a correct foundation; finishing it (cuDNN convs + the minibatch fix)
+is the path to a ~2-3x-over-`--slowly` win, if/when that margin is worth the opaque-checkpoint +
+maintenance cost. Files: `puffer4/dungeon_encoder.cu`, `puffer4/test_encoder.cu`,
+`scripts/check_encoder_parity.py`.

@@ -26,7 +26,13 @@ AIM_DIRS = np.stack([np.cos(np.arange(N_AIM) * 2 * np.pi / N_AIM), np.sin(np.ara
 
 CH_WALL, CH_ENEMY, CH_EBULLET, CH_EBVX, CH_EBVY, CH_PBULLET, CH_GRENADE = range(7)
 NUM_CH = 7
-NUM_SCALARS = 6  # hp, mp, spell_ready, boss_visible, confused, petrified
+NUM_SCALARS = 8  # hp, mp, spell_ready, boss_visible, confused, petrified, boss_hp_frac, boss_invuln
+# Fog-of-war minimap: a global downsampled view the player builds up by exploring (no cheats). MM x MM
+# cells, each covering a block of the full dungeon. Channels: terrain (discovered walkable +1 / wall
+# -1 / fog 0), player cell, boss cell (only once the boss has been seen).
+MM = 32
+NUM_MM_CH = 3
+MM_CH_TERRAIN, MM_CH_PLAYER, MM_CH_BOSS = range(3)
 BX, BY, BVX, BVY, BLIFE, BDMG = range(6)  # bullet columns
 EX, EY, EHP, ETIMER = range(4)  # enemy columns
 GX, GY, GFUSE, GRAD, GDMG, GSTATUS = range(6)  # grenade columns (status: 0 confused, 1 petrify)
@@ -132,6 +138,7 @@ class DungeonEnv(gym.Env):
         self.observation_space = gym.spaces.Dict(
             {
                 "grid": gym.spaces.Box(-1.0, 1.0, (NUM_CH, GRID, GRID), np.float32),
+                "minimap": gym.spaces.Box(-1.0, 1.0, (NUM_MM_CH, MM, MM), np.float32),
                 "scalars": gym.spaces.Box(-1.0, 1.0, (NUM_SCALARS,), np.float32),
             }
         )
@@ -175,6 +182,10 @@ class DungeonEnv(gym.Env):
         self.petrify_timer = 0
         self.minion_timer = 0
         self.visited = np.zeros(self.map.walkable.shape, bool)
+        # fog-of-war: tiles the player has seen (been within VIS_RADIUS of); the boss only enters the
+        # minimap after the player has actually laid eyes on it (boss_seen).
+        self.discovered = np.zeros(self.map.walkable.shape, bool)
+        self.boss_seen = False
         self._spawn_snakes()
         return self._obs(), {}
 
@@ -464,8 +475,42 @@ class DungeonEnv(gym.Env):
         out = np.concatenate([arr, new], 0) if arr.shape[0] else new
         return out[-self.cfg.max_bullets :] if out.shape[0] > self.cfg.max_bullets else out
 
+    def _update_visibility(self):
+        """Mark the disk of tiles within VIS_RADIUS of the player as discovered, and record whether the
+        boss has ever been seen. Integer tile arithmetic so the C port matches bit-for-bit."""
+        p = self.player_pos
+        ipx, ipy = int(p[0]), int(p[1])
+        h, w = self.map.walkable.shape
+        y0, y1 = max(0, ipy - VIS_RADIUS), min(h, ipy + VIS_RADIUS + 1)
+        x0, x1 = max(0, ipx - VIS_RADIUS), min(w, ipx + VIS_RADIUS + 1)
+        dy = np.arange(y0, y1) - ipy
+        dx = np.arange(x0, x1) - ipx
+        disk = (dy[:, None] ** 2 + dx[None, :] ** 2) <= VIS_RADIUS * VIS_RADIUS
+        self.discovered[y0:y1, x0:x1] |= disk
+        if np.linalg.norm(self.boss_pos - p) <= VIS_RADIUS:
+            self.boss_seen = True
+
+    def _minimap(self):
+        h, w = self.map.walkable.shape
+        mm = np.zeros((NUM_MM_CH, MM, MM), np.float32)
+        cx = (np.arange(w) * MM) // w
+        cy = (np.arange(h) * MM) // h
+        cell = cy[:, None] * MM + cx[None, :]  # (h, w) flat minimap cell per dungeon tile
+        terr = mm[MM_CH_TERRAIN].reshape(-1)
+        # priority: discovered walkable (+1) over discovered wall (-1) over fog (0); walls written first
+        # then overwritten by walkable so any seen floor in a block wins. Only discovered tiles contribute.
+        terr[cell[self.discovered & ~self.map.walkable]] = -1.0
+        terr[cell[self.discovered & self.map.walkable]] = 1.0
+        pmx, pmy = (int(self.player_pos[0]) * MM) // w, (int(self.player_pos[1]) * MM) // h
+        mm[MM_CH_PLAYER, pmy, pmx] = 1.0
+        if self.boss_seen:
+            bmx, bmy = (int(self.boss_pos[0]) * MM) // w, (int(self.boss_pos[1]) * MM) // h
+            mm[MM_CH_BOSS, bmy, bmx] = 1.0
+        return mm
+
     def _obs(self):
         c = self.cfg
+        self._update_visibility()
         half = GRID // 2
         p = self.player_pos
         grid = np.zeros((NUM_CH, GRID, GRID), np.float32)
@@ -501,10 +546,12 @@ class DungeonEnv(gym.Env):
                 1.0 if boss_visible else 0.0,
                 1.0 if self.confused_timer > 0 else 0.0,
                 1.0 if self.petrify_timer > 0 else 0.0,
+                (max(self.boss_hp, 0.0) / c.boss_hp_max) if self.fight_active else 0.0,
+                1.0 if self.invuln_timer > 0 else 0.0,
             ],
             np.float32,
         )
-        return {"grid": grid, "scalars": scalars}
+        return {"grid": grid, "minimap": self._minimap(), "scalars": scalars}
 
     def _scatter(self, grid, ch, rel, value):
         half = GRID // 2
@@ -548,11 +595,18 @@ class DungeonEnv(gym.Env):
             dot(self.boss_pos, (230, 50, 50), int(self.cfg.boss_radius * ppt))
         dot(p, (70, 240, 110), max(2, int(0.6 * ppt)))  # player at screen center
 
-        # minimap (whole dungeon) top-right
+        # minimap (whole dungeon) top-right -- fog of war: only discovered tiles show, like the obs the
+        # policy actually sees. Discovered floor lit, discovered wall dark-grey, undiscovered black.
         mm = 120
-        mini = np.where(self.map.walkable[..., None], np.array([70, 64, 58], np.uint8), np.array([24, 22, 28], np.uint8))
-        mini = mini[np.clip(np.arange(mm) * h // mm, 0, h - 1)][:, np.clip(np.arange(mm) * w // mm, 0, w - 1)]
-        for (wx, wy, col) in [(self.boss_xy[0], self.boss_xy[1], (230, 50, 50)), (int(p[0]), int(p[1]), (70, 240, 110))]:
+        disc = self.discovered
+        full = np.full((h, w, 3), (10, 9, 13), np.uint8)  # fog (undiscovered)
+        full[disc & ~self.map.walkable] = (44, 40, 50)  # discovered wall
+        full[disc & self.map.walkable] = (70, 64, 58)  # discovered floor
+        mini = full[np.clip(np.arange(mm) * h // mm, 0, h - 1)][:, np.clip(np.arange(mm) * w // mm, 0, w - 1)]
+        dots = [(int(p[0]), int(p[1]), (70, 240, 110))]
+        if self.boss_seen:  # boss only on the minimap once the player has laid eyes on it (no cheat reveal)
+            dots.append((int(self.boss_pos[0]), int(self.boss_pos[1]), (230, 50, 50)))
+        for (wx, wy, col) in dots:
             mx, my = int(wx * mm / w), int(wy * mm / h)
             mini[max(0, my - 2):my + 3, max(0, mx - 2):mx + 3] = col
         img[6:6 + mm, size - mm - 6:size - 6] = mini

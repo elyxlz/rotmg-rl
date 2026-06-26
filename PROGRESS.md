@@ -75,7 +75,18 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   and fire 28->18; advance only when a level hits >=0.80 greedy, train more chunks if it
   stalls; M3 = full boss (d=1.0) greedy clear >=0.90. Relaunched.
 
-### Recipe queue (add only if a level stalls)
+### 2026-06-26 — adaptive curriculum climbed to the full boss; finetuning for M3
+- Rebalanced env + adaptive curriculum worked: greedy clear stayed 1.000 from hp50 through
+  hp200 (chunks 1-7), no stalls. First wall at hp225/fire19 (chunk 8 = 0.567); one more chunk
+  at that level recovered to 0.993 (chunk 9). Full boss hp250/fire18 first try = 0.707 (c10),
+  retry fluctuated to 0.620 (c11) -> chunked retries plateau ~0.6-0.7 at the hardest level.
+- Diagnosis: bottleneck is dodging survival at full fire density (it already deals ~full
+  damage, return ~247), NOT exploration -> RND is not the right lever. The per-chunk LR
+  anneal-and-restart is inefficient at the final level.
+- Action: single sustained full-boss finetune (`m3-finetune`, 40M steps, one LR schedule)
+  warm-started from c10, with a chained 200-ep greedy eval = the M3 gate.
+
+### Recipe queue (add only if the finetune plateaus < 0.90)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

@@ -3,30 +3,36 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
-## PufferLib 4.0 migration: ADOPTED + VERIFIED (2026-06-26) — ~12x end-to-end SPS
+## PufferLib 4.0 migration: ADOPTED + VALIDATED (2026-06-26) — clears; CNN daily driver
 
-- **What**: ported our env + CNN-LSTM policy onto PufferLib 4.0's native C/CUDA trainer (GitHub branch
-  `4.0`, "4.0 Experiments"). 4.0 is a near-total rewrite: trainer + vectorization + policy forward all
-  live in a compiled `pufferlib/_C`, with the env **statically compiled in** via `build.sh <env>`.
-  The whole 3.0 seam (`emulation`/`vector`/`ocean.torch`/`pytorch`/`spaces`/`PufferEnv`,
-  `pufferl.train(name,args,vecenv,policy)`) is gone.
-- **No fork**: we pin commit `9a4eb87e` and vendor a clone at `.pufferlib4` that `setup_box_puffer4.sh`
-  assembles our env into (`ocean/dungeon/` + `config/dungeon.ini` + a `DungeonEncoder` appended to
-  `pufferlib/models.py`). Env C stays one source of truth: `csim/dungeon.h` carries `#ifdef PUFFER4`
-  guards (4.0 wires `float*` action/terminal buffers + `num_agents`/`rng`); the 3.0 build + parity
-  test are byte-unchanged.
-- **Verified (box, GPU 1, passive-boss smoke, 1024 envs, 5M steps)**: trains end-to-end, metrics flow
-  (boss_hp_frac/in_room/cleared/...), and it learns (boss_hp_frac 0.54->0.38, entropy 7.0->4.9).
-  **End-to-end SPS ~565-600K vs the 3.0 baseline ~49K (~12x)**; env stepping ~6% of time (~2.3M
-  env-SPS) — the win is the fused native rollout/learn pipeline (we were already GPU-bound). Ran in
-  `.venv4` without touching the live 3.0 job (GPU 0) or `.venv`.
-- **Build gotchas solved** (in `setup_box_puffer4.sh`): pin a CUDA-12.x torch wheel (box nvcc is 12.4,
-  default torch is now cu130); a transparent `ccache` shim (no ccache/sudo on box); unversioned
-  `libcudnn.so`/`libnccl.so` symlinks + the CUDA `stubs` dir on `LIBRARY_PATH` (for `-lcudnn -lnccl
-  -lnvidia-ml`).
-- **Follow-up**: only a 5M smoke is done — keep `scripts/train_dungeon.py` (3.0) as a fallback until a
-  full passive->full-boss 4.0 run confirms it clears like 3.0. Full writeup:
-  `docs/pufferlib4-migration.md`; integration files: `puffer4/`; launcher: `scripts/train_dungeon4.py`.
+- **What**: ported our env + CNN-LSTM policy onto PufferLib 4.0 (GitHub `4.0`, "4.0 Experiments"), a
+  near-total native rewrite (trainer+vectorization+policy in a compiled `pufferlib/_C`, env statically
+  compiled in via `build.sh`; the whole 3.0 seam — `emulation`/`vector`/`ocean.torch`/`pytorch`/
+  `spaces`/`PufferEnv`, `pufferl.train(name,args,vecenv,policy)` — is gone).
+- **No fork**: pin commit `9a4eb87e`, vendor a clone at `.pufferlib4` that `setup_box_puffer4.sh`
+  assembles our env into (`ocean/dungeon/` + `config/dungeon.ini` + `DungeonEncoder` appended to
+  `pufferlib/models.py`). `csim/dungeon.h` carries `#ifdef PUFFER4` guards (4.0 wires `float*`
+  action/terminal buffers + `num_agents`/`rng`); the 3.0 build + parity test are byte-unchanged.
+- **KEY NUANCE — two backends, speedup is architecture-dependent**:
+  - native `_C` (default): **~600K SPS (~12x)** BUT puffernet's **flat Linear encoder** (built in C
+    from hidden_size/num_layers; ignores `[torch] encoder`), opaque flat-weight checkpoints.
+  - `--slowly` (torch): **~63K SPS (~1.3x over 3.0)** with **OUR DungeonEncoder CNN** (8.5M params) +
+    torch state_dict checkpoints (renderable, warm-startable). Needs a `--float` build.
+  So the 12x is the flat-encoder path; our CNN is ~on-par with 3.0. The CNN (`--slowly`) is the daily
+  driver (right arch for the spatial task + observability); native is a fast sweep/experiment option.
+- **Validated (GPU 1, .venv4, passive boss hp300, 1024 envs, --slowly CNN)**: 50M-step run drove
+  `boss_hp_frac` 0.54->~0.33 (damaging the boss), entropy 7.0->4.1, per-step `cleared` ~0.027 (matches
+  3.0's 0.017-0.04). **POV eval rollouts render `cleared=True`** (boss killed in ~25-35 steps) — 4.0 +
+  our CNN clears like 3.0. wandb run `rotmg-dungeon/7f2ujuve`. Live 3.0 job (GPU 0) untouched.
+- **Tooling (parallel to box.sh, GPU 1 / .venv4)**: `scripts/box4.sh` {train|follow|wait|status|kill};
+  `train_dungeon4.py` (all curriculum knobs incl. `--slowly`, `--init-checkpoint` warm-start, wandb
+  group); `follow_along4.py` renders the latest `--slowly` checkpoint via the numpy DungeonEnv POV and
+  logs videos to wandb (`rollouts4-<id>`). Logs to project `rotmg-dungeon`.
+- **Build gotchas solved** (`setup_box_puffer4.sh`): pin CUDA-12.x torch (box nvcc 12.4, default torch
+  is cu130); transparent `ccache` shim (no ccache/sudo); unversioned `libcudnn.so`/`libnccl.so`
+  symlinks + CUDA `stubs` on `LIBRARY_PATH`; `--float` build (enables `--slowly`).
+- **Open prize**: native-speed CNN = port a conv2d into `src/puffernet.h` (C/CUDA). Until then it's
+  12x-flat or 1.3x-CNN. Full writeup: `docs/pufferlib4-migration.md`; integration: `puffer4/`.
 
 ## M4 DONE (2026-06-26): C (PufferLib Ocean) env port — blazing fast, parity-verified
 

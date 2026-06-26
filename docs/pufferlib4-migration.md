@@ -1,10 +1,18 @@
 # PufferLib 4.0 migration
 
-Status: **adopted and verified.** Our custom dungeon env + CNN-LSTM policy train end-to-end on
-PufferLib 4.0's native C/CUDA trainer at **~600K SPS vs the 3.0 baseline ~49K (≈12x)**, metrics
-flowing, without maintaining a fork (we pin a 4.0 commit and vendor a clone we assemble our env into).
-The 3.0 path (`scripts/train_dungeon.py`) stays in place as a fallback until 4.0 has a long run behind
-it.
+Status: **adopted and verified**, with one important nuance about which backend gives the speedup
+(see §4). Our env trains end-to-end on 4.0 without a fork (we pin a 4.0 commit and vendor a clone we
+assemble our env into). The headline numbers:
+
+- **Native `_C` backend: ~600K SPS (~12x over the 3.0 ~49K baseline)** — BUT it uses puffernet's
+  built-in **flat Linear encoder**, not our CNN, and saves opaque flat-weight checkpoints.
+- **`--slowly` torch backend: ~63K SPS (~1.3x over 3.0)** with **OUR `DungeonEncoder` CNN** (the
+  architecture this spatial task wants) + torch-state-dict checkpoints that render to POV videos.
+
+The CNN path (`--slowly`) is the **daily driver** (correct architecture + full observability);
+`scripts/box4.sh` + `follow_along4.py` wire it up with wandb + rollout videos like the 3.0 box.sh.
+Validated on the box: it learns and **clears** (eval rollouts `cleared=True`). The 3.0 path
+(`scripts/train_dungeon.py`) stays as a fallback.
 
 Pinned PufferLib commit: `9a4eb87e6b58c0aa5f22affefb65c7006d384972` (branch `4.0`, release "4.0
 Experiments"). PyPI is still 3.0.0 — 4.0 is GitHub-only.
@@ -85,32 +93,66 @@ in `puffer4/` (see `puffer4/README.md` for the mapping):
 `scripts/train_dungeon4.py` is a thin launcher mapping our familiar knobs (`--boss-hp`, `--n-snakes`,
 `--no-boss-shoots`, `--ent-coef`, ...) to `puffer train dungeon --env.*/--train.*` overrides.
 
-## 4. Verification + SPS (measured on the box)
+## 4. Two backends — the speedup is architecture-dependent (the key nuance)
 
-Smoke run (idle GPU 1, passive-boss config matching the live 3.0 run: `--boss-hp 300 --n-snakes 0
---no-grenades --no-minions --no-boss-shoots --spawn-in-room-prob 1.0 --ent-coef 0.02`, 1024 envs,
-hidden 256, 5M steps):
+4.0 has two trainer backends, and **which policy you get differs**:
 
-- **End-to-end SPS ~565-600K**, vs the 3.0 C-env baseline **~49K** -> **≈12x faster end-to-end.**
-- **Env stepping ~6% of step time** (~28ms for 1024x64 steps -> ~2.3M env-SPS on one GPU's 8 OMP
-  workers; 3.0 peaked ~3.39M env-SPS with 16 threads). As on 3.0, the env is not the bottleneck — the
-  win is the fused native rollout/learn pipeline (the ~49K -> ~600K jump is the GPU/training half).
-- **Metrics flow** (our per-step Log): `boss_hp_frac`, `in_room`, `cleared`, `snakes`,
-  `player_hp_frac`, `reward`, `perf` all render in the dashboard.
-- **It learns**: over 5M steps `boss_hp_frac` fell 0.54 -> 0.38 (the agent damages the boss) and
-  entropy 7.0 -> 4.9 — the same passive-boss bootstrap signal the 3.0 runs show (~0.046 cleared with
-  an early policy).
-- Ran entirely in `.venv4` on GPU 1; the live 3.0 job (GPU 0) and the working `.venv` were untouched.
+| | native `_C` (default) | `--slowly` (torch) |
+|---|---|---|
+| Policy | **puffernet's flat Linear encoder** (built in C from `hidden_size`/`num_layers`; ignores `[torch] encoder`) | **our `DungeonEncoder` CNN** (`pufferlib.models`, config-selected) |
+| SPS (1024 envs, passive smoke) | **~600K (~12x over 3.0)** | **~63K (~1.3x over 3.0)** |
+| Checkpoint | flat float32 dump of `master_weights` (opaque) | torch state_dict (renderable, warm-startable) |
+| Build | any | needs `--float` (`build.sh dungeon --float`) |
 
-## 5. Caveats / follow-ups
+So the ~12x is **the native path with a flat encoder, not our CNN**. The native trainer builds its
+own C policy (`src/puffernet.h`, a Linear encoder + LSTM) from `hidden_size`/`num_layers` and ignores
+the `[torch] encoder = DungeonEncoder` setting — that only feeds the `--slowly` torch path. For a
+spatial bullet-dodging task the CNN matters, so **`--slowly` is the daily driver** despite being only
+modestly faster than 3.0; native is a fast-experimentation / sweep option that trades the CNN away.
 
-- **Long-run validation pending.** Only a 5M-step smoke is done; a full passive->full-boss run on 4.0
-  to confirm it clears like 3.0 did has not been run yet (don't retire `train_dungeon.py` until then).
-- **torch pin.** The box happened to run with `2.12.1+cu130`; the script pins `cu128` for
-  reproducibility. If a clean `.venv4` is built, confirm `torch.version.cuda` is 12.x.
+Measured (GPU 1, `.venv4`, passive boss `--boss-hp 300`, no snakes/grenades/minions, `boss_shoots=0`,
+`spawn_in_room`, `ent_coef 0.02`, 1024 envs, hidden 256):
+
+- **`--slowly` (our CNN, 8.5M params):** ~63K SPS; **trains and clears.** A 50M-step run drove
+  `boss_hp_frac` 0.54 -> ~0.34 (the agent damages the boss), entropy 7.0 -> 4.2 (annealing), per-step
+  `cleared` ~0.028 — the same passive-boss bootstrap signal the 3.0 CNN runs show (~0.017-0.04).
+  POV eval rollouts of the 16-20M checkpoints render **`cleared=True`** (boss killed in ~25-35 steps).
+- **native (flat encoder, 1.9M params):** ~565-600K SPS; also learns the passive boss
+  (`boss_hp_frac` 0.54 -> 0.38 over 5M) but with the flat encoder + opaque checkpoints.
+- Env stepping is ~6% of step time either way (~2.3M env-SPS on 8 OMP workers; 3.0 peaked ~3.39M with
+  16 threads) — the env is not the bottleneck. All runs stayed in `.venv4` on GPU 1; the live 3.0 job
+  (GPU 0) + `.venv` were untouched.
+
+## 5. Tooling (parallel to the 3.0 box.sh)
+
+`scripts/box4.sh` mirrors `box.sh` for 4.0, pinned to GPU 1 / `.venv4` so it never touches a 3.0 run:
+
+- `box4.sh train --slowly --boss-hp 300 --no-snakes ... --total-timesteps 50000000` — launches via
+  `scripts/train_dungeon4.py`, which maps our knobs (`--boss-hp`, `--n-snakes`,
+  `--no-grenades/minions/boss-shoots`, `--spawn-in-room-prob`, `--ent-coef`, `--init-checkpoint`
+  warm-start, `--total-timesteps`, `--hidden`, `--slowly`) to `puffer train dungeon --env.*/--train.*`
+  overrides. Logs to wandb project **`rotmg-dungeon`** with `--wandb-group` from `$WANDB_RUN_GROUP`.
+- `box4.sh follow` — `scripts/follow_along4.py` watches `checkpoints4/dungeon/<run>/` for the newest
+  `<step>.bin`, reconstructs `Policy(DungeonEncoder, DefaultDecoder, LSTM)`, loads the torch
+  state_dict, runs a stochastic rollout on the numpy `DungeonEnv` (whose obs flattens to the same
+  `[grid, scalars]` layout the C env feeds the encoder), and logs the POV mp4 + `rollout_cleared` to
+  wandb (`rollouts4-<run_id>`). Only works for `--slowly` runs (native checkpoints are opaque); refuses
+  otherwise. The 4.0 checkpoint filename **is** the global step, so videos log at the true step.
+- `box4.sh wait` — blocks until the run ends (2 consecutive pgrep misses), then prints final metrics
+  (notifier). `box4.sh status` / `kill` mirror box.sh.
+
+## 6. Caveats / follow-ups
+
+- **Native-speed CNN is the open prize.** Getting both ~12x AND our CNN means porting the conv
+  encoder into `src/puffernet.h` (a C/CUDA conv2d forward/backward + registering it in the native
+  model). Bounded but real work; until then it's 12x-flat **or** 1.3x-CNN.
+- **torch pin.** The box ran with the already-present `2.12.1+cu130` (it satisfied `>=2.9`); the script
+  pins `cu128` for reproducibility. On a clean `.venv4`, confirm `torch.version.cuda` is 12.x. The
+  12.4-nvcc / cu13-torch mix ran fine on driver 580, but cu128 is the correct pin.
 - **Vendored clone is pinned, not tracked.** `.pufferlib4` is a frozen commit we assemble into, not a
-  maintained fork. To bump 4.0, change `PUFFER_REF` in `setup_box_puffer4.sh` and re-run; re-port only
-  if the Ocean binding contract (`vecenv.h` / `binding.c` shape) changes.
-- **Custom policy lives in the clone.** `DungeonEncoder` is appended to the clone's
-  `pufferlib/models.py` by the setup script (idempotent); the source of record is
-  `puffer4/dungeon_encoder.py`.
+  maintained fork. Bump via `PUFFER_REF` in `setup_box_puffer4.sh`; re-port only if the Ocean binding
+  contract (`vecenv.h` / `binding.c`) changes. `DungeonEncoder` is appended to the clone's
+  `pufferlib/models.py` by the setup script (source of record: `puffer4/dungeon_encoder.py`).
+- **Full-boss validation still pending.** Confirmed clearing on the passive-boss bootstrap (matching
+  3.0's M-progression); a full passive->shooting-boss curriculum on 4.0 hasn't been run. Keep
+  `train_dungeon.py` (3.0) until it has.

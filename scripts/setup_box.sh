@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Reproduce the GPU-box training env (PufferLib 3.x / PuffeRL).
+# Reproduce the GPU-box training env (PufferLib 3.x / PuffeRL) — the working default.
+#
+# For PufferLib 4.0 (native C/CUDA rewrite, investigated-but-not-adopted) use the separate
+# scripts/setup_box_puffer4.sh (provisions .venv4; never touches this .venv). See
+# docs/pufferlib4-migration.md for why 4.0 is not the default.
 #
 # PuffeRL's C advantage kernel is NOT in the prebuilt wheel for a non-default torch, so it
 # must be COMPILED against the installed torch. Order matters: install torch first, then build

@@ -3,6 +3,29 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## PufferLib 4.0 migration: INVESTIGATED, NOT ADOPTED (2026-06-26) — 3.0 stays default
+
+- **Finding**: 4.0 (GitHub branch `4.0`, "4.0 Experiments") is a near-total native rewrite. The
+  trainer, vectorization, AND the policy forward all live in a compiled `pufferlib/_C` (C/CUDA)
+  backend built by PufferLib's own `build.sh <env>`, with the env **statically compiled into `_C`**.
+  The 4.0 `pufferlib` package is 7 files; `emulation`, `vector`, `ocean` (py), `pytorch`, `spaces`,
+  and `PufferEnv` are **all removed**. `pufferl.train` lost its `vecenv=`/`policy=` args.
+- **Impact**: the exact seam we train through is gone. numpy `DungeonEnv` + `DungeonPolicy` via
+  `GymnasiumPufferEnv` + `vector.make` + `ocean.torch.Recurrent` + `pufferl.train(name,args,vecenv,
+  policy)` has **no 4.0 equivalent** (the numpy-env path is dead). The C env (`csim/dungeon.h`) is
+  already Ocean-contract-shaped so it ports cleanly, BUT only into a PufferLib **fork** (env compiles
+  into `_C`; our custom CNN-LSTM policy must be added to `pufferlib.models`; our standalone `csim`
+  extension + `vendor/puffer/env_binding.h` + `CDungeon` wrapper become obsolete).
+- **Speed**: not switching is cheap here — on 3.0 the C env is already ~3% of step time (we're
+  GPU/policy-bound), so 4.0's native env stepping barely helps our actual bottleneck. The native
+  `_C` build was **deferred for safety** (box had a live 3.0 job on `.venv` + `/home` at 98%/50 GB;
+  a torch>=2.9 + CUDA build would contend and risk the disk). The architectural blocker stands
+  regardless of build timing.
+- **Recommendation**: stay on 3.0 (it gives us custom-env + injected-policy, which 4.0 removes).
+  Revisit only if training becomes env-bound, or we accept maintaining a PufferLib fork, or 4.0
+  ships a stable release with a custom-env API. Full analysis: `docs/pufferlib4-migration.md`.
+  Deferred provisioning recipe: `scripts/setup_box_puffer4.sh`.
+
 ## M4 DONE (2026-06-26): C (PufferLib Ocean) env port — blazing fast, parity-verified
 
 - **What**: `sim/dungeon.py` ported to C in `src/rotmg_rl/csim/` (`dungeon.h` env + `binding.c`

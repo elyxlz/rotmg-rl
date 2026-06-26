@@ -25,6 +25,10 @@ train = [
     "torch==2.8.0",
     "pufferlib==3.0",  # 3.x ships the PuffeRL trainer; build with --no-build-isolation (see setup_box.sh)
 ]
+# PufferLib 4.0 (native C/CUDA rewrite) is intentionally NOT a pip dep: it is GitHub-only (PyPI is
+# still 3.0.0) and its _C backend is built via PufferLib's own build.sh, not pip. It is
+# investigated-but-not-adopted because it removes the custom-env + injected-policy API we train
+# through. See docs/pufferlib4-migration.md and scripts/setup_box_puffer4.sh (separate .venv4).
 
 [build-system]
 requires = ["hatchling"]

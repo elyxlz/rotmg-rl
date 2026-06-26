@@ -40,6 +40,7 @@ class DungeonConfig:
     player_bullet_speed: float = 1.2
     player_bullet_dmg: float = 40.0
     player_bullet_radius: float = 0.5
+    player_bullet_life: int = 25
     # boss (ScaleHP2(20) in source; sim uses a feasible single-player value)
     boss_hp_max: float = 2500.0
     boss_radius: float = 2.0
@@ -160,7 +161,7 @@ class DungeonEnv(gym.Env):
         self.shoot_timer = max(0, self.shoot_timer - 1)
         if aim_idx > 0 and self.shoot_timer == 0:
             vel = DIRS[aim_idx - 1] * c.player_bullet_speed
-            self.player_bullets = self._append(self.player_bullets, [[*self.player_pos, vel[0], vel[1], c.player_bullet_radius]])
+            self.player_bullets = self._append(self.player_bullets, [[*self.player_pos, vel[0], vel[1], c.player_bullet_life]])
             self.shoot_timer = c.shoot_cooldown
 
         if self.fight_active:

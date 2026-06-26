@@ -39,6 +39,7 @@ class DungeonConfig:
     max_steps: int = 4000
     activation_range: float = 20.0
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)
+    random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
     # Wizard
     player_hp_max: float = 670.0
     player_mp_max: float = 385.0
@@ -91,6 +92,8 @@ class DungeonConfig:
     minion_max: int = 5
     minion_cd: int = 15
     minion_hp: float = 30.0
+    enable_grenades: bool = True  # curriculum can disable for early stages
+    enable_minions: bool = True
     # rewards (exploration-based, no global pathfinding)
     rew_explore: float = 0.05  # per newly-visited tile
     rew_kill: float = 0.5  # per snake killed
@@ -141,7 +144,11 @@ class DungeonEnv(gym.Env):
             self._rng = np.random.default_rng(seed)
         c = self.cfg
         self.steps = 0
-        if self._rng.random() < c.spawn_in_room_prob:
+        roll = self._rng.random()
+        if roll < c.random_spawn_prob:  # random restart anywhere in the dungeon (coverage)
+            i = int(self._rng.integers(len(self._walk_xs)))
+            self.player_pos = np.array([self._walk_xs[i] + 0.5, self._walk_ys[i] + 0.5], np.float32)
+        elif roll < c.random_spawn_prob + c.spawn_in_room_prob:  # near the boss (fight practice)
             bx, by = self.boss_xy
             ang = self._rng.uniform(0, 2 * np.pi)
             sx, sy = _nearest_walkable(self.map.walkable, int(np.clip(bx + 6 * np.cos(ang), 1, self.map.width - 2)), int(np.clip(by + 6 * np.sin(ang), 1, self.map.height - 2)))
@@ -345,6 +352,8 @@ class DungeonEnv(gym.Env):
 
     def _spawn_minions(self):
         c = self.cfg
+        if not c.enable_minions:
+            return
         if self.minion_timer > 0:
             self.minion_timer -= 1
             return
@@ -359,6 +368,8 @@ class DungeonEnv(gym.Env):
         self.snakes = np.concatenate([self.snakes, new], 0)
 
     def _throw_grenade(self, key, cooldown, radius, dmg, status):
+        if not self.cfg.enable_grenades:
+            return
         if self.shoot_timers.get(key, 0) > 0:
             self.shoot_timers[key] -= 1
             return

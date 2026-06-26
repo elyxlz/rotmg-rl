@@ -113,6 +113,8 @@ class SnakePitEnv(gym.Env):
         self.boss_hp = c.boss_hp_max
         self.enemy_bullets = np.zeros((0, 4), np.float32)
         self.player_bullets = np.zeros((0, 4), np.float32)
+        # Per-step log of bursts fired (the sim's analog of EnemyShoot packets), for captures.
+        self.shoot_log: list[tuple] = []
         return self._obs(), {}
 
     def step(self, action):
@@ -184,10 +186,17 @@ class SnakePitEnv(gym.Env):
 
     def _radial_burst(self) -> np.ndarray:
         c = self.cfg
-        angles = np.arange(c.boss_burst, dtype=np.float32) * (2 * np.pi / c.boss_burst)
-        angles += self._rng.uniform(0.0, 2 * np.pi / c.boss_burst)  # random phase
+        gap = 2 * np.pi / c.boss_burst
+        phase = float(self._rng.uniform(0.0, gap))  # random per-burst phase
+        angles = np.arange(c.boss_burst, dtype=np.float32) * gap + phase
         vel = np.stack([np.cos(angles), np.sin(angles)], axis=1).astype(np.float32) * self.eff_bullet_speed
         pos = np.tile(self.boss_pos, (c.boss_burst, 1)).astype(np.float32)
+        # Log the burst as an EnemyShoot-style event (base_angle centers the arc for reconstruction).
+        base_angle = phase + (c.boss_burst - 1) / 2.0 * gap
+        lifetime = (c.arena_size * 1.5) / max(self.eff_bullet_speed, 1e-6)
+        self.shoot_log.append(
+            (self.boss_pos.copy(), base_angle, c.boss_burst, gap, float(self.eff_bullet_speed), self.steps, lifetime)
+        )
         return np.concatenate([pos, vel], axis=1)
 
     def _advance(self, bullets: np.ndarray) -> np.ndarray:

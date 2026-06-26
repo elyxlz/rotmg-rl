@@ -21,6 +21,21 @@ rendered .mp4 of a full run, plus a live completion on the server.
   had pufferlib 2.0.6, which ships no importable trainer).
 - Box now has: .NET 8 SDK (~/.dotnet, 8.0.422), betterSkillys cloned + built, Docker for Redis.
 
+## v3: FAITHFUL rebuild (user: "fully analyze the real game first"; sim wasn't faithful)
+
+### 2026-06-26 — analyzed real game from source + rebuilt the env faithfully
+- `docs/real-game-analysis.md`: full mechanics from betterSkillys source. Key: VISIBILITY_RADIUS
+  15 (local 31x31 view, NOT global); aim is continuous toward the mouse; dungeon is open with
+  snakes you fight/dodge through (no gates); tiles/sec = Speed/10 (my calibration confirmed).
+- Character CHOSEN: Wizard (staff 2-shot + Spell nuke), real stats.
+- Rebuilt `sim/dungeon.py` (v3) faithfully: LOCAL 31x31 vision (removed the global geodesic/boss-
+  direction CHEAT), fine mouse-aim (32 dirs), action MultiDiscrete([9,32,2,2]) (move,aim,shoot,
+  cast), EXPLORATION reward (visit new tiles + kills, no path breadcrumb), snake enemies (HP 5,
+  wander+shoot) populating the dungeon, Wizard staff+spell, 3-phase boss. 5 tests pass.
+- REMAINING fidelity: boss grenades + Confused/Petrify status, Stheno Swarm minions. Then retrain
+  on the faithful env (much harder: explore + fight with local vision only). Then real-client deploy.
+- NOTE: `record_dungeon.py` (old geodesic demo) needs updating to the v3 action/no-geodesic.
+
 ## v2 build log (whole dungeon)
 
 ### 2026-06-26 — M0 training stack DONE (PufferLib 3.x / PuffeRL works)

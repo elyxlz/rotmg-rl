@@ -3,6 +3,34 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## Protein sweep for the cautious-finish (2026-06-26) — score metric + sweep runner; metric pivot
+
+- **Goal**: crack the shooting-boss cautious-finish (boss_hp 300, boss_shoots, no
+  snakes/grenades/minions, spawn_in_room_prob=1.0). Warm-started from `checkpoints/passive.pt`, the
+  agent dodges well (player_hp_frac ~0.94) and damages the boss to ~18% but lingers instead of
+  finishing: per-step `cleared` decays toward ~0.003. Hypothesis: gamma too low (over-discounts the
+  future +clear vs immediate death-risk) and/or clear-vs-death + entropy need tuning.
+- **Score metric added** (`sim/dungeon.py` + `csim/dungeon.h`, parity-kept, C rebuilt, 9 tests
+  green): `score = 1.0 if cleared else (1 - boss_hp_frac_at_end)`, exposed as `environment/score`.
+  In C it is a per-EPISODE accumulator (score/episodes summed at the episode boundary; `my_log`
+  reports score/episodes -- the per-step `n` divisor cancels in the ratio). Numpy adds it to the
+  info dict; parity asserts score == 1 - boss_hp_frac on non-terminal steps.
+- **Sweep runner** `scripts/sweep_dungeon.py`: runs the Protein loop by hand (our CDungeon +
+  CDungeonPolicy are built like train_dungeon, not via the registry) -- suggest -> build
+  vecenv+policy warm-started from passive.pt -> `pufferl.train()` -> observe, cost = wall-clock.
+  Sweeps learning_rate, ent_coef, gamma (0.95-0.999), gae_lambda, vf_coef + the reward balance
+  (rew_clear, rew_death, rew_boss_dmg). Clip coefficients deliberately NOT swept (the guide).
+- **KEY FINDING — the specified `score` SATURATES, so the sweep pivots to `cleared`**: at
+  max_steps=4000 even a badly cautious agent finishes the kill eventually, so every episode clears
+  and `score` pegs at ~1.0 EVEN in the textbook cautious state (trial with cleared=0.005,
+  boss_hp_frac=0.18, player_hp_frac=0.94 still scored 0.9999). `score` cannot see "slow finish".
+  The per-step clear RATE -- the problem's OWN symptom -- is the metric with real gradient (4.5x
+  spread, 0.0026-0.0119, across the first 3 trials), so the sweep maximizes `environment/cleared`.
+  `score` stays logged for reference. (Implication: to make the per-episode score itself
+  discriminate, the episode budget would have to be tight enough that a slow finish truncates.)
+- Sweep running on GPU 0 (`.venv`, group `sweep-cleared`, 20 trials x 15M warm-started, ~52K SPS,
+  ~7 min/trial). Best config + finish verdict to follow.
+
 ## PufferLib 4.0 migration: ADOPTED + VALIDATED (2026-06-26) — clears; CNN daily driver
 
 - **What**: ported our env + CNN-LSTM policy onto PufferLib 4.0 (GitHub `4.0`, "4.0 Experiments"), a

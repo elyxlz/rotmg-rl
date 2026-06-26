@@ -49,9 +49,12 @@ fi
 ( cd "$PUFFER_DIR" && git fetch --depth 1 origin "$PUFFER_REF" && git checkout -q "$PUFFER_REF" )
 echo "PufferLib pinned at $(cd "$PUFFER_DIR" && git rev-parse --short HEAD)"
 
-# 2. Separate venv (.venv4) — never the working .venv. 4.0 pyproject deps; torch>=2.9 cu12.
+# 2. Separate venv (.venv4) — never the working .venv. 4.0 pyproject deps.
+# torch MUST match the box CUDA toolkit major: nvcc is 12.4, so use CUDA 12.x wheels (cu128), NOT
+# torch's default cu130 wheels — a CUDA-13 torch mismatches the 12.4 nvcc/cudart the _C build links.
 uv venv "$VENV4"
-uv pip install --python "$VENV_PY" "torch>=2.9" numpy pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
+uv pip install --python "$VENV_PY" "torch>=2.9" --index-url https://download.pytorch.org/whl/cu128
+uv pip install --python "$VENV_PY" numpy pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
 
 # 3. Assemble our env into the clone (single source of truth: env .h files copied from csim/).
 mkdir -p "$PUFFER_DIR/ocean/dungeon"
@@ -65,8 +68,17 @@ if ! grep -q "class DungeonEncoder" "$PUFFER_DIR/pufferlib/models.py"; then
     cat "$REPO_ROOT/puffer4/dungeon_encoder.py" >> "$PUFFER_DIR/pufferlib/models.py"
 fi
 
+# 3.5 Link prerequisites: build.sh links `-lcudnn -lnccl -lnvidia-ml`, but the pip nvidia wheels ship
+# only versioned .so files (no libcudnn.so / libnccl.so for `-l`) and NVML lives in the CUDA stubs
+# dir. Add unversioned symlinks into the wheel lib dirs + put cudnn/nccl/stubs on the linker path.
+CUDNN_LIB=$("$VENV_PY" -c "import nvidia.cudnn, os; print(os.path.join(nvidia.cudnn.__path__[0], 'lib'))")
+NCCL_LIB=$("$VENV_PY" -c "import nvidia.nccl, os; print(os.path.join(nvidia.nccl.__path__[0], 'lib'))")
+for so in "$CUDNN_LIB"/libcudnn.so.*; do [ -e "$CUDNN_LIB/libcudnn.so" ] || ln -sf "$(basename "$so")" "$CUDNN_LIB/libcudnn.so"; done
+for so in "$NCCL_LIB"/libnccl.so.*; do [ -e "$NCCL_LIB/libnccl.so" ] || ln -sf "$(basename "$so")" "$NCCL_LIB/libnccl.so"; done
+export LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$CUDNN_LIB:$NCCL_LIB${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
 # 4. Build _C with the dungeon env statically linked (default = CUDA backend).
-( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV4/bin:$CUDA_HOME/bin:$PATH" ./build.sh dungeon )
+( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV4/bin:$CUDA_HOME/bin:$PATH" LIBRARY_PATH="$LIBRARY_PATH" ./build.sh dungeon )
 
 # 5. Install the package (the _C*.so is already built in place; no rebuild).
 uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"

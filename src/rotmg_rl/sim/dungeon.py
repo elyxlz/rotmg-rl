@@ -45,6 +45,7 @@ class DungeonConfig:
     max_steps: int = 4000
     activation_range: float = 20.0
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)
+    spawn_in_room_radius: float = 6.0  # ring distance (tiles) from the boss for the in-room spawn; ramp it up to teach navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
     random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
     # Wizard
     player_hp_max: float = 670.0
@@ -165,7 +166,7 @@ class DungeonEnv(gym.Env):
         elif roll < c.random_spawn_prob + c.spawn_in_room_prob:  # near the boss (fight practice)
             bx, by = self.boss_xy
             ang = self._rng.uniform(0, 2 * np.pi)
-            sx, sy = _nearest_walkable(self.map.walkable, int(np.clip(bx + 6 * np.cos(ang), 1, self.map.width - 2)), int(np.clip(by + 6 * np.sin(ang), 1, self.map.height - 2)))
+            sx, sy = _nearest_walkable(self.map.walkable, int(np.clip(bx + c.spawn_in_room_radius * np.cos(ang), 1, self.map.width - 2)), int(np.clip(by + c.spawn_in_room_radius * np.sin(ang), 1, self.map.height - 2)))
             self.player_pos = np.array([sx + 0.5, sy + 0.5], np.float32)
         else:
             self.player_pos = np.array([self.entrance_xy[0] + 0.5, self.entrance_xy[1] + 0.5], np.float32)

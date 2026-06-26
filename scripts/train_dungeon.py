@@ -40,6 +40,7 @@ def main() -> None:
     p.add_argument("--rew-approach", type=float, default=None, help="distance-to-boss shaping (default 0/off); turn on (~0.02) for navigation")
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
     p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
+    p.add_argument("--spawn-in-room-radius", type=float, default=6.0, help="ring distance from boss for in-room spawn; ramp up (6->~100) for the navigate-under-threats curriculum")
     p.add_argument("--random-spawn-prob", type=float, default=0.0)
     p.add_argument("--boss-hp", type=float, default=7500.0)
     p.add_argument("--n-snakes", type=int, default=40)
@@ -86,6 +87,7 @@ def main() -> None:
     rew_overrides = {k: v for k, v in (("rew_clear", args.rew_clear), ("rew_death", args.rew_death), ("rew_boss_dmg", args.rew_boss_dmg), ("rew_approach", args.rew_approach)) if v is not None}
     env_cfg = DungeonConfig(
         spawn_in_room_prob=args.spawn_in_room_prob,
+        spawn_in_room_radius=args.spawn_in_room_radius,
         random_spawn_prob=args.random_spawn_prob,
         boss_hp_max=args.boss_hp,
         n_snakes=args.n_snakes,

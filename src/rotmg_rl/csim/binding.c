@@ -17,6 +17,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     c->activation_range = unpack(kwargs, "activation_range");
     c->spawn_in_room_prob = unpack(kwargs, "spawn_in_room_prob");
     c->random_spawn_prob = unpack(kwargs, "random_spawn_prob");
+    c->spawn_in_room_radius = unpack(kwargs, "spawn_in_room_radius");
     c->player_hp_max = unpack(kwargs, "player_hp_max");
     c->player_mp_max = unpack(kwargs, "player_mp_max");
     c->mp_regen = unpack(kwargs, "mp_regen");

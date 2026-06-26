@@ -84,7 +84,7 @@ typedef struct {
     /* --- DungeonConfig mirror --- */
     float player_speed, player_radius;
     int max_steps;
-    float activation_range, spawn_in_room_prob, random_spawn_prob;
+    float activation_range, spawn_in_room_prob, random_spawn_prob, spawn_in_room_radius;
     float player_hp_max, player_mp_max, mp_regen;
     int staff_cooldown, staff_num;
     float staff_dmg_lo, staff_dmg_hi, staff_speed;
@@ -693,7 +693,7 @@ static void c_reset(Dungeon* env) {
         env->py = g_walk_y[i] + 0.5f;
     } else if (roll < c->random_spawn_prob + c->spawn_in_room_prob) {
         double ang = uniform_f(env, 0.0f, (float)(2.0 * M_PI));
-        int cx = (int)(bx + 6 * cos(ang)), cy = (int)(by + 6 * sin(ang));
+        int cx = (int)(bx + c->spawn_in_room_radius * cos(ang)), cy = (int)(by + c->spawn_in_room_radius * sin(ang));
         if (cx < 1) cx = 1;
         if (cx > MAP_W - 2) cx = MAP_W - 2;
         if (cy < 1) cy = 1;

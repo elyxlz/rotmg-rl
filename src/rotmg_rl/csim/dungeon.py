@@ -25,6 +25,7 @@ def config_to_kwargs(cfg: DungeonConfig) -> dict:
         max_steps=cfg.max_steps,
         activation_range=cfg.activation_range,
         spawn_in_room_prob=cfg.spawn_in_room_prob,
+        spawn_in_room_radius=cfg.spawn_in_room_radius,
         random_spawn_prob=cfg.random_spawn_prob,
         player_hp_max=cfg.player_hp_max,
         player_mp_max=cfg.player_mp_max,

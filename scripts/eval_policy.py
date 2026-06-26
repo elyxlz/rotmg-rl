@@ -49,6 +49,7 @@ def main() -> None:
     parser.add_argument("--boss-burst", type=int, default=12)
     parser.add_argument("--enemy-bullet-speed", type=float, default=0.7)
     parser.add_argument("--stochastic", action="store_true", help="sample actions (deployment-faithful) instead of greedy argmax")
+    parser.add_argument("--randomize", action="store_true", help="domain randomization per episode (M4 robustness eval)")
     parser.add_argument("--seed", type=int, default=10_000)
     args = parser.parse_args()
 
@@ -63,6 +64,7 @@ def main() -> None:
             boss_fire_interval=args.boss_fire_interval,
             boss_burst=args.boss_burst,
             enemy_bullet_speed=args.enemy_bullet_speed,
+            randomize=args.randomize,
         )
     )
     clears, returns, lengths = [], [], []

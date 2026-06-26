@@ -51,6 +51,15 @@ class SnakePitConfig:
     rew_damage_taken: float = 0.05  # per HP lost
     rew_clear: float = 50.0
     rew_death: float = 10.0
+    # Domain randomization (per-episode), for sim-to-real robustness (M4). Multiplicative
+    # ranges around the base values, plus additive obs noise and spawn jitter.
+    randomize: bool = False
+    dr_bullet_speed: tuple[float, float] = (0.85, 1.15)
+    dr_boss_speed: tuple[float, float] = (0.7, 1.3)
+    dr_player_speed: tuple[float, float] = (0.9, 1.1)
+    dr_fire_interval: tuple[int, int] = (-2, 2)  # additive to boss_fire_interval, clamped >= 8
+    dr_spawn_jitter: float = 0.12  # fraction of arena_size
+    dr_obs_noise: float = 0.02  # gaussian std added to the observation tensor when randomizing
 
 
 class SnakePitEnv(gym.Env):
@@ -79,10 +88,28 @@ class SnakePitEnv(gym.Env):
         c = self.cfg
         self.steps = 0
         self.shoot_timer = 0
-        self.boss_timer = c.boss_fire_interval
-        self.player_pos = np.array([c.arena_size * 0.5, c.arena_size * 0.85], np.float32)
+        # Per-episode effective dynamics (randomized for M4 robustness, else the base values).
+        rng = self._rng
+        if c.randomize:
+            self.eff_bullet_speed = c.enemy_bullet_speed * rng.uniform(*c.dr_bullet_speed)
+            self.eff_boss_speed = c.boss_speed * rng.uniform(*c.dr_boss_speed)
+            self.eff_player_speed = c.player_speed * rng.uniform(*c.dr_player_speed)
+            self.eff_fire_interval = max(8, c.boss_fire_interval + int(rng.integers(c.dr_fire_interval[0], c.dr_fire_interval[1] + 1)))
+            self.eff_obs_noise = c.dr_obs_noise
+            jit = c.dr_spawn_jitter * c.arena_size
+            px = c.arena_size * 0.5 + rng.uniform(-jit, jit)
+            bx = c.arena_size * 0.5 + rng.uniform(-jit, jit)
+        else:
+            self.eff_bullet_speed = c.enemy_bullet_speed
+            self.eff_boss_speed = c.boss_speed
+            self.eff_player_speed = c.player_speed
+            self.eff_fire_interval = c.boss_fire_interval
+            self.eff_obs_noise = 0.0
+            px = bx = c.arena_size * 0.5
+        self.boss_timer = self.eff_fire_interval
+        self.player_pos = np.array([px, c.arena_size * 0.85], np.float32)
         self.player_hp = c.player_hp_max
-        self.boss_pos = np.array([c.arena_size * 0.5, c.arena_size * 0.2], np.float32)
+        self.boss_pos = np.array([bx, c.arena_size * 0.2], np.float32)
         self.boss_hp = c.boss_hp_max
         self.enemy_bullets = np.zeros((0, 4), np.float32)
         self.player_bullets = np.zeros((0, 4), np.float32)
@@ -95,7 +122,7 @@ class SnakePitEnv(gym.Env):
 
         # Player movement.
         if move_idx > 0:
-            self.player_pos = self.player_pos + DIRS[move_idx - 1] * c.player_speed * c.dt
+            self.player_pos = self.player_pos + DIRS[move_idx - 1] * self.eff_player_speed * c.dt
             self.player_pos = np.clip(self.player_pos, 0.0, c.arena_size)
 
         # Player shooting.
@@ -109,10 +136,10 @@ class SnakePitEnv(gym.Env):
         # Boss behaviour: drift toward player, fire radial bursts.
         to_player = self.player_pos - self.boss_pos
         d = np.linalg.norm(to_player) + 1e-6
-        self.boss_pos = np.clip(self.boss_pos + (to_player / d) * c.boss_speed * c.dt, 0.0, c.arena_size)
+        self.boss_pos = np.clip(self.boss_pos + (to_player / d) * self.eff_boss_speed * c.dt, 0.0, c.arena_size)
         self.boss_timer -= 1
         if self.boss_timer <= 0:
-            self.boss_timer = c.boss_fire_interval
+            self.boss_timer = self.eff_fire_interval
             self.enemy_bullets = self._append(self.enemy_bullets, self._radial_burst())
 
         # Advance bullets.
@@ -159,7 +186,7 @@ class SnakePitEnv(gym.Env):
         c = self.cfg
         angles = np.arange(c.boss_burst, dtype=np.float32) * (2 * np.pi / c.boss_burst)
         angles += self._rng.uniform(0.0, 2 * np.pi / c.boss_burst)  # random phase
-        vel = np.stack([np.cos(angles), np.sin(angles)], axis=1).astype(np.float32) * c.enemy_bullet_speed
+        vel = np.stack([np.cos(angles), np.sin(angles)], axis=1).astype(np.float32) * self.eff_bullet_speed
         pos = np.tile(self.boss_pos, (c.boss_burst, 1)).astype(np.float32)
         return np.concatenate([pos, vel], axis=1)
 
@@ -197,7 +224,11 @@ class SnakePitEnv(gym.Env):
         )
 
     def _obs(self) -> dict[str, np.ndarray]:
-        return build_observation(self.game_state())
+        obs = build_observation(self.game_state())
+        if self.eff_obs_noise > 0.0:
+            for key in obs:
+                obs[key] = np.clip(obs[key] + self._rng.normal(0.0, self.eff_obs_noise, obs[key].shape).astype(np.float32), -1.0, 1.0)
+        return obs
 
     # --- rendering (headless rgb_array, for video logging) -----------------
 

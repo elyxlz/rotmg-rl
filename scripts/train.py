@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--boss-burst", type=int, default=12)
     p.add_argument("--boss-speed", type=float, default=0.25)
     p.add_argument("--enemy-bullet-speed", type=float, default=0.7)
+    p.add_argument("--randomize", action="store_true", help="domain randomization per episode (M4 robustness)")
     p.add_argument("--init-checkpoint", default=None, help="warm-start from this checkpoint (curriculum)")
     p.add_argument("--video-interval", type=int, default=10, help="record a rollout every N updates")
     return p.parse_args()
@@ -101,6 +102,7 @@ def main() -> None:
         boss_burst=args.boss_burst,
         boss_speed=args.boss_speed,
         enemy_bullet_speed=args.enemy_bullet_speed,
+        randomize=args.randomize,
     )
     backend = vector.Multiprocessing if args.backend == "multiprocessing" else vector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}

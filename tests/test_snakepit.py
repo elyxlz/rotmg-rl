@@ -40,6 +40,22 @@ def test_determinism_same_seed():
         assert np.array_equal(ra[0]["grid"], rb[0]["grid"])
 
 
+def test_domain_randomization_runs_and_varies():
+    # Randomized env still steps, stays in-space, and produces different effective dynamics per seed.
+    cfg = SnakePitConfig(randomize=True)
+    env = SnakePitEnv(cfg)
+    speeds = set()
+    for seed in range(5):
+        env.reset(seed=seed)
+        speeds.add(round(env.eff_bullet_speed, 4))
+        for _ in range(50):
+            obs, reward, terminated, truncated, _ = env.step(env.action_space.sample())
+            assert env.observation_space.contains(obs)
+            if terminated or truncated:
+                break
+    assert len(speeds) > 1  # randomization actually varies dynamics
+
+
 def test_boss_can_die_and_clear_is_rewarded():
     # Shrink boss HP so a focused-fire policy clears quickly; verifies the clear path + reward.
     cfg = SnakePitConfig(boss_hp_max=5.0, boss_fire_interval=10_000)  # boss barely shoots

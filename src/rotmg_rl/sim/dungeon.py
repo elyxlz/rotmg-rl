@@ -95,16 +95,17 @@ class DungeonConfig:
     minion_hp: float = 30.0
     enable_grenades: bool = True  # curriculum can disable for early stages
     enable_minions: bool = True
-    # rewards (exploration-based, no global pathfinding)
-    rew_explore: float = 0.05  # per newly-visited tile
-    rew_kill: float = 1.0  # per snake killed
-    rew_boss_dmg: float = 0.03  # dominant signal: reward engaging/damaging the boss
-    rew_reach: float = 20.0
+    # rewards (exploration-based, no global pathfinding). Scaled to PufferLib's roughly -1..1 rule:
+    # per-step signals tiny, a full clean clear totals ~1-2.5 total episode reward.
+    rew_explore: float = 0.01  # per newly-visited tile
+    rew_kill: float = 0.1  # per snake killed
+    rew_boss_dmg: float = 1.0  # dominant signal, applied normalized by boss_hp_max (full boss ~= 1.0)
+    rew_reach: float = 0.3
     rew_survive: float = 0.0  # NO reward for existing (paid the agent to flee -> cleared fell)
-    rew_damage_taken: float = 0.004  # mild, so it's not too scared to engage
-    rew_clear: float = 200.0
-    rew_death: float = 5.0  # small: don't make it terrified to engage the boss
-    rew_step: float = -0.003  # net-negative existence: must make progress (kill the boss)
+    rew_damage_taken: float = 0.5  # applied normalized by player_hp_max (full HP lost == 0.5)
+    rew_clear: float = 1.0
+    rew_death: float = 0.5  # small: don't make it terrified to engage the boss
+    rew_step: float = -0.001  # net-negative existence: must make progress (kill the boss)
 
 
 def _nearest_walkable(walkable, x, y):
@@ -268,7 +269,7 @@ class DungeonEnv(gym.Env):
             if hit.any():
                 dmg = float(self.player_bullets[hit, BDMG].sum())
                 self.boss_hp -= dmg
-                reward += dmg * c.rew_boss_dmg
+                reward += (dmg / c.boss_hp_max) * c.rew_boss_dmg
                 self.player_bullets = self.player_bullets[~hit]
         # enemy bullets vs player
         if self.enemy_bullets.shape[0]:
@@ -276,7 +277,7 @@ class DungeonEnv(gym.Env):
             if hit.any():
                 dmg = float(self.enemy_bullets[hit, BDMG].sum())
                 self.player_hp -= dmg
-                reward -= dmg * c.rew_damage_taken
+                reward -= (dmg / c.player_hp_max) * c.rew_damage_taken
                 self.enemy_bullets = self.enemy_bullets[~hit]
         return reward
 
@@ -392,7 +393,7 @@ class DungeonEnv(gym.Env):
         for g in self.grenades[detonated]:
             if np.linalg.norm(self.player_pos - g[:2]) <= g[GRAD]:
                 self.player_hp -= g[GDMG]
-                reward -= g[GDMG] * c.rew_damage_taken
+                reward -= (g[GDMG] / c.player_hp_max) * c.rew_damage_taken
                 if int(g[GSTATUS]) == 0:
                     self.confused_timer = c.confused_ticks
                 else:

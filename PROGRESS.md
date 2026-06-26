@@ -3,6 +3,25 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## PufferLib 4.0 is now PRIMARY (2026-06-26) — new obs integrated + validated (100% clears)
+
+- **Decision**: 4.0 (`--slowly` CNN) is the daily driver; 3.0 stays as fallback until 4.0 is
+  confirmed equal-or-better on the full curriculum.
+- **Brought 4.0 up to date with the new obs** `[grid(7,31,31), minimap(3,32,32), scalars(8)]` = 9807:
+  rewrote `puffer4/dungeon_encoder.py` to mirror the current CDungeonPolicy (grid CNN+2xMaxPool ->
+  1568->256; minimap CNN+2xMaxPool -> 1024->128; scalar 8->64; fuse 448->hidden, 662K-param encoder),
+  added `rew_approach` + `score`/`episodes` to the binding, and all curriculum knobs to
+  `train_dungeon4.py` (`--gamma/--gae-lambda/--vf-coef/--rew-boss-dmg/--rew-clear/--rew-death/
+  --rew-approach/--init-checkpoint/...`).
+- **VALIDATED (GPU 1, .venv4, eval_dungeon4.py true per-episode clear rate, 100 eps each)**:
+  - passive boss (hp300, spawn-in-room): **100% clear** (avg 8-step episodes).
+  - shooting boss (hp2000, shoots): **100% clear** at 6.6M steps (avg 20-step episodes).
+  Metrics flow (score/episodes/cleared/boss_hp_frac), wandb -> rotmg-dungeon, SPS ~52K.
+- **Tooling (primary)**: `box4.sh` {train(defaults --slowly)|follow|wait|status|metrics};
+  `eval_dungeon4.py` (per-episode clear); `follow_along4.py` (POV videos, flatten [grid,minimap,
+  scalars]). README + docs point at 4.0 as primary, 3.0 fallback. Fixed checkpoint-dir to absolute
+  (puffer's cwd is the clone). Native CNN encoder parked (opt-in `PUFFER_NATIVE_CNN=1`, pre-minimap).
+
 ## Fog-of-war minimap obs (2026-06-26) — fix the navigation blindness; 4.0 integration pending
 
 - **Problem**: the policy only saw a 31x31 local egocentric window, so it went BLIND while navigating

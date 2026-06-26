@@ -18,9 +18,12 @@ dev = ["pytest>=8.0"]
 # Training deps (pufferlib + torch) are heavy and CUDA-specific; installed on the GPU box.
 # Kept in an optional group so the base scaffold resolves anywhere (incl. the aarch64 dev box).
 [project.optional-dependencies]
+# PufferLib 3.x's PuffeRL kernel must be compiled against the installed torch, so the GPU-box
+# env is built via scripts/setup_box.sh (not a plain `uv sync`). Versions pinned to the working
+# combo. See scripts/setup_box.sh for the required install order.
 train = [
-    "torch>=2.4",
-    "pufferlib>=3.0",  # 3.x ships the PuffeRL trainer (2.0.x had no importable trainer)
+    "torch==2.8.0",
+    "pufferlib==3.0",  # 3.x ships the PuffeRL trainer; build with --no-build-isolation (see setup_box.sh)
 ]
 
 [build-system]

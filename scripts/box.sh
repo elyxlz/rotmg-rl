@@ -23,8 +23,10 @@ case "$cmd" in
     sleep 4
     rm -rf checkpoints/run
     mkdir -p checkpoints/run
-    PYTHONUNBUFFERED=1 setsid uv run python scripts/train_dungeon.py "$@" --wandb --data-dir checkpoints/run --save-path checkpoints/dungeon.pt </dev/null >logs/train.log 2>&1 &
-    echo "train launched pid $!"
+    group="dungeon-$(date +%Y%m%d-%H%M%S)"  # wandb group: bundles train + rollouts runs together
+    echo "$group" > logs/group.txt
+    WANDB_RUN_GROUP="$group" PYTHONUNBUFFERED=1 setsid uv run python scripts/train_dungeon.py "$@" --wandb --data-dir checkpoints/run --save-path checkpoints/dungeon.pt </dev/null >logs/train.log 2>&1 &
+    echo "train launched pid $! (group $group)"
     ;;
   follow)
     pkill -9 -f scripts/follow_along.py 2>/dev/null
@@ -35,8 +37,9 @@ case "$cmd" in
       [ -n "$rid" ] && break
       sleep 2
     done
-    PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --run-id "$rid" --interval 180 </dev/null >logs/follow.log 2>&1 &
-    echo "follow launched pid $! (resuming run $rid)"
+    group=$(cat logs/group.txt 2>/dev/null || echo "")  # same group as the training run -> bundled in wandb
+    WANDB_RUN_GROUP="$group" PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --run-id "$rid" --interval 180 </dev/null >logs/follow.log 2>&1 &
+    echo "follow launched pid $! (group $group, run $rid)"
     ;;
   status)
     echo "procs: train=$(pgrep -cf scripts/train_dungeon.py) follow=$(pgrep -cf scripts/follow_along.py)  load:$(uptime | grep -oE 'average.*')"

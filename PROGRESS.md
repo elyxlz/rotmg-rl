@@ -3,6 +3,26 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## FULL DUNGEON >=80% — deliverable MET (2026-06-27): entrance + all threats + 7500 boss = 81%
+
+- **`full_dungeon_best.pt` (= `full_boss_best.pt`) clears the FULL deliverable config 81%** (81/100
+  stochastic eps via `eval_dungeon.py`): entrance spawn + 40 snakes + grenades + minions + 7500-HP
+  shooting boss, boss_hp_frac at end 0.085 (killed), ~1311 steps/ep. The >=80% target is met. NO
+  in-room cheat — the policy navigates from the entrance and kills the boss with only local vision +
+  fog-of-war minimap.
+- **How (the warm-start chain)**: stage_7500a (in-room fight, 96% w/ threats) -> nav3 (add the
+  `rew_approach` distance shaping + entrance spawn, no threats: 100%) -> **nav4** (warm nav3, add
+  ALL threats, 85% entrance, ent 0.004, rew_approach 0.02, 100M C-env steps: **81% full config**).
+  The "all threats at once" jump worked once navigation was already a learned skill; the per-step
+  `environment/cleared` (~0.0006) looked near-zero but is a RATE over ~1300-step eps (×1311 ≈ 0.8) —
+  the eval is the only honest clear-rate read.
+- **Eval ladder (all via eval_dungeon, true per-episode rate)**: in-room/no-threat 100%, in-room/all-
+  threats 96%, entrance/no-threat 100%, **entrance/all-threats 81%** (deliverable).
+- **New curriculum lever**: `spawn_in_room_radius` (configurable in-room spawn ring distance, default
+  6 = parity-identical) for a navigate-under-threats distance ramp; `pov_rollout.py` records honest
+  policy-driven POV mp4s. nav5 (polish: warm nav4 + mid-radius-55 under-threats practice, ent 0.003)
+  is training to widen the margin above 80%.
+
 ## Navigation CRACKED via distance shaping (2026-06-26) — full fight solved; threats stage in flight
 
 - **Reframed the goal with the new eval suite** (`scripts/eval_dungeon.py`, true per-episode clear

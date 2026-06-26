@@ -79,6 +79,17 @@ rendered .mp4 of a full run, plus a live completion on the server.
 - REMAINING M1: faithful layers (grenades+Confused/Petrify, minions) + game-faithful renderer
   (real sprites). Then M2 PuffeRL training on this env.
 
+### 2026-06-26 — M2 integration WORKS: DungeonEnv trains on PuffeRL
+- `scripts/train_dungeon.py`: wires DungeonEnv into the LATEST PufferLib (PuffeRL) via
+  GymnasiumPufferEnv + pufferlib.vector + default MLP-LSTM policy (ocean.torch.Policy+Recurrent).
+  `pufferl.train(name, args=cfg, vecenv, policy)`. Fix: clear sys.argv before load_config (it
+  parses argv). Smoke ran: trainer dashboard live, custom info metrics (cleared/in_room/steps)
+  logged by PuffeRL. The user's "use latest PufferLib" requirement is satisfied end to end.
+- Random policy doesn't navigate yet (in_room=0, just wanders) -> needs (a) a CNN-LSTM policy to
+  exploit the 6x15x15 spatial grid (the default MLP flattens it), and (b) real training time.
+- NEXT M2: custom CNN-LSTM policy for PuffeRL + a real training run; verify navigation->fight->
+  completion learns. Then M1 faithfulness layers + renderer for the deliverable mp4.
+
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |

@@ -13,7 +13,7 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 | M3 | Sim milestone: clear simulated Snake Pit >=90% (eval >=200 eps) | DONE (0.920 stochastic, 300 eps) |
 | M4 | Robustness milestone: >=90% across full domain-randomization range | PARTIAL (DR robustness gained; full-boss-DR-0.90 impractical) |
 | M5 | Deploy adapters (NR-CORE server + protocol reader + input injector + gap harness) | not started |
-| M6 | Real milestone: clear a real Snake Pit on the private server (DONE) | not started |
+| M6 | Real milestone: clear a real Snake Pit on the private server (DONE) | BLOCKED (external assets + protocol matching) |
 
 ## Log
 
@@ -175,7 +175,19 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   3. Gap-measurement harness: real Snake Pit (Stheno's true patterns) almost certainly differs
      from this sim's radial-burst approx -> measure, then fix sim + retrain (the planned loop).
 
-### Recipe queue (add only if a later milestone plateaus)
+### 2026-06-26 — M6 BLOCKED on external assets + protocol matching (needs user)
+- Box can install the stack (nvm Node ok, Docker ok, no sudo). Cloned nrelay + NR-CORE.
+- Hard blockers for a live real-game clear:
+  1. NR-CORE targets .NET Framework 4.6 (Mono on Linux) + Redis; HAS a Dockerfile.
+  2. NR-CORE ships NO assets/resources and NO behaviors (boss AI) -- both removed from the repo,
+     must be downloaded from an account-gated forum (nillysrealm.com). The boss behaviors are
+     exactly Stheno's patterns needed for a real gap measurement.
+  3. Protocol mismatch: NR-CORE pairs with client NR-27.7.X13; nrelay 8.9.0 uses @realmlib/net
+     3.3.3 (older). Bridging likely needs protocol reverse-engineering.
+- Most tractable alternative that still serves the design's "measure gap on real data":
+  RECORDED real packet captures (RealmShark) -> run the gap-measurement harness offline, no
+  live server needed. Requires the user to supply captures (or a working server target).
+- Paused for a user decision on how to proceed (see options presented).
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

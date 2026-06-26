@@ -92,6 +92,10 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "player_hp_frac", log->player_hp_frac);
     assign_to_dict(dict, "reward", log->reward);
     assign_to_dict(dict, "perf", log->perf);
+    /* score/episodes are per-episode sums (both already divided by n); their ratio is the
+     * per-episode mean end-of-episode score -- the metric the Protein sweep maximizes. */
+    assign_to_dict(dict, "score", log->episodes > 0.0f ? log->score / log->episodes : 0.0f);
+    assign_to_dict(dict, "episodes", log->episodes);
     return 0;
 }
 

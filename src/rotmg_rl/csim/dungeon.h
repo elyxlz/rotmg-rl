@@ -51,7 +51,14 @@ typedef struct {
     float snakes;         /* alive snake count, summed per step */
     float player_hp_frac; /* player_hp/player_hp_max, summed per step */
     float reward;         /* step reward, summed per step */
-    float perf;           /* headline 0-1 metric: per-step clear rate */
+    float perf;           /* per-step clear rate */
+    /* Per-EPISODE accumulators (added once at episode end, NOT per step). The sweep maximizes
+     * `score`: a dense end-of-episode result independent of the tunable reward scale (the guide:
+     * "log a score, not raw reward"). score = 1.0 if cleared else (1 - boss_hp_frac_at_end). Both
+     * fields are summed then divided by n (step count) in vec_log, so my_log recovers the
+     * per-episode mean as score/episodes (the n divisor cancels in the ratio). */
+    float score;          /* sum of per-episode end-state scores */
+    float episodes;       /* count of episodes ended (terminated or truncated) */
     float n;              /* step count (required as the last field) */
 } Log;
 
@@ -754,6 +761,13 @@ static void c_step(Dungeon* env) {
     env->log.reward += (float)reward;
     env->log.perf += cleared ? 1.0f : 0.0f;
     env->log.n += 1.0f;
+
+    /* Per-episode score, recorded once at the episode boundary (before c_reset wipes boss_hp). */
+    if (terminated || truncated) {
+        float bhf_end = (env->boss_hp > 0.0 ? (float)env->boss_hp : 0.0f) / c->boss_hp_max;
+        env->log.score += cleared ? 1.0f : (1.0f - bhf_end);
+        env->log.episodes += 1.0f;
+    }
 
     compute_obs(env);
 

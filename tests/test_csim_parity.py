@@ -100,6 +100,8 @@ def _run(cfg: DungeonConfig, seed: int, actions: np.ndarray, inject: dict | None
         assert abs(o_info["boss_hp_frac"] - c_bhf) <= 2e-3, f"step {t}: boss_hp_frac oracle={o_info['boss_hp_frac']:.5f} c={c_bhf:.5f}"
         assert float(o_info["in_room"]) == g["fight_active"], f"step {t}: in_room oracle={o_info['in_room']} c={g['fight_active']}"
         assert not o_info["cleared"], f"step {t}: oracle cleared True on a non-terminal step"
+        # score parity: on a non-terminal (never-cleared) step score == 1 - boss_hp_frac in both sims.
+        assert abs(o_info["score"] - (1.0 - c_bhf)) <= 2e-3, f"step {t}: score oracle={o_info['score']:.5f} c={1.0 - c_bhf:.5f}"
         compared += 1
     return compared, oracle, c
 
@@ -211,6 +213,50 @@ def test_metrics_cleared_is_a_per_step_rate():
     assert log is not None
     assert 0.0 < log["cleared"] < 0.3, log  # per-step clear rate is small (not the per-episode ~1.0)
     assert log["boss_hp_frac"] > 0.3, log  # boss healthy most steps (not 0)
+
+
+def test_score_metric_per_episode():
+    """The `score` log key is the per-EPISODE mean end-of-episode score (1 if cleared else damage
+    fraction), NOT a per-step mean. With a passive boss, huge player HP, noop actions and a short
+    max_steps, every episode truncates with the boss at full HP -> per-episode score == 0 (the boss
+    took no damage), and episodes > 0 (truncations are counted)."""
+    from rotmg_rl.csim.dungeon import CDungeon
+
+    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0, max_steps=20)
+    env = CDungeon(cfg, num_envs=64, seed=1, log_interval=200)
+    env.reset(seed=1)
+    noop = np.zeros((64, 4), np.int32)
+    log = None
+    for _ in range(200):
+        *_, info = env.step(noop)
+        if info:
+            log = info[0]
+    env.close()
+    assert log is not None
+    assert log["episodes"] > 0.0, log  # episodes (truncations) were counted
+    assert log["score"] < 0.01, log  # boss never damaged -> end-of-episode score ~0 (bug: per-step dilute)
+
+
+def test_score_metric_clears_reach_one():
+    """When the boss dies fast (tiny HP, player shooting toward it), episodes clear and the
+    per-episode `score` approaches 1.0 -- distinct from the per-step `cleared` rate."""
+    from rotmg_rl.csim.dungeon import CDungeon
+
+    cfg = DungeonConfig(boss_hp_max=20.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0)
+    env = CDungeon(cfg, num_envs=128, seed=0, log_interval=300)
+    env.reset(seed=0)
+    a = np.zeros((128, 4), np.int32)
+    a[:, 1] = 16  # aim
+    a[:, 2] = 1  # always shoot -> the boss in the room dies quickly
+    log = None
+    for _ in range(300):
+        *_, info = env.step(a)
+        if info:
+            log = info[0]
+    env.close()
+    assert log is not None
+    assert log["episodes"] > 0.0, log
+    assert log["score"] > 0.8, log  # most episodes clear -> per-episode score near 1
 
 
 def test_full_config_runs_via_wrapper():

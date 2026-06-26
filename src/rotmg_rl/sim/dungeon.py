@@ -247,7 +247,11 @@ class DungeonEnv(gym.Env):
             terminated = True
             reward -= c.rew_death
         truncated = (not terminated) and self.steps >= c.max_steps
-        info = {"cleared": cleared, "in_room": float(self.fight_active), "snakes": int((self.snakes[:, EHP] > 0).sum()), "boss_hp_frac": max(self.boss_hp, 0) / c.boss_hp_max, "steps": self.steps}
+        boss_hp_frac = max(self.boss_hp, 0) / c.boss_hp_max
+        # Dense end-of-episode score, scale-independent of the tunable reward (the sweep maximizes it):
+        # at episode end this is 1.0 on a clear, else the damage fraction dealt (1 - boss HP left).
+        score = 1.0 if cleared else (1.0 - boss_hp_frac)
+        info = {"cleared": cleared, "in_room": float(self.fight_active), "snakes": int((self.snakes[:, EHP] > 0).sum()), "boss_hp_frac": boss_hp_frac, "score": score, "steps": self.steps}
         return self._obs(), float(reward), terminated, truncated, info
 
     def _resolve_collisions(self) -> float:

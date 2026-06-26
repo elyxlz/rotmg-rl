@@ -112,6 +112,11 @@ class DungeonConfig:
     rew_clear: float = 1.0
     rew_death: float = 0.5  # small: don't make it terrified to engage the boss
     rew_step: float = -0.001  # net-negative existence: must make progress (kill the boss)
+    # potential-based distance-to-boss shaping (privileged TRAINING signal, not in the obs): while
+    # navigating (pre-fight), reward closing euclidean distance to the boss. Default 0 = off (the
+    # explore reward alone never finds the boss across the ~107-tile fixed map). Turn on for the
+    # navigation curriculum; the deployed policy uses no reward, only the fog-of-war minimap.
+    rew_approach: float = 0.0
 
 
 def _nearest_walkable(walkable, x, y):
@@ -169,6 +174,7 @@ class DungeonEnv(gym.Env):
         self.staff_timer = 0
         self.spell_timer = 0
         self.boss_pos = np.array([self.boss_xy[0] + 0.5, self.boss_xy[1] + 0.5], np.float32)
+        self._prev_boss_dist = float(np.linalg.norm(self.player_pos - self.boss_pos))  # distance-shaping baseline
         self.boss_hp = c.boss_hp_max
         self.phase = 0
         self.fight_active = False
@@ -233,6 +239,11 @@ class DungeonEnv(gym.Env):
             self._cast_spell(aim)
             self.player_mp -= c.spell_cost
             self.spell_timer = c.spell_cooldown
+
+        if not self.fight_active and c.rew_approach != 0.0:  # dense gradient toward the boss while navigating
+            cur_boss_dist = float(np.linalg.norm(self.player_pos - self.boss_pos))
+            reward += c.rew_approach * (self._prev_boss_dist - cur_boss_dist)
+            self._prev_boss_dist = cur_boss_dist
 
         if not self.fight_active and np.linalg.norm(self.player_pos - self.boss_pos) <= c.activation_range:
             self.fight_active = True

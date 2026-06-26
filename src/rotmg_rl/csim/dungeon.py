@@ -87,6 +87,7 @@ def config_to_kwargs(cfg: DungeonConfig) -> dict:
         rew_clear=cfg.rew_clear,
         rew_death=cfg.rew_death,
         rew_step=cfg.rew_step,
+        rew_approach=cfg.rew_approach,
     )
 
 

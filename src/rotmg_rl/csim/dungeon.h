@@ -113,6 +113,7 @@ typedef struct {
     int enable_grenades, enable_minions;
     float rew_explore, rew_kill, rew_boss_dmg, rew_reach, rew_survive;
     float rew_damage_taken, rew_clear, rew_death, rew_step;
+    float rew_approach; /* potential-based distance-to-boss shaping (0 = off) */
 } Config;
 
 typedef struct {
@@ -158,6 +159,7 @@ typedef struct {
     unsigned char discovered[MAP_H * MAP_W]; /* fog-of-war: tiles ever within VIS_RADIUS of the player */
     float mm_terr[MM * MM]; /* minimap terrain pool, accumulated as tiles are discovered (+1/-1/0) */
     int boss_seen;          /* boss has been within vision at least once */
+    double prev_boss_dist;  /* distance-shaping baseline: player->boss distance last step */
     int steps;
     uint64_t rng_state; /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
@@ -710,6 +712,7 @@ static void c_reset(Dungeon* env) {
     env->spell_timer = 0;
     env->boss_x = bx + 0.5;
     env->boss_y = by + 0.5;
+    env->prev_boss_dist = dist_df(env->boss_x, env->boss_y, env->px, env->py);
     env->boss_hp = c->boss_hp_max;
     env->phase = 0;
     env->fight_active = 0;
@@ -769,6 +772,12 @@ static void c_step(Dungeon* env) {
         cast_spell(env, aimx, aimy);
         env->player_mp -= c->spell_cost;
         env->spell_timer = c->spell_cooldown;
+    }
+
+    if (!env->fight_active && c->rew_approach != 0.0f) {  /* dense gradient toward the boss while navigating */
+        double cur_boss_dist = dist_df(env->boss_x, env->boss_y, env->px, env->py);
+        reward += c->rew_approach * (env->prev_boss_dist - cur_boss_dist);
+        env->prev_boss_dist = cur_boss_dist;
     }
 
     if (!env->fight_active && dist_df(env->boss_x, env->boss_y, env->px, env->py) <= c->activation_range) {

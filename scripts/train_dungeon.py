@@ -37,6 +37,7 @@ def main() -> None:
     p.add_argument("--rew-clear", type=float, default=None, help="reward for finishing the kill (default 1.0)")
     p.add_argument("--rew-death", type=float, default=None, help="death penalty (default 0.5)")
     p.add_argument("--rew-boss-dmg", type=float, default=None, help="boss-damage reward scale (default 1.0)")
+    p.add_argument("--rew-approach", type=float, default=None, help="distance-to-boss shaping (default 0/off); turn on (~0.02) for navigation")
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
     p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
     p.add_argument("--random-spawn-prob", type=float, default=0.0)
@@ -82,7 +83,7 @@ def main() -> None:
     print(f"CONFIG lr={t['learning_rate']} batch={t['batch_size']} minibatch={t['minibatch_size']} bptt={t['bptt_horizon']} ent_coef={t['ent_coef']} gamma={t['gamma']} gae_lambda={t['gae_lambda']} vf_coef={t['vf_coef']}", flush=True)
     backend = pvector.Multiprocessing if args.backend == "multiprocessing" else pvector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}
-    rew_overrides = {k: v for k, v in (("rew_clear", args.rew_clear), ("rew_death", args.rew_death), ("rew_boss_dmg", args.rew_boss_dmg)) if v is not None}
+    rew_overrides = {k: v for k, v in (("rew_clear", args.rew_clear), ("rew_death", args.rew_death), ("rew_boss_dmg", args.rew_boss_dmg), ("rew_approach", args.rew_approach)) if v is not None}
     env_cfg = DungeonConfig(
         spawn_in_room_prob=args.spawn_in_room_prob,
         random_spawn_prob=args.random_spawn_prob,

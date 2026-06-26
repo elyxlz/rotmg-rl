@@ -126,6 +126,16 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   stochastic clear >=0.90.
 - (Gentler DR ranges retained: obs noise 0.005, bullet x[0.9,1.1], boss x[0.85,1.15], fire +-1.)
 
+### 2026-06-26 — DR curriculum + sustained finish for M4
+- DR-from-scratch curriculum held high through the ramp: chunks 1-5 (hp50-150) all >=0.95
+  stochastic UNDER DR (no collapse). hp175 needed 1 retry (0.487 -> 0.880). hp200 plateaued
+  under chunked retries (0.367, 0.340) — same LR-restart inefficiency as the M3 full-boss
+  plateau, arriving earlier because DR is harder.
+- Finishing the same way M3's plateau was broken: sustained single-schedule run at the full
+  boss WITH DR (`m4-dr-final`, 50M steps, LR 1e-4) warm-started from the robust hp175 DR base
+  (curr-dr-c07, 0.88). No fixed->DR collapse risk since the base is already DR-trained.
+  Chained DR stochastic eval (300 eps) = M4 gate (>=0.90).
+
 ### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.

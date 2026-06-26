@@ -54,12 +54,12 @@ class SnakePitConfig:
     # Domain randomization (per-episode), for sim-to-real robustness (M4). Multiplicative
     # ranges around the base values, plus additive obs noise and spawn jitter.
     randomize: bool = False
-    dr_bullet_speed: tuple[float, float] = (0.85, 1.15)
-    dr_boss_speed: tuple[float, float] = (0.7, 1.3)
-    dr_player_speed: tuple[float, float] = (0.9, 1.1)
-    dr_fire_interval: tuple[int, int] = (-2, 2)  # additive to boss_fire_interval, clamped >= 8
-    dr_spawn_jitter: float = 0.12  # fraction of arena_size
-    dr_obs_noise: float = 0.02  # gaussian std added to the observation tensor when randomizing
+    dr_bullet_speed: tuple[float, float] = (0.9, 1.1)
+    dr_boss_speed: tuple[float, float] = (0.85, 1.15)
+    dr_player_speed: tuple[float, float] = (0.92, 1.08)
+    dr_fire_interval: tuple[int, int] = (-1, 1)  # additive to boss_fire_interval, clamped >= 8
+    dr_spawn_jitter: float = 0.08  # fraction of arena_size
+    dr_obs_noise: float = 0.005  # gaussian std added to the observation tensor when randomizing
 
 
 class SnakePitEnv(gym.Env):

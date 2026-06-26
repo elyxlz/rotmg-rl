@@ -24,12 +24,11 @@ def main() -> None:
     a = sys.argv[1:]
     runs = list(api.runs(PROJECT, order="-created_at"))
     if a and a[0] == "--cleanup":
-        keep = runs[0].group if runs else None
+        # SAFE: only delete CRASHED runs (never running/finished); preserves real history
         for r in runs:
-            if r.group != keep:
-                print(f"delete {r.name} ({r.id}, {r.state}, group={r.group})")
+            if r.state == "crashed":
+                print(f"delete crashed {r.name} ({r.id}, group={r.group})")
                 r.delete()
-        print(f"kept group {keep}")
         return
 
     target = api.run(f"{PROJECT}/{a[0]}") if a else runs[0]

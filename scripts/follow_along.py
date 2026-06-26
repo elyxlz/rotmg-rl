@@ -75,7 +75,7 @@ def main() -> None:
     if args.wandb:
         # a dedicated run named for the training run (resuming the live run drops media on step conflicts)
         name = f"rollouts-{args.run_id}" if args.run_id else "rollouts"
-        wandb.init(project="rotmg-dungeon", name=name, job_type="eval")
+        wandb.init(project="rotmg-dungeon", name=name, job_type="eval", group=os.environ.get("WANDB_RUN_GROUP"))
     pathlib.Path("videos").mkdir(exist_ok=True)
     # show the fight (where the action is): spawn in the boss room
     cfg = DungeonConfig(boss_hp_max=args.boss_hp, spawn_in_room_prob=1.0)

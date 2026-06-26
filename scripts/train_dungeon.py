@@ -9,6 +9,7 @@ default MLP+LSTM policy. Cold-start, no demos. Logs offline by default (no wandb
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from functools import partial
 
@@ -58,6 +59,7 @@ def main() -> None:
     t["checkpoint_interval"] = 20  # save often so follow_along renders fresh policies
     cfg["wandb"] = args.wandb
     cfg["wandb_project"] = "rotmg-dungeon"
+    cfg["wandb_group"] = os.environ.get("WANDB_RUN_GROUP") or "dungeon"  # PuffeRL reads this, not the env var
     cfg["neptune"] = False
     cfg["env_name"] = "rotmg_dungeon"
 

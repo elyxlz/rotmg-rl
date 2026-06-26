@@ -22,6 +22,10 @@ class DungeonPolicy(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         assert isinstance(env.single_action_space, pufferlib.spaces.MultiDiscrete)
+        # flags the PufferLib LSTM wrapper / action sampler reads
+        self.is_multidiscrete = True
+        self.is_continuous = False
+        self.is_dict_obs = True
         self.action_nvec = tuple(env.single_action_space.nvec)
         self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
         self.cnn = nn.Sequential(

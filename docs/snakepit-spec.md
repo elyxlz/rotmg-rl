@@ -80,6 +80,22 @@ that makes the 7500-HP boss killable). Real stats from betterSkillys resources:
 4. Player status effects: Confused (reversed move), Petrify (no move), timers.
 5. A simple DEBUG renderer (shapes/colors, not faithful) to follow the policy visually.
 
+## FAITHFUL REDESIGN (user feedback: the arcade sim is NOT faithful)
+The first sim cheated. Real game constraints to honor:
+1. **Local viewport only.** The real client shows a small window around the character (~radius
+   10-15 tiles). REMOVE the global geodesic field and the global direction-to-boss from the
+   observation/reward. The agent sees only local surroundings and must EXPLORE.
+2. **Exploration-based progression**, not path-to-known-boss. Reward = visiting NEW tiles +
+   killing enemies + finding/damaging the boss + clearing. No global pathfinding breadcrumb.
+3. **Fight through rooms.** The dungeon is full of snakes that shoot you; you fight/dodge
+   through. Enemy stats: Pit Snake/Pit Viper HP 5, proj Speed 60; Fire Python HP 200, Speed 80,
+   life 2000ms. Snakes: Wander + Shoot(~1s). Spawn them through the walkable rooms/corridors.
+4. **Continuous mouse-aim.** Staff and Spell fire toward the MOUSE direction (continuous), not 8
+   discrete dirs. Action -> continuous Box [move_x, move_y, aim_x, aim_y, shoot, cast], which
+   also maps cleanly to driving the real client (WASD + cursor + click + spell key).
+This makes the RL problem much harder (explore + fight with local vision only) but it is the
+real game. Policy must become continuous (Box action). Viewport ~21x21 (radius 10).
+
 ## Sim modeling plan (M1)
 Model phases as an HP-gated state machine; aimed/rotating spreads; grenades as telegraphed AoE
 circles applying Confused/Petrify; Stheno Swarm minions; Wander. Whole dungeon = navigate the

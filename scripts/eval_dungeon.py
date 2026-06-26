@@ -25,8 +25,8 @@ def flatten(obs) -> np.ndarray:  # matches the C obs layout: [grid, minimap, sca
 
 
 @torch.no_grad()
-def run_episode(policy, cfg, device, seed, max_steps):
-    env = DungeonEnv(cfg)
+def run_episode(policy, cfg, device, seed, max_steps, frames=None):
+    env = DungeonEnv(cfg, render_mode="rgb_array" if frames is not None else None)
     obs, _ = env.reset(seed=seed)
     state = {"lstm_h": None, "lstm_c": None, "hidden": None}
     for t in range(max_steps):
@@ -34,6 +34,8 @@ def run_episode(policy, cfg, device, seed, max_steps):
         logits, _ = policy.forward_eval(x, state)
         action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
         obs, _, term, trunc, info = env.step(action)
+        if frames is not None:
+            frames.append(env.render())
         if term or trunc:
             return bool(info["cleared"]), t + 1, float(env.boss_hp / cfg.boss_hp_max)
     return False, max_steps, float(env.boss_hp / cfg.boss_hp_max)
@@ -52,6 +54,8 @@ def main() -> None:
     p.add_argument("--no-boss-shoots", action="store_true")
     p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
     p.add_argument("--random-spawn-prob", type=float, default=0.0)
+    p.add_argument("--render", default=None, help="also save an mp4 of one rollout to this path")
+    p.add_argument("--fps", type=int, default=15)
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -87,6 +91,14 @@ def main() -> None:
     print(f"  avg episode length: {np.mean(lengths):.0f} steps")
     print(f"  avg boss_hp_frac at end: {np.mean(hp_left):.3f}  (cleared eps end at 0)")
     print(f"  >=80% deliverable: {'MET' if rate >= 0.8 else 'not met'}")
+
+    if args.render:
+        import imageio.v2 as imageio
+
+        frames = []
+        c, n, _ = run_episode(policy, cfg, device, seed=99999, max_steps=cfg.max_steps, frames=frames)
+        imageio.mimsave(args.render, frames, fps=args.fps)
+        print(f"  saved render -> {args.render} ({len(frames)} frames, cleared={c})")
 
 
 if __name__ == "__main__":

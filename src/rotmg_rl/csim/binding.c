@@ -77,6 +77,8 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     c->rew_clear = unpack(kwargs, "rew_clear");
     c->rew_death = unpack(kwargs, "rew_death");
     c->rew_step = unpack(kwargs, "rew_step");
+    env->rng_state = (uint64_t)(long)unpack(kwargs, "seed") * 2654435761ULL + 0x9E3779B97F4A7C15ULL;
+    if (env->rng_state == 0) env->rng_state = 1;
     return 0;
 }
 

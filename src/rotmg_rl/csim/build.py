@@ -28,7 +28,12 @@ def main() -> None:
 
     cmd = [
         "cc",
-        "-O2",
+        "-O3",
+        "-march=native",
+        "-funroll-loops",
+        "-fopenmp",  # parallelize the per-env step loop across cores (vec_step)
+        "-ffp-contract=off",  # no FMA contraction -> float results stay bit-faithful to the numpy oracle
+        "-fno-math-errno",
         "-fPIC",
         "-shared",
         "-fwrapv",

@@ -517,6 +517,11 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
         return NULL;
     }
 
+    /* rotmg-rl: parallelize the per-env step loop across cores (envs are independent; each owns
+     * its own RNG state, so this is data-race free). Falls back to serial without -fopenmp. */
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static)
+#endif
     for (int i = 0; i < vec->num_envs; i++) {
         c_step(vec->envs[i]);
     }

@@ -10,6 +10,7 @@
 #define ROTMG_DUNGEON_H
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -126,20 +127,49 @@ typedef struct {
     unsigned char visited[MAP_H * MAP_W];
     int steps;
     double ep_return;
-
-    /* precomputed walkable tile list (for random/snake spawn) */
-    int* walk_x;
-    int* walk_y;
-    int n_walk;
-    float move_dx[N_MOVE], move_dy[N_MOVE];
-    float aim_dx[N_AIM], aim_dy[N_AIM];
-    int initialized;
+    uint64_t rng_state; /* per-env RNG: thread-safe under OpenMP, independent per env */
+    int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
 } Dungeon;
+
+/* Shared, read-only after init: the map-derived tables are identical for every env, so we build
+ * them once globally instead of per-env (less memory bandwidth, better cache, no per-env malloc). */
+static int g_init = 0;
+static int g_n_walk = 0;
+static int g_walk_x[MAP_H * MAP_W];
+static int g_walk_y[MAP_H * MAP_W];
+static float g_move_dx[N_MOVE], g_move_dy[N_MOVE];
+static float g_aim_dx[N_AIM], g_aim_dy[N_AIM];
+
+static void init_globals(void) {
+    if (g_init) return;
+    for (int i = 0; i < N_MOVE; i++) {
+        g_move_dx[i] = (float)cos(i * M_PI / 4.0);
+        g_move_dy[i] = (float)sin(i * M_PI / 4.0);
+    }
+    for (int i = 0; i < N_AIM; i++) {
+        g_aim_dx[i] = (float)cos(i * 2.0 * M_PI / N_AIM);
+        g_aim_dy[i] = (float)sin(i * 2.0 * M_PI / N_AIM);
+    }
+    int k = 0;
+    for (int y = 0; y < MAP_H; y++)
+        for (int x = 0; x < MAP_W; x++)
+            if (MAP_WALKABLE[y * MAP_W + x]) {
+                g_walk_x[k] = x;
+                g_walk_y[k] = y;
+                k++;
+            }
+    g_n_walk = k;
+    g_init = 1;
+}
 
 /* --- helpers --- */
 
-static inline float frand(void) { return (float)rand() / (float)RAND_MAX; }
-static inline float uniform_f(float lo, float hi) { return lo + (hi - lo) * frand(); }
+static inline uint32_t rng_next(Dungeon* env) {
+    env->rng_state = env->rng_state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return (uint32_t)(env->rng_state >> 32);
+}
+static inline float frand(Dungeon* env) { return (float)(rng_next(env) >> 8) / (float)(1 << 24); }
+static inline float uniform_f(Dungeon* env, float lo, float hi) { return lo + (hi - lo) * frand(env); }
 
 static inline int walkable_at(float fx, float fy) {
     int x = (int)fx, y = (int)fy;
@@ -157,34 +187,8 @@ static double dist_df(double ax, double ay, float bx, float by) {
     return sqrt(dx * dx + dy * dy);
 }
 
-static void init_static(Dungeon* env) {
-    if (env->initialized) return;
-    for (int i = 0; i < N_MOVE; i++) {
-        env->move_dx[i] = (float)cos(i * M_PI / 4.0);
-        env->move_dy[i] = (float)sin(i * M_PI / 4.0);
-    }
-    for (int i = 0; i < N_AIM; i++) {
-        env->aim_dx[i] = (float)cos(i * 2.0 * M_PI / N_AIM);
-        env->aim_dy[i] = (float)sin(i * 2.0 * M_PI / N_AIM);
-    }
-    int total = 0;
-    for (int i = 0; i < MAP_H * MAP_W; i++) total += MAP_WALKABLE[i] != 0;
-    env->walk_x = (int*)malloc(sizeof(int) * total);
-    env->walk_y = (int*)malloc(sizeof(int) * total);
-    int k = 0;
-    for (int y = 0; y < MAP_H; y++)
-        for (int x = 0; x < MAP_W; x++)
-            if (MAP_WALKABLE[y * MAP_W + x]) {
-                env->walk_x[k] = x;
-                env->walk_y[k] = y;
-                k++;
-            }
-    env->n_walk = total;
-    env->initialized = 1;
-}
-
 /* nearest walkable tile to (x,y), matching _nearest_walkable */
-static void nearest_walkable(Dungeon* env, int x, int y, int* ox, int* oy) {
+static void nearest_walkable(int x, int y, int* ox, int* oy) {
     if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H && MAP_WALKABLE[y * MAP_W + x]) {
         *ox = x;
         *oy = y;
@@ -192,16 +196,16 @@ static void nearest_walkable(Dungeon* env, int x, int y, int* ox, int* oy) {
     }
     long best = -1;
     int bi = 0;
-    for (int i = 0; i < env->n_walk; i++) {
-        long dx = env->walk_x[i] - x, dy = env->walk_y[i] - y;
+    for (int i = 0; i < g_n_walk; i++) {
+        long dx = g_walk_x[i] - x, dy = g_walk_y[i] - y;
         long d = dx * dx + dy * dy;
         if (best < 0 || d < best) {
             best = d;
             bi = i;
         }
     }
-    *ox = env->walk_x[bi];
-    *oy = env->walk_y[bi];
+    *ox = g_walk_x[bi];
+    *oy = g_walk_y[bi];
 }
 
 static void append_bullet(Bullet* arr, int* n, int cap, int max_keep, Bullet b) {
@@ -319,7 +323,7 @@ static void fire_staff(Dungeon* env, float dx, float dy) {
     for (int i = 0; i < c->staff_num; i++) {
         float k = (float)i - (c->staff_num - 1) / 2.0f;
         Bullet b = {env->px + perpx * k, env->py + perpy * k, vx, vy, (float)c->staff_life,
-                    uniform_f(c->staff_dmg_lo, c->staff_dmg_hi)};
+                    uniform_f(env, c->staff_dmg_lo, c->staff_dmg_hi)};
         append_bullet(env->pbul, &env->n_pbul, MAX_PBULLETS, c->max_bullets, b);
     }
 }
@@ -333,7 +337,7 @@ static void cast_spell(Dungeon* env, float dx, float dy) {
         double t = (n == 1) ? 0.0 : (-half_arc + (2.0 * half_arc) * i / (n - 1));
         double a = base + t;
         Bullet b = {env->px, env->py, (float)cos(a) * c->spell_speed, (float)sin(a) * c->spell_speed,
-                    (float)c->spell_life, uniform_f(c->spell_dmg_lo, c->spell_dmg_hi)};
+                    (float)c->spell_life, uniform_f(env, c->spell_dmg_lo, c->spell_dmg_hi)};
         append_bullet(env->pbul, &env->n_pbul, MAX_PBULLETS, c->max_bullets, b);
     }
 }
@@ -401,7 +405,7 @@ static void spawn_minions(Dungeon* env) {
     if (count_alive_snakes(env) >= c->n_snakes + c->minion_max) return;
     for (int i = 0; i < c->minion_max; i++) {
         if (env->n_snake >= MAX_SNAKES) break;
-        double ang = uniform_f(0.0f, (float)(2.0 * M_PI));
+        double ang = uniform_f(env, 0.0f, (float)(2.0 * M_PI));
         Snake s = {(float)(env->boss_x + cos(ang) * 3.0), (float)(env->boss_y + sin(ang) * 3.0), c->minion_hp, 0.0f};
         env->snakes[env->n_snake++] = s;
     }
@@ -471,9 +475,9 @@ static double grenades_tick(Dungeon* env) {
 
 /* --- snakes --- */
 
-static float randn(void) {
+static float randn(Dungeon* env) {
     /* Box-Muller; training-only randomness, not parity-matched */
-    float u1 = frand(), u2 = frand();
+    float u1 = frand(env), u2 = frand(env);
     if (u1 < 1e-7f) u1 = 1e-7f;
     return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
 }
@@ -482,7 +486,7 @@ static void snakes_tick(Dungeon* env) {
     Config* c = &env->cfg;
     for (int i = 0; i < env->n_snake; i++) {
         if (env->snakes[i].hp <= 0.0f) continue;
-        float ddx = randn() * c->snake_speed, ddy = randn() * c->snake_speed;
+        float ddx = randn(env) * c->snake_speed, ddy = randn(env) * c->snake_speed;
         float cx = env->snakes[i].x + ddx, cy = env->snakes[i].y + ddy;
         if (walkable_at(cx, cy)) {
             env->snakes[i].x = cx;
@@ -504,14 +508,14 @@ static void spawn_snakes(Dungeon* env) {
     Config* c = &env->cfg;
     env->n_snake = 0;
     int want = c->n_snakes;
-    if (want > env->n_walk) want = env->n_walk;
+    if (want > g_n_walk) want = g_n_walk;
     /* sample distinct walkable tiles (training randomness; not parity-matched) */
     for (int s = 0; s < want; s++) {
         if (env->n_snake >= MAX_SNAKES) break;
-        int idx = rand() % env->n_walk;
-        int x = env->walk_x[idx], y = env->walk_y[idx];
+        int idx = rng_next(env) % g_n_walk;
+        int x = g_walk_x[idx], y = g_walk_y[idx];
         if (abs(x - ENTRANCE_X) + abs(y - ENTRANCE_Y) <= 6) continue;
-        Snake sn = {x + 0.5f, y + 0.5f, c->snake_hp, (float)(rand() % c->snake_cooldown)};
+        Snake sn = {x + 0.5f, y + 0.5f, c->snake_hp, (float)(rng_next(env) % c->snake_cooldown)};
         env->snakes[env->n_snake++] = sn;
     }
 }
@@ -538,16 +542,25 @@ static void scatter_f(float* obs, int ch, float relx, float rely, float v) {
 static void compute_obs(Dungeon* env) {
     Config* c = &env->cfg;
     float* obs = env->observations;
-    memset(obs, 0, sizeof(float) * OBS_SIZE);
     int ipx = (int)env->px, ipy = (int)env->py;
 
-    for (int row = 0; row < GRID; row++) {
-        for (int col = 0; col < GRID; col++) {
-            int wx = ipx + col - HALF, wy = ipy + row - HALF;
-            if (wx >= 0 && wx < MAP_W && wy >= 0 && wy < MAP_H)
-                set_cell(obs, CH_WALL, row, col, MAP_WALKABLE[wy * MAP_W + wx] ? 0.0f : 1.0f);
+    /* Wall channel (0) depends only on the player's tile; the dynamic channels (1..6) + scalars
+     * change every step. Clear/refill walls only when the tile changes; always clear the rest. */
+    if (ipx != env->last_ipx || ipy != env->last_ipy) {
+        memset(obs, 0, sizeof(float) * (GRID * GRID));  /* clear wall channel */
+        for (int row = 0; row < GRID; row++) {
+            int wy = ipy + row - HALF;
+            if (wy < 0 || wy >= MAP_H) continue;
+            for (int col = 0; col < GRID; col++) {
+                int wx = ipx + col - HALF;
+                if (wx >= 0 && wx < MAP_W && !MAP_WALKABLE[wy * MAP_W + wx])
+                    set_cell(obs, CH_WALL, row, col, 1.0f);
+            }
         }
+        env->last_ipx = ipx;
+        env->last_ipy = ipy;
     }
+    memset(obs + GRID * GRID, 0, sizeof(float) * (OBS_SIZE - GRID * GRID));  /* channels 1..6 + scalars */
 
     for (int i = 0; i < env->n_snake; i++)
         if (env->snakes[i].hp > 0.0f)
@@ -591,27 +604,28 @@ static void compute_obs(Dungeon* env) {
 
 static void c_reset(Dungeon* env) {
     Config* c = &env->cfg;
-    init_static(env);
+    init_globals();
     env->steps = 0;
     env->ep_return = 0.0;
+    env->last_ipx = env->last_ipy = -1000000; /* force a wall-channel rebuild on next obs */
     int bx, by, ex, ey;
-    nearest_walkable(env, BOSS_X, BOSS_Y, &bx, &by);
-    nearest_walkable(env, ENTRANCE_X, ENTRANCE_Y, &ex, &ey);
+    nearest_walkable(BOSS_X, BOSS_Y, &bx, &by);
+    nearest_walkable(ENTRANCE_X, ENTRANCE_Y, &ex, &ey);
 
-    float roll = frand();
+    float roll = frand(env);
     if (roll < c->random_spawn_prob) {
-        int i = rand() % env->n_walk;
-        env->px = env->walk_x[i] + 0.5f;
-        env->py = env->walk_y[i] + 0.5f;
+        int i = rng_next(env) % g_n_walk;
+        env->px = g_walk_x[i] + 0.5f;
+        env->py = g_walk_y[i] + 0.5f;
     } else if (roll < c->random_spawn_prob + c->spawn_in_room_prob) {
-        double ang = uniform_f(0.0f, (float)(2.0 * M_PI));
+        double ang = uniform_f(env, 0.0f, (float)(2.0 * M_PI));
         int cx = (int)(bx + 6 * cos(ang)), cy = (int)(by + 6 * sin(ang));
         if (cx < 1) cx = 1;
         if (cx > MAP_W - 2) cx = MAP_W - 2;
         if (cy < 1) cy = 1;
         if (cy > MAP_H - 2) cy = MAP_H - 2;
         int sx, sy;
-        nearest_walkable(env, cx, cy, &sx, &sy);
+        nearest_walkable(cx, cy, &sx, &sy);
         env->px = sx + 0.5f;
         env->py = sy + 0.5f;
     } else {
@@ -644,8 +658,8 @@ static void c_step(Dungeon* env) {
     double reward = c->rew_step;
 
     if (move_idx > 0 && env->petrify_timer == 0) {
-        float mvx = env->move_dx[move_idx - 1] * c->player_speed;
-        float mvy = env->move_dy[move_idx - 1] * c->player_speed;
+        float mvx = g_move_dx[move_idx - 1] * c->player_speed;
+        float mvy = g_move_dy[move_idx - 1] * c->player_speed;
         if (env->confused_timer > 0) {
             mvx = -mvx;
             mvy = -mvy;
@@ -666,7 +680,7 @@ static void c_step(Dungeon* env) {
     env->player_mp = env->player_mp + c->mp_regen;
     if (env->player_mp > c->player_mp_max) env->player_mp = c->player_mp_max;
 
-    float aimx = env->aim_dx[aim_idx], aimy = env->aim_dy[aim_idx];
+    float aimx = g_aim_dx[aim_idx], aimy = g_aim_dy[aim_idx];
     if (shoot == 1 && env->staff_timer == 0) {
         fire_staff(env, aimx, aimy);
         env->staff_timer = c->staff_cooldown;
@@ -724,10 +738,6 @@ static void c_step(Dungeon* env) {
 
 static void c_render(Dungeon* env) { (void)env; }
 
-static void c_close(Dungeon* env) {
-    if (env->walk_x) free(env->walk_x);
-    if (env->walk_y) free(env->walk_y);
-    env->walk_x = env->walk_y = NULL;
-}
+static void c_close(Dungeon* env) { (void)env; }
 
 #endif

@@ -62,7 +62,8 @@ def main() -> None:
     p.add_argument("--max-frames", type=int, default=1500)
     p.add_argument("--boss-hp", type=float, default=2500.0)
     p.add_argument("--wandb", action="store_true", help="also log rollouts to wandb (needs `wandb login`)")
-    p.add_argument("--run-id", default=None, help="resume this wandb run id so videos land in the training run")
+    p.add_argument("--run-id", default=None, help="training run id; videos go to a run named rollouts-<id>")
+    p.add_argument("--fps", type=int, default=15, help="rollout video fps (lower = slower/realtime)")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -72,10 +73,9 @@ def main() -> None:
     policy = ocean_torch.Recurrent(venv.driver_env, policy, input_size=args.hidden, hidden_size=args.hidden).to(device)
 
     if args.wandb:
-        if args.run_id:  # resume the training run so videos share its dashboard
-            wandb.init(project="rotmg-dungeon", id=args.run_id, resume="allow")
-        else:
-            wandb.init(project="rotmg-dungeon", name="rollouts", job_type="eval")
+        # a dedicated run named for the training run (resuming the live run drops media on step conflicts)
+        name = f"rollouts-{args.run_id}" if args.run_id else "rollouts"
+        wandb.init(project="rotmg-dungeon", name=name, job_type="eval")
     pathlib.Path("videos").mkdir(exist_ok=True)
     # show the fight (where the action is): spawn in the boss room
     cfg = DungeonConfig(boss_hp_max=args.boss_hp, spawn_in_room_prob=1.0)
@@ -88,9 +88,9 @@ def main() -> None:
                 policy.eval()
                 frames, cleared = rollout(policy, cfg, device, seed=int(time.time()) % 10000, max_frames=args.max_frames)
                 out = f"videos/follow_{pathlib.Path(ckpt).stem}.mp4"
-                imageio.mimsave(out, frames, fps=30)
+                imageio.mimsave(out, frames, fps=args.fps)  # encode fps controls playback speed
                 if args.wandb:
-                    wandb.log({"rollout": wandb.Video(out, fps=30, format="mp4"), "cleared": float(cleared), "frames": len(frames)})
+                    wandb.log({"rollout": wandb.Video(out, format="mp4"), "cleared": float(cleared), "frames": len(frames)})
                 print(f"rendered {ckpt} -> {out} (cleared={cleared})", flush=True)
                 last = ckpt
             except Exception as e:  # checkpoint mid-write or arch mismatch; retry next loop

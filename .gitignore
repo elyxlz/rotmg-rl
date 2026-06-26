@@ -9,6 +9,11 @@ dist/
 # uv
 .uv/
 
+# PufferLib 4.0 (vendored clone + separate venv + ccache shim; assembled by setup_box_puffer4.sh)
+.venv4/
+.venv4-shim/
+.pufferlib4/
+
 # RL / training artifacts
 wandb/
 checkpoints/

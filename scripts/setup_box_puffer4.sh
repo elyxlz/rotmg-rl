@@ -27,7 +27,16 @@ export CUDA_HOME NVCC_ARCH="${NVCC_ARCH:-sm_86}" # 2x RTX 3090 = compute 8.6
 
 command -v clang >/dev/null || { echo "ERROR: clang not found (build.sh needs it)"; exit 1; }
 [ -x "$CUDA_HOME/bin/nvcc" ] || { echo "ERROR: no nvcc at $CUDA_HOME/bin (set CUDA_HOME)"; exit 1; }
-command -v ccache >/dev/null || echo "WARN: ccache not found; build.sh uses it (slower without, not fatal)"
+
+# build.sh hardcodes `NVCC="ccache $CUDA_HOME/bin/nvcc"`. If ccache isn't installed (no sudo on the
+# box), drop in a transparent shim that just execs its args, and prepend it to PATH for the build.
+SHIM_DIR="$REPO_ROOT/.venv4-shim"
+if ! command -v ccache >/dev/null; then
+    mkdir -p "$SHIM_DIR"
+    printf '#!/bin/sh\nexec "$@"\n' > "$SHIM_DIR/ccache"
+    chmod +x "$SHIM_DIR/ccache"
+    echo "ccache not found -> using transparent shim at $SHIM_DIR/ccache"
+fi
 
 avail_g=$(df -BG --output=avail "$REPO_ROOT" | tail -1 | tr -dc '0-9')
 echo "Free space on $REPO_ROOT: ${avail_g}G"
@@ -57,7 +66,7 @@ if ! grep -q "class DungeonEncoder" "$PUFFER_DIR/pufferlib/models.py"; then
 fi
 
 # 4. Build _C with the dungeon env statically linked (default = CUDA backend).
-( cd "$PUFFER_DIR" && PATH="$VENV4/bin:$CUDA_HOME/bin:$PATH" ./build.sh dungeon )
+( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV4/bin:$CUDA_HOME/bin:$PATH" ./build.sh dungeon )
 
 # 5. Install the package (the _C*.so is already built in place; no rebuild).
 uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"

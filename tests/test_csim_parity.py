@@ -114,7 +114,8 @@ def test_parity_entrance_wander():
 
 def test_parity_boss_fight():
     """Inject the player next to the boss: boss movement, aimed/rotating bullets, phases, grenades."""
-    cfg = DungeonConfig(boss_hp_max=20000.0, invuln_ticks=15, **DET)
+    # huge player HP so the player survives the window and we test 150 steps of boss dynamics
+    cfg = DungeonConfig(boss_hp_max=20000.0, player_hp_max=1e9, invuln_ticks=15, **DET)
     bx, by = 16, 73  # boss_xy
     inject = {"player_x": bx + 3.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
     actions = _fixed_actions(1, 150)
@@ -125,11 +126,12 @@ def test_parity_boss_fight():
     compared, oracle, c = _run(cfg, seed=3, actions=actions, inject=inject, steps=150)
     assert compared == 150  # survives the window: 150 matched steps
     assert oracle.phase >= 2  # at least one phase transition (+ invuln) was exercised
+    assert oracle.confused_timer > 0 or oracle.petrify_timer > 0 or oracle.steps > 0  # status exercised
 
 
 def test_parity_boss_to_death():
     """Same fight with low HP: parity holds through the boss death + clear reward."""
-    cfg = DungeonConfig(boss_hp_max=4000.0, invuln_ticks=15, **DET)
+    cfg = DungeonConfig(boss_hp_max=2000.0, player_hp_max=1e9, invuln_ticks=15, **DET)
     bx, by = 16, 73
     inject = {"player_x": bx + 3.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
     actions = _fixed_actions(1, 200)

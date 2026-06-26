@@ -30,6 +30,7 @@ def main() -> None:
     p.add_argument("--bptt-horizon", type=int, default=16)
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--learning-rate", type=float, default=None, help="override PuffeRL's tuned LR (0.015); leave unset")
+    p.add_argument("--ent-coef", type=float, default=None, help="entropy bonus; raise above default 0.001 to avoid collapse")
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
     p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
     p.add_argument("--random-spawn-prob", type=float, default=0.0)
@@ -51,6 +52,8 @@ def main() -> None:
     t["total_timesteps"] = args.total_timesteps
     if args.learning_rate is not None:  # else keep PuffeRL's tuned default (0.015)
         t["learning_rate"] = args.learning_rate
+    if args.ent_coef is not None:  # default 0.001 collapses entropy on this hard task
+        t["ent_coef"] = args.ent_coef
     # DON'T override batch_size/minibatch_size/bptt_horizon: PuffeRL's defaults (minibatch 8192,
     # bptt 64, batch auto) are tuned together with LR 0.015. Overriding them froze learning.
     t["use_rnn"] = True
@@ -75,6 +78,12 @@ def main() -> None:
         enable_minions=not args.no_minions,
         boss_shoots=not args.no_boss_shoots,
     )
+    import dataclasses
+    import json
+    import pathlib
+
+    pathlib.Path(args.data_dir).mkdir(parents=True, exist_ok=True)
+    (pathlib.Path(args.data_dir) / "env_config.json").write_text(json.dumps(dataclasses.asdict(env_cfg)))  # follow_along matches this
     vecenv = pvector.make(
         emulation.GymnasiumPufferEnv,
         env_kwargs={"env_creator": partial(DungeonEnv, env_cfg)},

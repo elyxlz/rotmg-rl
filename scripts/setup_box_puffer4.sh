@@ -62,11 +62,29 @@ cp "$REPO_ROOT/src/rotmg_rl/csim/dungeon.h" "$PUFFER_DIR/ocean/dungeon/dungeon.h
 cp "$REPO_ROOT/src/rotmg_rl/csim/snakepit_map.h" "$PUFFER_DIR/ocean/dungeon/snakepit_map.h"
 cp "$REPO_ROOT/puffer4/binding.c" "$PUFFER_DIR/ocean/dungeon/binding.c"
 cp "$REPO_ROOT/puffer4/dungeon.ini" "$PUFFER_DIR/config/dungeon.ini"
-# DungeonEncoder -> pufferlib/models.py (idempotent: only append once)
+# DungeonEncoder -> pufferlib/models.py (idempotent: only append once). For the --slowly torch path.
 if ! grep -q "class DungeonEncoder" "$PUFFER_DIR/pufferlib/models.py"; then
     printf '\n\n' >> "$PUFFER_DIR/pufferlib/models.py"
     cat "$REPO_ROOT/puffer4/dungeon_encoder.py" >> "$PUFFER_DIR/pufferlib/models.py"
 fi
+
+# Native CUDA CNN encoder -> src/dungeon_encoder.cu + wire into ocean.cu's create_custom_encoder, so
+# the NATIVE _C backend trains with our conv encoder (12x speed WITH the CNN; not --slowly, not flat).
+cp "$REPO_ROOT/puffer4/dungeon_encoder.cu" "$PUFFER_DIR/src/dungeon_encoder.cu"
+"$VENV_PY" - "$PUFFER_DIR/src/ocean.cu" <<'PYEOF'
+import sys
+p = sys.argv[1]
+src = open(p).read()
+anchor = "static void create_custom_encoder(const std::string& env_name, Encoder* enc) {"
+assert anchor in src, "create_custom_encoder anchor not found in ocean.cu"
+if '#include "dungeon_encoder.cu"' not in src:
+    src = src.replace(anchor, '#include "dungeon_encoder.cu"\n\n' + anchor, 1)
+if "create_dungeon_encoder(enc)" not in src:
+    src = src.replace(anchor + "\n",
+        anchor + '\n    if (env_name == "dungeon") { create_dungeon_encoder(enc); return; }\n', 1)
+open(p, "w").write(src)
+print("ocean.cu: dungeon encoder wired")
+PYEOF
 
 # 3.5 Link prerequisites: build.sh links `-lcudnn -lnccl -lnvidia-ml`, but the pip nvidia wheels ship
 # only versioned .so files (no libcudnn.so / libnccl.so for `-l`) and NVML lives in the CUDA stubs

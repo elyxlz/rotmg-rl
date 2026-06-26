@@ -43,6 +43,7 @@ def main() -> None:
     p.add_argument("--save-path", default=None, help="save the trained policy state_dict here")
     p.add_argument("--wandb", action="store_true", help="log metrics to wandb (needs `wandb login`)")
     p.add_argument("--data-dir", default="checkpoints/run", help="PuffeRL checkpoint dir (watched by follow_along)")
+    p.add_argument("--c-env", action="store_true", help="use the fast C (Ocean) env instead of the numpy sim")
     args = p.parse_args()
     sys.argv = [sys.argv[0]]  # pufferl.load_config parses sys.argv; keep our args out of its way
 
@@ -84,17 +85,30 @@ def main() -> None:
 
     pathlib.Path(args.data_dir).mkdir(parents=True, exist_ok=True)
     (pathlib.Path(args.data_dir) / "env_config.json").write_text(json.dumps(dataclasses.asdict(env_cfg)))  # follow_along matches this
-    vecenv = pvector.make(
-        emulation.GymnasiumPufferEnv,
-        env_kwargs={"env_creator": partial(DungeonEnv, env_cfg)},
-        num_envs=args.num_envs,
-        backend=backend,
-        **vec_kwargs,
-    )
+    if args.c_env:
+        # Native Ocean env: one CDungeon owns all num_envs C envs, stepped in a tight C loop.
+        from rotmg_rl.csim.dungeon import CDungeon
+        from rotmg_rl.csim.policy import CDungeonPolicy
+
+        vecenv = pvector.make(
+            CDungeon,
+            env_kwargs={"config": env_cfg, "num_envs": args.num_envs},
+            backend=pvector.PufferEnv,
+            num_envs=1,
+        )
+    else:
+        vecenv = pvector.make(
+            emulation.GymnasiumPufferEnv,
+            env_kwargs={"env_creator": partial(DungeonEnv, env_cfg)},
+            num_envs=args.num_envs,
+            backend=backend,
+            **vec_kwargs,
+        )
 
     import torch
 
-    policy = DungeonPolicy(vecenv.driver_env, hidden_size=args.hidden)
+    policy_cls = CDungeonPolicy if args.c_env else DungeonPolicy
+    policy = policy_cls(vecenv.driver_env, hidden_size=args.hidden)
     policy = ocean_torch.Recurrent(vecenv.driver_env, policy, input_size=args.hidden, hidden_size=args.hidden)
     policy = policy.to("cuda")
     if args.init_checkpoint:

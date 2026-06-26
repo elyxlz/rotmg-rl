@@ -142,6 +142,25 @@ def test_parity_boss_to_death():
     assert oracle.boss_hp <= 0.0  # boss died, parity held through the terminal/clear step
 
 
+def test_full_config_runs_via_wrapper():
+    """The stochastic training config (snakes + minions + grenades) runs in the PufferEnv wrapper
+    without crashing and yields finite, in-range observations + rewards."""
+    from rotmg_rl.csim.dungeon import CDungeon
+
+    n = 8
+    env = CDungeon(DungeonConfig(), num_envs=n, seed=0)
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == (n, OBS_SIZE)
+    rng = np.random.RandomState(0)
+    for _ in range(300):
+        actions = np.stack([rng.randint(0, [9, 32, 2, 2]) for _ in range(n)]).astype(np.int32)
+        obs, rew, term, trunc, _ = env.step(actions)
+        assert np.isfinite(obs).all()
+        assert obs.min() >= -1.0001 and obs.max() <= 1.0001
+        assert np.isfinite(rew).all()
+    env.close()
+
+
 if __name__ == "__main__":
     test_parity_entrance_wander()
     print("entrance-wander parity OK")

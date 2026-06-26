@@ -45,8 +45,11 @@ M4 (PRIORITY: SPEED THE LOOP). Rewrite the env in C (PufferLib Ocean style) so i
 M3  Train a policy that COMPLETES the faithful sim >=80% (stochastic eval). Flat cold-start does
     NOT clear (proven). Bootstrap exploration with a PASSIVE BOSS (boss_shoots=False -> learn
     aim+kill), then an ADAPTIVE CURRICULUM (weak->full boss, add threat/snakes/grenades, shift
-    spawns fight->navigation). Tune rewards/curriculum until it clears. ALWAYS read run metrics
-    via the wandb API (scripts/wandb_metrics.py), not log-grepping, to inform the next experiment.
+    spawns fight->navigation). ALWAYS read run metrics via the wandb API (scripts/wandb_metrics.py),
+    not log-grepping. Watch entropy (collapse at ent_coef 0.001 -> raise it) + boss_hp_frac.
+    Then AUTO-TUNE hparams (ent_coef/lr/reward coefs) with PufferLib's PROTEIN sweep (CARBS
+    successor: pufferl.sweep, cost-aware Bayesian over env 'score'). Needs the C env (M4) for speed
+    + a dense env 'score' metric = (1-boss_hp_frac)+cleared. Stop hand-guessing hparams.
 M5  Deploy to drive the REAL client: run the betterSkillys visual client headless (Xvfb), read
     live game state (intercepted packets) -> the same local observation, inject the policy's
     actions (WASD + mouse + click + spell key) into the client. Build a gap harness; refit sim if

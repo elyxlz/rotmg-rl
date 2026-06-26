@@ -21,6 +21,19 @@ rendered .mp4 of a full run, plus a live completion on the server.
   had pufferlib 2.0.6, which ships no importable trainer).
 - Box now has: .NET 8 SDK (~/.dotnet, 8.0.422), betterSkillys cloned + built, Docker for Redis.
 
+## v2 build log (whole dungeon)
+
+### 2026-06-26 — M0 training stack DONE (PufferLib 3.x / PuffeRL works)
+- Wrestled the env: PuffeRL's C advantage kernel isn't in the prebuilt wheel for our torch, so
+  it must be COMPILED against the installed torch. Working recipe (`scripts/setup_box.sh`):
+  torch==2.8.0+cu128, then `uv pip install --no-build-isolation --no-deps pufferlib==3.0`
+  (compiles the kernel via gcc in ~40s; no nvcc needed). Both 3090s visible.
+- PuffeRL smoke: `puffer train puffer_squared` ran the full trainer dashboard at ~5.4M SPS,
+  episode_return improving. PuffeRL trains end to end.
+- Note: PuffeRL CLI env_name = the `[base] env_name` field (e.g. `puffer_squared`), not the
+  filename. For our env I'll drive PuffeRL programmatically: `PuffeRL(config, vecenv, policy)`.
+- M0 remaining: run the betterSkillys server (Redis + resources) + headless client connects.
+
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |

@@ -87,7 +87,7 @@ def main() -> None:
         cfg = DungeonConfig(**d)
     else:
         cfg = DungeonConfig(boss_hp_max=args.boss_hp, spawn_in_room_prob=1.0)
-    last = None
+    last, steps_per_epoch = None, None
     while True:
         ckpt = newest_ckpt(args.watch)
         if ckpt and ckpt != last:
@@ -98,7 +98,16 @@ def main() -> None:
                 out = f"videos/follow_{pathlib.Path(ckpt).stem}.mp4"
                 imageio.mimsave(out, frames, fps=args.fps)  # encode fps controls playback speed
                 if args.wandb:
-                    wandb.log({"rollout": wandb.Video(out, format="mp4"), "cleared": float(cleared), "frames": len(frames)})
+                    # log at the ACTUAL training step of this checkpoint (epoch * steps/epoch from the live run)
+                    epoch = int("".join(c for c in pathlib.Path(ckpt).stem if c.isdigit()) or "0")
+                    if steps_per_epoch is None and args.run_id:
+                        try:
+                            s = wandb.Api().run(f"rotmg-dungeon/{args.run_id}").summary
+                            steps_per_epoch = s["agent_steps"] / s["epoch"] if s["epoch"] else None
+                        except Exception:
+                            steps_per_epoch = None
+                    step = int(epoch * steps_per_epoch) if steps_per_epoch else None
+                    wandb.log({"rollout": wandb.Video(out, format="mp4"), "rollout_cleared": float(cleared), "checkpoint_epoch": epoch}, step=step)
                 print(f"rendered {ckpt} -> {out} (cleared={cleared})", flush=True)
                 last = ckpt
             except Exception as e:  # checkpoint mid-write or arch mismatch; retry next loop

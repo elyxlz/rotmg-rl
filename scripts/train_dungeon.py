@@ -9,6 +9,7 @@ default MLP+LSTM policy. Cold-start, no demos. Logs offline by default (no wandb
 from __future__ import annotations
 
 import argparse
+import sys
 
 import pufferlib.emulation as emulation
 import pufferlib.vector as pvector
@@ -28,6 +29,7 @@ def main() -> None:
     p.add_argument("--learning-rate", type=float, default=2.5e-4)
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
     args = p.parse_args()
+    sys.argv = [sys.argv[0]]  # pufferl.load_config parses sys.argv; keep our args out of its way
 
     cfg = pufferl.load_config("default")
     t = cfg["train"]

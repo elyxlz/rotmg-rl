@@ -84,11 +84,13 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
 }
 
 static int my_log(PyObject* dict, Log* log) {
-    assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
-    assign_to_dict(dict, "cleared", log->cleared);
+    /* vec_log already divided each field by n (total steps) -> per-step means matching numpy. */
     assign_to_dict(dict, "boss_hp_frac", log->boss_hp_frac);
+    assign_to_dict(dict, "in_room", log->in_room);
+    assign_to_dict(dict, "cleared", log->cleared);
+    assign_to_dict(dict, "snakes", log->snakes);
+    assign_to_dict(dict, "player_hp_frac", log->player_hp_frac);
+    assign_to_dict(dict, "reward", log->reward);
     assign_to_dict(dict, "perf", log->perf);
     return 0;
 }

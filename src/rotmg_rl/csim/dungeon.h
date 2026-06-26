@@ -39,14 +39,20 @@
 #define MAX_SNAKES 512
 #define MAX_GRENADES 64
 
+/* Per-STEP accumulators (vec_log divides every field by n). This matches the numpy oracle's
+ * per-step info semantics: the gym vector backend feeds PuffeRL one info dict per env per step,
+ * so environment/boss_hp_frac is a per-step mean (~1.0 while the boss is healthy, dropping as it
+ * is damaged) and environment/cleared is the per-step clear rate (~0, spiking only on the death
+ * step), NOT per-episode values. n increments every step. */
 typedef struct {
-    float perf;
-    float score;
-    float episode_return;
-    float episode_length;
-    float cleared;
-    float boss_hp_frac;
-    float n;
+    float boss_hp_frac;   /* max(boss_hp,0)/boss_hp_max, summed per step */
+    float in_room;        /* fight_active, summed per step */
+    float cleared;        /* cleared-this-step flag, summed per step */
+    float snakes;         /* alive snake count, summed per step */
+    float player_hp_frac; /* player_hp/player_hp_max, summed per step */
+    float reward;         /* step reward, summed per step */
+    float perf;           /* headline 0-1 metric: per-step clear rate */
+    float n;              /* step count (required as the last field) */
 } Log;
 
 typedef struct {
@@ -126,7 +132,6 @@ typedef struct {
 
     unsigned char visited[MAP_H * MAP_W];
     int steps;
-    double ep_return;
     uint64_t rng_state; /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
 } Dungeon;
@@ -606,7 +611,6 @@ static void c_reset(Dungeon* env) {
     Config* c = &env->cfg;
     init_globals();
     env->steps = 0;
-    env->ep_return = 0.0;
     env->last_ipx = env->last_ipy = -1000000; /* force a wall-channel rebuild on next obs */
     int bx, by, ex, ey;
     nearest_walkable(BOSS_X, BOSS_Y, &bx, &by);
@@ -720,20 +724,23 @@ static void c_step(Dungeon* env) {
     int truncated = (!terminated) && env->steps >= c->max_steps;
 
     env->rewards[0] = (float)reward;
-    env->ep_return += reward;
     env->terminals[0] = terminated ? 1 : 0;
+
+    /* Per-step metrics on the post-step (terminal) state, before any auto-reset, so they match
+     * the numpy oracle's per-step info dict. On a clear step boss_hp<=0 -> boss_hp_frac=0,
+     * cleared=1; on a normal step the boss's remaining HP fraction is recorded. */
+    env->log.boss_hp_frac += (env->boss_hp > 0.0f ? env->boss_hp : 0.0f) / c->boss_hp_max;
+    env->log.in_room += env->fight_active ? 1.0f : 0.0f;
+    env->log.cleared += cleared ? 1.0f : 0.0f;
+    env->log.snakes += (float)count_alive_snakes(env);
+    env->log.player_hp_frac += env->player_hp / c->player_hp_max;
+    env->log.reward += (float)reward;
+    env->log.perf += cleared ? 1.0f : 0.0f;
+    env->log.n += 1.0f;
+
     compute_obs(env);
 
-    if (terminated || truncated) {
-        env->log.score += (float)env->ep_return;
-        env->log.episode_return += (float)env->ep_return;
-        env->log.episode_length += (float)env->steps;
-        env->log.cleared += cleared ? 1.0f : 0.0f;
-        env->log.boss_hp_frac += (env->boss_hp > 0 ? env->boss_hp : 0) / c->boss_hp_max;
-        env->log.perf += cleared ? 1.0f : 0.0f;
-        env->log.n += 1.0f;
-        c_reset(env);
-    }
+    if (terminated || truncated) c_reset(env);
 }
 
 static void c_render(Dungeon* env) { (void)env; }

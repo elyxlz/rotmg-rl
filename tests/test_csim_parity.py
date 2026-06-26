@@ -39,6 +39,9 @@ class CEnv:
     def put(self, **kwargs):
         binding.env_put(self.handle, **kwargs)
 
+    def get(self) -> dict:
+        return binding.env_get(self.handle)
+
     def step(self, action):
         self.act[:] = action
         binding.env_step(self.handle)
@@ -81,7 +84,7 @@ def _run(cfg: DungeonConfig, seed: int, actions: np.ndarray, inject: dict | None
     compared = 0
     for t in range(steps):
         a = actions[t]
-        o_obs, o_rew, o_term, o_trunc, _ = oracle.step(a.tolist())
+        o_obs, o_rew, o_term, o_trunc, o_info = oracle.step(a.tolist())
         c_rew, c_term = c.step(a)
         assert o_term == c_term, f"step {t}: terminal mismatch oracle={o_term} c={c_term}"
         assert abs(o_rew - c_rew) <= rew_atol, f"step {t}: reward oracle={o_rew:.6f} c={c_rew:.6f}"
@@ -90,6 +93,13 @@ def _run(cfg: DungeonConfig, seed: int, actions: np.ndarray, inject: dict | None
             break
         msg = _first_divergence(_oracle_flat(o_obs), c.obs, obs_atol)
         assert msg is None, f"step {t}: obs divergence {msg}"
+        # info-field parity (the bug the obs/reward checks missed): on non-terminal steps the C env
+        # has not auto-reset, so its live state must reproduce the oracle's per-step info dict.
+        g = c.get()
+        c_bhf = max(g["boss_hp"], 0.0) / g["boss_hp_max"]
+        assert abs(o_info["boss_hp_frac"] - c_bhf) <= 2e-3, f"step {t}: boss_hp_frac oracle={o_info['boss_hp_frac']:.5f} c={c_bhf:.5f}"
+        assert float(o_info["in_room"]) == g["fight_active"], f"step {t}: in_room oracle={o_info['in_room']} c={g['fight_active']}"
+        assert not o_info["cleared"], f"step {t}: oracle cleared True on a non-terminal step"
         compared += 1
     return compared, oracle, c
 
@@ -140,6 +150,67 @@ def test_parity_boss_to_death():
     actions[:, 3] = 1
     compared, oracle, c = _run(cfg, seed=3, actions=actions, inject=inject, steps=200)
     assert oracle.boss_hp <= 0.0  # boss died, parity held through the terminal/clear step
+
+
+def test_parity_info_passive_boss_in_room():
+    """The coordinator's config (passive boss, in room, no snakes/grenades/minions): assert the C
+    env's per-step info (boss_hp_frac, in_room, cleared) matches the numpy oracle step by step, and
+    that boss_hp_frac starts at 1.0 and falls as the boss is damaged (it does NOT start at 0)."""
+    cfg = DungeonConfig(boss_hp_max=20000.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False)
+    bx, by = 16, 73
+    inject = {"player_x": bx + 3.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
+    actions = _fixed_actions(2, 120)
+    actions[:, 1] = 16  # aim at the boss
+    actions[:, 2] = 1
+    actions[:, 3] = 1
+    compared, oracle, c = _run(cfg, seed=2, actions=actions, inject=inject, steps=120)
+    assert compared == 120  # per-step info parity held for the whole window
+    g = c.get()
+    assert 0.0 < g["boss_hp"] < 20000.0  # boss started full (frac 1.0) and was damaged, not dead
+
+
+def test_metrics_per_step_boss_full_when_undamaged():
+    """Regression for the reported bug: with a passive boss spawned-in-room and NO shooting, the
+    boss is never damaged, so the per-step metrics report boss_hp_frac~=1.0 and cleared=0 (the bug
+    aggregated per-EPISODE and reported boss_hp_frac=0 / cleared=1)."""
+    from rotmg_rl.csim.dungeon import CDungeon
+
+    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0)
+    env = CDungeon(cfg, num_envs=64, seed=1, log_interval=100)
+    env.reset(seed=1)
+    noop = np.zeros((64, 4), np.int32)  # move/aim/shoot/cast all 0 -> boss never takes damage
+    log = None
+    for _ in range(100):
+        *_, info = env.step(noop)
+        if info:
+            log = info[0]
+    env.close()
+    assert log is not None
+    assert log["boss_hp_frac"] > 0.99, log  # boss full every step (bug: 0.0)
+    assert log["cleared"] == 0.0, log  # never cleared (bug: 1.0)
+    assert log["in_room"] > 0.9, log  # spawned in room -> fight active most steps
+
+
+def test_metrics_cleared_is_a_per_step_rate():
+    """With shooting, episodes DO clear fast (per-episode rate ~1), but the per-step `cleared`
+    metric is a low rate and boss_hp_frac stays well above 0 -- proving per-step (numpy) semantics,
+    not per-episode."""
+    from rotmg_rl.csim.dungeon import CDungeon
+
+    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0)
+    env = CDungeon(cfg, num_envs=128, seed=0, log_interval=200)
+    env.reset(seed=0)
+    rng = np.random.RandomState(0)
+    log = None
+    for _ in range(200):
+        a = rng.randint(0, [9, 32, 2, 2], size=(128, 4)).astype(np.int32)
+        *_, info = env.step(a)
+        if info:
+            log = info[0]
+    env.close()
+    assert log is not None
+    assert 0.0 < log["cleared"] < 0.3, log  # per-step clear rate is small (not the per-episode ~1.0)
+    assert log["boss_hp_frac"] > 0.3, log  # boss healthy most steps (not 0)
 
 
 def test_full_config_runs_via_wrapper():

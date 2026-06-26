@@ -49,9 +49,8 @@ def main() -> None:
     t["total_timesteps"] = args.total_timesteps
     if args.learning_rate is not None:  # else keep PuffeRL's tuned default (0.015)
         t["learning_rate"] = args.learning_rate
-    t["bptt_horizon"] = args.bptt_horizon
-    t["batch_size"] = args.num_envs * args.bptt_horizon * 4
-    t["minibatch_size"] = args.num_envs * args.bptt_horizon
+    # DON'T override batch_size/minibatch_size/bptt_horizon: PuffeRL's defaults (minibatch 8192,
+    # bptt 64, batch auto) are tuned together with LR 0.015. Overriding them froze learning.
     t["use_rnn"] = True
     t["compile"] = False
     t["data_dir"] = args.data_dir

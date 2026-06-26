@@ -29,6 +29,13 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   so rollout videos show what the policy actually knows.
 - **Obs shape**: flat C obs `OBS_SIZE = 7*31*31 + 3*32*32 + 8 = 9807`. This invalidates old
   checkpoints (expected, accepted).
+- **Encoder speed-up (separate commit)**: SPS was capped by `grid_fc = Linear(32*31*31=30752 -> 256)`,
+  a ~7.9M-param GEMM dominating compute on any backend. Added `MaxPool2d(2)` after each conv in BOTH
+  policies' grid + minimap CNNs (grid 31->15->7, FC `Linear(1568->256)`; minimap 32->16->8). Policy
+  params 10.1M -> 674K. **End-to-end training SPS ~39.5K -> ~64.7K (~1.64x)** on the in-room boss-hp
+  300 smoke, with learning UNCHANGED: boss_hp_frac 0.59->0.39 both pre and post (no degradation), no
+  NaN. Policy-side only; the C env obs is untouched, so the obs revision and the speed-up are
+  independently revertible.
 - **4.0 integration PENDING**: a concurrent agent owns the 4.0 side (`puffer4/`, `scripts/*4.py`,
   `.venv4`); this change touches only the 3.0 stack + the shared env/policy/test files. The 4.0
   native encoder must be updated to slice the new `[grid, minimap, scalars]` layout before 4.0 runs.

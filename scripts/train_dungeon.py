@@ -31,6 +31,12 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--learning-rate", type=float, default=None, help="override PuffeRL's tuned LR (0.015); leave unset")
     p.add_argument("--ent-coef", type=float, default=None, help="entropy bonus; raise above default 0.001 to avoid collapse")
+    p.add_argument("--gamma", type=float, default=None, help="discount; raise toward 0.999 so the future +clear isn't over-discounted")
+    p.add_argument("--gae-lambda", type=float, default=None, help="GAE lambda (default 0.90)")
+    p.add_argument("--vf-coef", type=float, default=None, help="value loss coef (default 2.0)")
+    p.add_argument("--rew-clear", type=float, default=None, help="reward for finishing the kill (default 1.0)")
+    p.add_argument("--rew-death", type=float, default=None, help="death penalty (default 0.5)")
+    p.add_argument("--rew-boss-dmg", type=float, default=None, help="boss-damage reward scale (default 1.0)")
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
     p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
     p.add_argument("--random-spawn-prob", type=float, default=0.0)
@@ -55,6 +61,12 @@ def main() -> None:
         t["learning_rate"] = args.learning_rate
     if args.ent_coef is not None:  # default 0.001 collapses entropy on this hard task
         t["ent_coef"] = args.ent_coef
+    if args.gamma is not None:
+        t["gamma"] = args.gamma
+    if args.gae_lambda is not None:
+        t["gae_lambda"] = args.gae_lambda
+    if args.vf_coef is not None:
+        t["vf_coef"] = args.vf_coef
     # DON'T override batch_size/minibatch_size/bptt_horizon: PuffeRL's defaults (minibatch 8192,
     # bptt 64, batch auto) are tuned together with LR 0.015. Overriding them froze learning.
     t["use_rnn"] = True
@@ -67,9 +79,10 @@ def main() -> None:
     cfg["neptune"] = False
     cfg["env_name"] = "rotmg_dungeon"
 
-    print(f"CONFIG lr={t['learning_rate']} batch={t['batch_size']} minibatch={t['minibatch_size']} bptt={t['bptt_horizon']} ent_coef={t['ent_coef']} vf_coef={t['vf_coef']}", flush=True)
+    print(f"CONFIG lr={t['learning_rate']} batch={t['batch_size']} minibatch={t['minibatch_size']} bptt={t['bptt_horizon']} ent_coef={t['ent_coef']} gamma={t['gamma']} gae_lambda={t['gae_lambda']} vf_coef={t['vf_coef']}", flush=True)
     backend = pvector.Multiprocessing if args.backend == "multiprocessing" else pvector.Serial
     vec_kwargs = {"num_workers": args.num_workers} if args.backend == "multiprocessing" else {}
+    rew_overrides = {k: v for k, v in (("rew_clear", args.rew_clear), ("rew_death", args.rew_death), ("rew_boss_dmg", args.rew_boss_dmg)) if v is not None}
     env_cfg = DungeonConfig(
         spawn_in_room_prob=args.spawn_in_room_prob,
         random_spawn_prob=args.random_spawn_prob,
@@ -78,6 +91,7 @@ def main() -> None:
         enable_grenades=not args.no_grenades,
         enable_minions=not args.no_minions,
         boss_shoots=not args.no_boss_shoots,
+        **rew_overrides,
     )
     import dataclasses
     import json

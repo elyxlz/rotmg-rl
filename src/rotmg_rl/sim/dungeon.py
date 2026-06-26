@@ -557,9 +557,25 @@ class DungeonEnv(gym.Env):
             mini[max(0, my - 2):my + 3, max(0, mx - 2):mx + 3] = col
         img[6:6 + mm, size - mm - 6:size - 6] = mini
 
-        # HP (green) / MP (blue) bars, bottom-left
         c = self.cfg
+        # BOSS HP bar (red) across the top + 3-phase markers — the key omitted info
+        if self.fight_active or self.boss_hp < c.boss_hp_max:
+            bw = size - mm - 24  # leave room for the minimap on the right
+            img[8:16, 8:8 + bw] = (60, 20, 20)  # empty (dark)
+            img[8:16, 8:8 + int(max(0.0, self.boss_hp / c.boss_hp_max) * bw)] = (235, 45, 45)  # boss hp fill
+            for ph in range(3):  # phase 1/2/3 segments; active phase lit
+                seg = bw // 3
+                col = (250, 205, 60) if self.phase == ph + 1 else (85, 75, 40)
+                img[18:21, 8 + ph * seg + 1 : 8 + (ph + 1) * seg - 1] = col
+
+        # player HP (green) / MP (blue) bars with empty backing, bottom-left
         for j, (frac, col) in enumerate([(self.player_hp / c.player_hp_max, (60, 220, 60)), (self.player_mp / c.player_mp_max, (60, 120, 255))]):
             yb = size - 18 + j * 8
+            img[yb:yb + 6, 8:8 + 160] = (35, 35, 38)
             img[yb:yb + 6, 8:8 + int(max(0, frac) * 160)] = col
+
+        # status effects (confused = purple, petrified = grey) when active, above the player bars
+        for k, (active, col) in enumerate([(self.confused_timer > 0, (200, 60, 200)), (self.petrify_timer > 0, (170, 170, 170))]):
+            if active:
+                img[size - 27:size - 20, 8 + k * 11 : 16 + k * 11] = col
         return img

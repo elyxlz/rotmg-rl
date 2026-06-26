@@ -17,6 +17,8 @@ dist/
 # RL / training artifacts
 wandb/
 checkpoints/
+checkpoints4/
+logs4/
 runs/
 *.pt
 *.ckpt

@@ -77,15 +77,21 @@ for so in "$CUDNN_LIB"/libcudnn.so.*; do [ -e "$CUDNN_LIB/libcudnn.so" ] || ln -
 for so in "$NCCL_LIB"/libnccl.so.*; do [ -e "$NCCL_LIB/libnccl.so" ] || ln -sf "$(basename "$so")" "$NCCL_LIB/libnccl.so"; done
 export LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$CUDNN_LIB:$NCCL_LIB${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
-# 4. Build _C with the dungeon env statically linked (default = CUDA backend).
-( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV4/bin:$CUDA_HOME/bin:$PATH" LIBRARY_PATH="$LIBRARY_PATH" ./build.sh dungeon )
+# 4. Build _C with the dungeon env statically linked. --float (float32) is required for the --slowly
+# torch backend = our CNN + renderable checkpoints, and the native backend still runs on it. Drop
+# --float (set PUFFER_BUILD_FLAGS='') for max native throughput (bf16), but then --slowly won't work.
+( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV4/bin:$CUDA_HOME/bin:$PATH" LIBRARY_PATH="$LIBRARY_PATH" ./build.sh dungeon ${PUFFER_BUILD_FLAGS:---float} )
 
 # 5. Install the package (the _C*.so is already built in place; no rebuild).
 uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"
 
+# 5b. Our package + render deps in .venv4, so scripts/follow_along4.py can render the numpy DungeonEnv.
+uv pip install --python "$VENV_PY" -e "$REPO_ROOT" --no-deps
+uv pip install --python "$VENV_PY" gymnasium imageio imageio-ffmpeg
+
 # 6. Smoke: the native backend imports and reports our env baked in.
 ( cd "$PUFFER_DIR" && "$VENV_PY" -c "from pufferlib import _C; print('puffer4 _C OK, env =', getattr(_C, 'env_name', '?'))" )
 echo
-echo "Done. Train our env on 4.0:"
-echo "  $REPO_ROOT/.venv4/bin/python scripts/train_dungeon4.py --total-timesteps 2000000"
-echo "or directly:  ( cd $PUFFER_DIR && $VENV4/bin/puffer train dungeon )"
+echo "Done. Train our env on 4.0 (use --slowly for our CNN + renderable videos):"
+echo "  scripts/box4.sh train --slowly --boss-hp 300 --total-timesteps 50000000"
+echo "  scripts/box4.sh follow   # POV rollout videos to wandb"

@@ -5,7 +5,13 @@ scripts/setup_box_puffer4.sh, which bakes our env into the pinned clone at .puff
 thin launcher: it maps our familiar knobs to 4.0's `--section.key` overrides and execs the .venv4
 `puffer` CLI inside the clone. The 3.0 path stays `scripts/train_dungeon.py` (untouched).
 
-    .venv4/bin/python scripts/train_dungeon4.py --total-timesteps 2000000 --num-envs 1024
+Two backends (see docs/pufferlib4-migration.md):
+  default (native _C): fastest (~12x), but uses puffernet's flat Linear encoder, NOT our CNN, and
+    saves opaque flat-weight checkpoints (not renderable by follow_along4).
+  --slowly (torch):    uses OUR DungeonEncoder CNN (pufferlib.models) + torch state_dict checkpoints
+    that follow_along4.py can render. Still uses the fast native env + CUDA kernels.
+
+    .venv4/bin/python scripts/train_dungeon4.py --total-timesteps 2000000 --slowly --wandb
 
 (Runs with any Python; it only subprocess-execs the .venv4 puffer binary.)
 """
@@ -13,6 +19,7 @@ thin launcher: it maps our familiar knobs to 4.0's `--section.key` overrides and
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import subprocess
 import sys
@@ -26,6 +33,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--total-timesteps", type=int, default=2_000_000)
     p.add_argument("--num-envs", type=int, default=1024, help="-> vec.total_agents (parallel games)")
+    p.add_argument("--num-workers", type=int, default=None, help="-> vec.num_threads")
     p.add_argument("--hidden", type=int, default=256, help="-> policy.hidden_size")
     p.add_argument("--learning-rate", type=float, default=None)
     p.add_argument("--ent-coef", type=float, default=None)
@@ -36,7 +44,13 @@ def main() -> None:
     p.add_argument("--no-grenades", action="store_true")
     p.add_argument("--no-minions", action="store_true")
     p.add_argument("--no-boss-shoots", action="store_true")
+    p.add_argument("--slowly", action="store_true", help="torch backend = OUR CNN + renderable checkpoints")
+    p.add_argument("--init-checkpoint", default=None, help="warm-start from this .bin (same backend only)")
+    p.add_argument("--checkpoint-dir", default="checkpoints4", help="where 4.0 writes <env>/<run_id>/*.bin")
+    p.add_argument("--checkpoint-interval", type=int, default=50, help="epochs between checkpoints (low = fresh videos)")
+    p.add_argument("--tag", default=None, help="wandb tag")
     p.add_argument("--wandb", action="store_true")
+    p.add_argument("--wandb-group", default=None, help="defaults to $WANDB_RUN_GROUP")
     args = p.parse_args()
 
     if not PUFFER.exists():
@@ -46,6 +60,13 @@ def main() -> None:
     cmd += ["--train.total-timesteps", str(args.total_timesteps)]
     cmd += ["--vec.total-agents", str(args.num_envs)]
     cmd += ["--policy.hidden-size", str(args.hidden)]  # the LSTM network is sized from policy.hidden_size
+    cmd += ["--checkpoint-dir", args.checkpoint_dir, "--checkpoint-interval", str(args.checkpoint_interval)]
+    if args.num_workers is not None:
+        cmd += ["--vec.num-threads", str(args.num_workers)]
+    if args.slowly:
+        cmd += ["--slowly"]
+    if args.init_checkpoint is not None:
+        cmd += ["--load-model-path", args.init_checkpoint]
     if args.learning_rate is not None:
         cmd += ["--train.learning-rate", str(args.learning_rate)]
     if args.ent_coef is not None:
@@ -64,8 +85,11 @@ def main() -> None:
         cmd += ["--env.enable-minions", "0"]
     if args.no_boss_shoots:
         cmd += ["--env.boss-shoots", "0"]
+    if args.tag is not None:
+        cmd += ["--tag", args.tag]
     if args.wandb:
-        cmd += ["--wandb", "--wandb-project", "rotmg-dungeon"]
+        group = args.wandb_group or os.environ.get("WANDB_RUN_GROUP") or "dungeon4"
+        cmd += ["--wandb", "--wandb-project", "rotmg-dungeon", "--wandb-group", group]
 
     print("exec:", " ".join(cmd), flush=True)
     raise SystemExit(subprocess.run(cmd, cwd=str(CLONE)).returncode)

@@ -115,6 +115,17 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 - `m4-dr`: finetune from m3-final WITH --randomize, LR 1.5e-4, 40M steps; chained DR stochastic
   eval gates M4 (>=0.90 across the DR range).
 
+### 2026-06-26 — M4 pivot: DR from scratch, not warm-start-into-DR
+- Warm-starting the M3 champion into DR collapsed to passive survival (clear -> 0.00, return
+  254 -> 128) at BOTH harsh and gentle DR, BOTH LRs. Structural: a fixed-dynamics-competent
+  policy, shocked by DR, retreats to a passive local optimum (partial damage + survive beats
+  die-trying in hard randomized episodes) and can't climb out.
+- Fix: train under DR FROM SCRATCH through the adaptive curriculum (`curriculum.py --randomize
+  --tag dr`), so robustness is learned natively and there's no fixed-dynamics habit to lose.
+  Curriculum eval switched to --stochastic (deployment metric). M4 gate = full-boss DR
+  stochastic clear >=0.90.
+- (Gentler DR ranges retained: obs noise 0.005, bullet x[0.9,1.1], boss x[0.85,1.15], fire +-1.)
+
 ### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.

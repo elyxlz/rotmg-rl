@@ -59,6 +59,15 @@ rendered .mp4 of a full run, plus a live completion on the server.
   (spec in docs/snakepit-spec.md: 7500 HP, proj id0 spd70/1500ms, id1 spd62/2000ms, grenades,
   status, minions), then the game-faithful renderer (real sprites from Shared/resources).
 
+### 2026-06-26 — M1 brick: whole-dungeon navigation env (tested)
+- `sim/dungeon.py`: gymnasium env over the real map. Player spawns at entrance, navigates to the
+  boss room. BFS geodesic distance field from the boss = dense wall-aware nav reward; egocentric
+  15x15 wall-view + dir/geodist scalars as observation; 8-dir movement with wall sliding.
+- Tested: a geodesic-gradient oracle navigates entrance->boss room over the real map (connectivity
+  + mechanics verified). 2 tests pass.
+- NEXT brick: layer the faithful 3-phase Stheno fight onto this env (activates in the boss room) —
+  aimed/rotating spreads, grenades+status (Confused/Petrify), minions. Then the game renderer.
+
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |

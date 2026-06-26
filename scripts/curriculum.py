@@ -10,6 +10,7 @@ chunks at the same d. M3 = full boss (d=1.0) greedy clear >= 0.90.
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import re
 import subprocess
@@ -48,6 +49,13 @@ def run(cmd: list[str]) -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--randomize", action="store_true", help="domain randomization throughout (M4: native robustness)")
+    parser.add_argument("--tag", default="", help="checkpoint name tag, e.g. 'dr', to avoid clobbering")
+    args = parser.parse_args()
+    dr_args = ["--randomize"] if args.randomize else []
+    tag = f"-{args.tag}" if args.tag else ""
+
     pathlib.Path("checkpoints").mkdir(exist_ok=True)
     py = sys.executable
     d = 0.0
@@ -55,11 +63,11 @@ def main() -> None:
     retries = 0
     for chunk_i in range(1, MAX_CHUNKS + 1):
         hp, fire = difficulty(d)
-        name = f"curr-c{chunk_i:02d}"
+        name = f"curr{tag}-c{chunk_i:02d}"
         train_cmd = [
             py, "scripts/train.py", "--name", name,
             "--boss-hp", f"{hp:.1f}", "--boss-fire-interval", str(fire),
-            "--total-timesteps", str(CHUNK_STEPS), *COMMON_TRAIN,
+            "--total-timesteps", str(CHUNK_STEPS), *COMMON_TRAIN, *dr_args,
         ]
         if ckpt:
             train_cmd += ["--init-checkpoint", ckpt]
@@ -69,6 +77,7 @@ def main() -> None:
         eval_out = run([
             py, "scripts/eval_policy.py", "--checkpoint", ckpt,
             "--episodes", str(EVAL_EPISODES), "--boss-hp", f"{hp:.1f}", "--boss-fire-interval", str(fire),
+            "--stochastic", *dr_args,
         ])
         m = re.search(r"clear_rate (\d+\.\d+)", eval_out)
         cr = float(m.group(1)) if m else 0.0

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Manage dungeon training on the box reliably (avoid fragile inline ssh).
+# Usage: ./scripts/box.sh {kill | train <train_dungeon args...> | follow | status}
+set -u
+cd "$(dirname "$0")/.." || exit 1
+export PATH="$HOME/.local/bin:$PATH"
+export UV_LINK_MODE=copy
+mkdir -p logs checkpoints/run
+
+cmd="${1:-status}"
+shift || true
+case "$cmd" in
+  kill)
+    pkill -9 -f scripts/train_dungeon.py 2>/dev/null
+    pkill -9 -f scripts/curriculum_dungeon.py 2>/dev/null
+    pkill -9 -f scripts/follow_along.py 2>/dev/null
+    sleep 5
+    echo "remaining: $(pgrep -cf 'scripts/(train_dungeon|curriculum_dungeon|follow_along)')  load:$(uptime | grep -oE 'average.*')"
+    ;;
+  train)  # launch ONE clean run; kills any existing first
+    pkill -9 -f scripts/train_dungeon.py 2>/dev/null
+    pkill -9 -f scripts/curriculum_dungeon.py 2>/dev/null
+    sleep 4
+    rm -rf checkpoints/run
+    mkdir -p checkpoints/run
+    PYTHONUNBUFFERED=1 setsid uv run python scripts/train_dungeon.py "$@" --wandb --data-dir checkpoints/run --save-path checkpoints/dungeon.pt </dev/null >logs/train.log 2>&1 &
+    echo "train launched pid $!"
+    ;;
+  follow)
+    pkill -9 -f scripts/follow_along.py 2>/dev/null
+    sleep 2
+    PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --interval 180 </dev/null >logs/follow.log 2>&1 &
+    echo "follow launched pid $!"
+    ;;
+  status)
+    echo "procs: train=$(pgrep -cf scripts/train_dungeon.py) follow=$(pgrep -cf scripts/follow_along.py)  load:$(uptime | grep -oE 'average.*')"
+    echo "wandb:   $(grep -aoE 'https://wandb.ai/[^ ]+/runs/[a-z0-9]+' logs/train.log 2>/dev/null | tail -1)"
+    echo "config:  $(grep -a CONFIG logs/train.log 2>/dev/null | head -1)"
+    echo "cleared: $(grep -aoE 'cleared +[0-9.]+' logs/train.log 2>/dev/null | tail -1)   steps: $(grep -aoE 'Steps +[0-9.]+ *[KM]?' logs/train.log 2>/dev/null | tail -1)"
+    echo "follow:  $(grep -aoE 'rendered .*|skip .*' logs/follow.log 2>/dev/null | tail -1)"
+    ;;
+  *)
+    echo "usage: box.sh {kill|train <args>|follow|status}" ;;
+esac

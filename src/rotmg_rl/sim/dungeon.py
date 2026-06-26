@@ -517,4 +517,17 @@ class DungeonEnv(gym.Env):
         if self.fight_active:
             dot(self.boss_pos, (220, 40, 40), 4)
         dot(self.player_pos, (60, 230, 90), 3)
+
+        # box showing the agent's actual local view (31x31, all it can see)
+        px, py = int(self.player_pos[0] * px_per_tile), int(self.player_pos[1] * px_per_tile)
+        r = VIS_RADIUS * px_per_tile
+        for (x0, x1, y0, y1) in [(px - r, px + r, py - r, py - r), (px - r, px + r, py + r, py + r), (px - r, px - r, py - r, py + r), (px + r, px + r, py - r, py + r)]:
+            xa, xb = max(0, min(x0, x1)), min(img.shape[1] - 1, max(x0, x1))
+            ya, yb = max(0, min(y0, y1)), min(img.shape[0] - 1, max(y0, y1))
+            img[ya:yb + 1, xa:xb + 1] = (90, 230, 90)
+
+        # HP (green) and MP (blue) bars, top-left
+        c = self.cfg
+        for j, (frac, col) in enumerate([(self.player_hp / c.player_hp_max, (60, 220, 60)), (self.player_mp / c.player_mp_max, (60, 120, 255))]):
+            img[4 + j * 7 : 9 + j * 7, 4 : 4 + int(max(0, frac) * 120)] = col
         return img

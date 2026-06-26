@@ -3,7 +3,25 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
-## Milestones
+## SCOPE CHANGE (2026-06-26): whole dungeon + open server + latest PufferLib
+
+GOAL.md was rewritten. New mission: cold-start RL agent that ENTERS and COMPLETES the whole
+Snake Pit dungeon (navigation + combat + boss), trained on a FAITHFUL sim rebuilt from a real
+open server's source, using the LATEST PufferLib (3.x PuffeRL). Deliverable: a game-faithful
+rendered .mp4 of a full run, plus a live completion on the server.
+
+- Found **betterSkillys** (DethMetalz69/betterSkillys): open ROTMG server, **.NET 8, builds
+  clean (0 errors)** on the box. Ships real behaviors + assets (unlike stripped NR-CORE).
+- Real Snake Pit boss read from `WorldServer/logic/db/BehaviorDb.SnakePit.cs`: Stheno = 3 phases
+  (invuln gates), AIMED low-count spreads (3-4 bullets, 15 deg apart), ramping fire rate, plus
+  minions (Pit Snakes/Vipers/Pythons, Stheno Swarm/Pet). VERY different from the v1 radial sim.
+- v1 (boss-only radial sim, M0-M3 @ 0.92, deploy bridge) is SUPERSEDED by the faithful
+  whole-dungeon rebuild. Reusable: training pattern, deploy bridge, gap harness. Rebuild: sim +
+  policy. New training loop = PufferLib 3.x PuffeRL (v1 used a hand-rolled PPO because the box
+  had pufferlib 2.0.6, which ships no importable trainer).
+- Box now has: .NET 8 SDK (~/.dotnet, 8.0.422), betterSkillys cloned + built, Docker for Redis.
+
+## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |
 |----|-----------|--------|

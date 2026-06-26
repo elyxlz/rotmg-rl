@@ -1,63 +1,75 @@
 # GOAL
 
 Paste the block below into `/goal` to run the autonomous build loop. See
-[`docs/specs/2026-06-25-rotmg-rl-design.md`](docs/specs/2026-06-25-rotmg-rl-design.md) for
-the full design.
+[`docs/specs/2026-06-25-rotmg-rl-design.md`](docs/specs/2026-06-25-rotmg-rl-design.md) and
+[`PROGRESS.md`](PROGRESS.md) for design + build log.
 
 ```text
-/goal Build a cold-start RL agent that clears one ROTMG dungeon (Snake Pit), and run that
-same policy on the real game to complete a real dungeon. Work incessantly toward this until
-the Real milestone is verified, then harden.
+/goal Build a cold-start RL agent that ENTERS and COMPLETES the entire Snake Pit dungeon (from
+the dungeon entrance, through the rooms, to killing the boss Stheno through all her phases, to
+"dungeon cleared") and run it on a REAL open-source ROTMG server. Work incessantly until the
+deliverable mp4 exists and a real completion on the server is verified.
+
+THE DELIVERABLE (the definition of done)
+- A full .mp4 of the BEST policy ENTERING and COMPLETING the Snake Pit dungeon end to end,
+  rendered to look like the ACTUAL game (real ROTMG sprites/tiles/projectiles from the server
+  assets, HP bars, etc.) -- not abstract dots. Saved in the repo and copied to the user's machine.
+- Plus M6: the same policy completes a real Snake Pit on the betterSkillys server (live).
 
 GROUND TRUTH
-- Repo (source of truth): ~/Repos/rotmg-rl  — read docs/specs/2026-06-25-rotmg-rl-design.md
-  FIRST every time you lose context; it is the authoritative design.
-- Remote GPU box for training: `ssh -p 62022 audiogen@81.105.49.222` (alias ripperred).
-  2x RTX 3090, 32 cores, Ubuntu 22.04. gcc/git/docker present; install `uv`; no system CUDA
-  toolkit needed (use PyTorch CUDA wheels). Push from local, pull on the box, train there.
-- Keep PROGRESS.md updated and committed every iteration; push regularly.
+- Repo (source of truth): ~/Repos/rotmg-rl. Read PROGRESS.md + the spec FIRST each time.
+- GPU box: `ssh -p 62022 audiogen@81.105.49.222` (alias ripperred). 2x RTX 3090, 16 physical
+  cores, Ubuntu 22.04. uv at ~/.local/bin; .NET 8 SDK at ~/.dotnet; Docker usable (no sudo).
+- Open server (REAL target + ground-truth behaviors): ~/rotmg-realgame/betterSkillys
+  (.NET 8, builds clean). Real Snake Pit logic: source/WorldServer/logic/db/BehaviorDb.SnakePit.cs
+  (Stheno: 3 phases, aimed low-count spreads + invuln gates; minions: Pit Snakes/Vipers/Pythons,
+  Stheno Swarm/Pet). Assets/XMLs: source/Shared/resources.
+- Keep PROGRESS.md updated + committed every iteration; push regularly.
 
 HARD CONSTRAINTS (never violate)
-- Cold-start RL only. NO supervised data, NO behavioral cloning, NO human demonstrations.
-- PufferLib (PuffeRL: recurrent CNN-LSTM PPO). One dungeon only: Snake Pit.
-- The policy sees ONLY the shared world-agnostic observation tensor (egocentric multi-channel
-  grid + scalar vector). Two adapters produce it identically: sim (ground truth) and real
-  game (packets via an nrelay/RealmShark fork). Never let the policy see anything
-  world-specific. No raw pixels.
-- Real-game testing happens on a self-hosted PRIVATE server (NR-CORE) FIRST. Do not touch
-  official ROTMG servers without an explicit new instruction from me.
+- Cold-start RL only. NO supervised data / behavioral cloning / human demos.
+- Use the LATEST PufferLib (3.x) and its built-in PuffeRL trainer for the learning loop (NOT a
+  hand-rolled PPO loop). Recurrent (LSTM) policy.
+- One dungeon: the WHOLE Snake Pit (navigation + combat + boss), not just the boss arena.
+- The policy sees ONLY the shared world-agnostic observation tensor; the same tensor is produced
+  by the sim and by the real server adapter. No raw pixels for the policy.
+- Real-game testing uses the self-hosted betterSkillys server (open source, local). Do NOT touch
+  official ROTMG servers. NR-CORE is dead (do not revisit).
+- Sim fidelity: reimplement the Snake Pit FAITHFULLY from betterSkillys source (dungeon layout,
+  Stheno's real phases/patterns, minions, projectile speeds from the resource XMLs). The faithful
+  sim is what collapses the sim-to-real gap (the RocketSim approach).
 
 THE LOOP (each iteration)
-1. Read the spec + PROGRESS.md. Identify the lowest unmet milestone (below).
-2. Take the smallest change that advances it. Train on the GPU box when training is involved.
-3. VERIFY with a concrete measurement before claiming anything — never assert success without
-   evidence (a measured clear-rate number, a reviewed rollout video, a passing eval).
-4. Log to Weights & Biases (reward, clear rate, episode length, curriculum stage, RND reward,
-   entropy/KL) and record a greedy rollout video. Update PROGRESS.md with: milestone status,
-   current clear rate, what changed, what's next. Commit + push.
-5. If blocked, diagnose the root cause and continue; don't stall waiting on me unless a
-   hard-constraint decision is needed.
+1. Read spec + PROGRESS.md; identify the lowest unmet milestone.
+2. Smallest change that advances it. Train on the GPU box (PuffeRL, multi-core + 3090s).
+3. VERIFY with a concrete measurement before claiming anything (completion-rate over >=200 eps,
+   reviewed rollout video, passing eval). Stochastic action sampling is the deployment metric.
+4. Log to Weights & Biases + record a rollout video. Update PROGRESS.md (milestone, current
+   completion rate, what changed, next). Commit + push.
+5. If blocked, diagnose root cause and continue; only ping the user for a true external blocker.
 
 MILESTONES (advance in order; each gates the next)
-M0  Repo scaffold + uv env on the box + wandb logging working (smoke run logs a curve).
-M1  PufferLib Ocean-style C sim of Snake Pit (player movement, shooting, Stheno + minion
-    bullet patterns, HP, collision, geometry) at >=1M steps/sec/core, with a raylib renderer
-    and a play.py viewer.
-M2  Cold-start training stack: recurrent PPO + dense reward shaping + curriculum
-    (stationary enemy -> moving -> minions -> boss phase 1 -> full boss -> full dungeon) +
-    RND intrinsic reward + domain randomization from day one.
-M3  Sim milestone: policy clears simulated Snake Pit >=90% of episodes. (verify: eval over
-    >=200 episodes; review a rollout video.)
-M4  Robustness milestone: >=90% clear rate across the full domain-randomization range.
-M5  Deploy adapters (ALL headless on the Linux box, protocol I/O only, no GUI/display):
-    NR-CORE private server up on Linux; headless nrelay fork that BOTH reads state
-    (incl. EnemyShoot packets, bullets reconstructed by local sim) and SENDS actions
-    (Move/PlayerShoot); observation+action adapters; a gap-measurement harness that replays
-    real packet captures through the policy and checks its actions look sane.
-M6  Real milestone (DONE): the same policy completes a real Snake Pit on the private server.
-    Expect 1-2 iterations of measure-gap-on-real-data -> fix sim fidelity -> retrain.
+M0  Stack ready: latest PufferLib (3.x) + PuffeRL smoke run logs a curve; betterSkillys server
+    RUNS (Redis via Docker + resources configured); a headless client connects + reads state.
+M1  Faithful Snake Pit sim from betterSkillys source: dungeon map (entrance -> rooms -> boss
+    room) + navigation, real Stheno 3-phase fight, minions, projectile properties from XMLs.
+    Plus a GAME-FAITHFUL renderer using the real ROTMG assets (sprites/tiles/projectiles).
+    Target >=1M steps/s/core; numpy reference first if needed, then fast/C if required.
+M2  Cold-start training on PuffeRL (recurrent PPO): observation covers navigation + combat;
+    reward shapes whole-dungeon progress (explore -> reach boss -> clear phases -> COMPLETE);
+    curriculum + intrinsic motivation for the long, sparse navigation horizon.
+M3  Sim completion: policy completes the full simulated dungeon (enter -> clear) >=90%
+    (stochastic, >=200 eps). Record the game-faithful completion mp4 = THE DELIVERABLE.
+M4  Robustness: >=90% completion across the domain-randomization range.
+M5  Deploy adapters to the betterSkillys server (headless protocol I/O): read state -> shared
+    observation, send actions; gap-measurement harness (sim vs real); refit sim if needed.
+M6  Real completion: the same policy enters and completes a real Snake Pit on the betterSkillys
+    server, verified end to end.
 
-After M6: harden (raise clear rate, reduce variance, document repro) and stop opening new
-scope. Report status concisely each iteration; only ping me for a hard-constraint decision
-(e.g. going to official servers) or when M6 is verifiably done.
+REUSE FROM v1 (boss-only radial sim, now superseded): the training infra pattern, the deploy
+bridge (observation schema, bullet reconstruction, policy server, RealmShark adapter), and the
+gap-measurement harness all carry over. The OLD sim + policy (radial-burst, boss-only) are
+superseded by the faithful whole-dungeon sim; rebuild them.
+
+After the deliverable mp4 exists AND M6 is verified: harden, document repro, stop new scope.
 ```

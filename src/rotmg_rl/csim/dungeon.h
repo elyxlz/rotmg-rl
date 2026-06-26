@@ -115,7 +115,7 @@ typedef struct {
     float player_hp, player_mp;
     int staff_timer, spell_timer;
     double boss_x, boss_y; /* boss_pos becomes float64 in oracle after first move */
-    float boss_hp;
+    double boss_hp; /* float64 like the numpy oracle (Python float), for phase/collision fidelity */
     int phase, fight_active, invuln_timer;
     int confused_timer, petrify_timer, minion_timer;
     double rotate_angle;
@@ -292,7 +292,7 @@ static double resolve_collisions(Dungeon* env) {
         }
         if (any) {
             env->n_pbul = w;
-            env->boss_hp -= (float)dmg;
+            env->boss_hp -= dmg;
             reward += dmg * c->rew_boss_dmg;
         }
     }
@@ -421,7 +421,7 @@ static void boss_tick(Dungeon* env) {
     if (env->invuln_timer > 0) {
         env->invuln_timer--;
     } else {
-        float frac = env->boss_hp / c->boss_hp_max;
+        double frac = env->boss_hp / c->boss_hp_max;
         if (env->phase == 1 && frac <= 0.66f) {
             env->phase = 2;
             env->invuln_timer = c->invuln_ticks;
@@ -430,11 +430,12 @@ static void boss_tick(Dungeon* env) {
             env->invuln_timer = c->invuln_ticks;
         }
     }
-    /* boss_pos = boss_pos + unit(player - boss) * boss_speed  (becomes float64) */
-    float vx = env->px - (float)env->boss_x, vy = env->py - (float)env->boss_y;
-    double nrm = sqrt((double)vx * vx + (double)vy * vy) + 1e-6;
-    env->boss_x = env->boss_x + ((double)vx / nrm) * c->boss_speed;
-    env->boss_y = env->boss_y + ((double)vy / nrm) * c->boss_speed;
+    /* boss_pos = boss_pos + unit(player - boss) * boss_speed; numpy keeps boss_pos float64, so the
+     * direction vector is computed in double (player float32 promoted), not float32. */
+    double vx = (double)env->px - env->boss_x, vy = (double)env->py - env->boss_y;
+    double nrm = sqrt(vx * vx + vy * vy) + 1e-6;
+    env->boss_x = env->boss_x + (vx / nrm) * c->boss_speed;
+    env->boss_y = env->boss_y + (vy / nrm) * c->boss_speed;
     if (env->invuln_timer > 0) return;
 
     if (env->phase == 1) {
@@ -713,7 +714,7 @@ static void c_step(Dungeon* env) {
     env->steps++;
 
     int terminated = 0, cleared = 0;
-    if (env->boss_hp <= 0.0f && env->phase > 0) {
+    if (env->boss_hp <= 0.0 && env->phase > 0) {
         terminated = 1;
         cleared = 1;
         reward += c->rew_clear;

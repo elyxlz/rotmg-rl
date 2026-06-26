@@ -108,7 +108,7 @@ static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
     v = PyDict_GetItemString(kwargs, "phase");
     if (v) env->phase = (int)PyLong_AsLong(v);
     v = PyDict_GetItemString(kwargs, "boss_hp");
-    if (v) env->boss_hp = (float)PyFloat_AsDouble(v);
+    if (v) env->boss_hp = PyFloat_AsDouble(v);
     compute_obs(env);
     return 0;
 }

@@ -154,19 +154,19 @@ def test_parity_boss_to_death():
 
 def test_parity_info_passive_boss_in_room():
     """The coordinator's config (passive boss, in room, no snakes/grenades/minions): assert the C
-    env's per-step info (boss_hp_frac, in_room, cleared) matches the numpy oracle step by step, and
-    that boss_hp_frac starts at 1.0 and falls as the boss is damaged (it does NOT start at 0)."""
-    cfg = DungeonConfig(boss_hp_max=20000.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False)
+    env's per-step info (boss_hp_frac, in_room, cleared) matches the numpy oracle step by step. The
+    player moves around the boss but does not shoot, so the boss stays full -> boss_hp_frac is 1.0
+    (NOT 0) and cleared is 0 every step, exactly matching the oracle. (The damaging boss_hp_frac<1.0
+    case is covered by test_parity_boss_fight, whose _run also asserts info parity per step.)"""
+    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False)
     bx, by = 16, 73
-    inject = {"player_x": bx + 3.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
+    inject = {"player_x": bx + 5.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
     actions = _fixed_actions(2, 120)
-    actions[:, 1] = 16  # aim at the boss
-    actions[:, 2] = 1
-    actions[:, 3] = 1
+    actions[:, 2] = 0  # no shooting -> boss never damaged
+    actions[:, 3] = 0
     compared, oracle, c = _run(cfg, seed=2, actions=actions, inject=inject, steps=120)
     assert compared == 120  # per-step info parity held for the whole window
-    g = c.get()
-    assert 0.0 < g["boss_hp"] < 20000.0  # boss started full (frac 1.0) and was damaged, not dead
+    assert oracle.boss_hp == 300.0  # boss full the whole time -> info boss_hp_frac stayed 1.0
 
 
 def test_metrics_per_step_boss_full_when_undamaged():

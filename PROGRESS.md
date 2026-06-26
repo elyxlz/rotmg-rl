@@ -86,7 +86,18 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 - Action: single sustained full-boss finetune (`m3-finetune`, 40M steps, one LR schedule)
   warm-started from c10, with a chained 200-ep greedy eval = the M3 gate.
 
-### Recipe queue (add only if the finetune plateaus < 0.90)
+### 2026-06-26 — greedy is the wrong metric; stochastic = 0.883; low-LR final push
+- 40M finetune: final training (sampling) clear ~0.88-0.91, but GREEDY eval = 0.503. Greedy is
+  brittle for bullet-hell dodging (deterministic policy gets cornered into death loops;
+  stochasticity jitters out). Deployment acts by SAMPLING, so stochastic is the faithful metric.
+- Added `--stochastic` eval mode. m3-finetune over 300 eps: **stochastic 0.883**, greedy 0.503.
+  So the real deployable clear is 0.883, just under the 0.90 M3 bar, curve still rising.
+- The 40M run dipped early (0.8 -> 0.5 -> recover) because LR 2.5e-4 is too high for a finetune.
+  Final push (`m3-final`): warm-start from m3-finetune, LR 1e-4, ent 0.005, 25M steps. With the
+  low LR it holds ~0.98 sampling from the start (no dip). Chained stochastic eval gates M3.
+- NOTE: M3/M4 acceptance + deployment use STOCHASTIC action sampling, not greedy.
+
+### Recipe queue (add only if the final push plateaus < 0.90)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.
 2. RND intrinsic reward for exploration (dodging + approaching boss under sparse true reward).

@@ -3,6 +3,36 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## Fog-of-war minimap obs (2026-06-26) — fix the navigation blindness; 4.0 integration pending
+
+- **Problem**: the policy only saw a 31x31 local egocentric window, so it went BLIND while navigating
+  (no global position, couldn't see the boss past 15 tiles). A real ROTMG player has a fog-of-war
+  minimap. Added one faithfully (no cheats), plus boss-HP and boss-invuln scalars.
+- **Obs change** (`sim/dungeon.py` + `csim/dungeon.h`/`binding.c`, parity-kept, C rebuilt):
+  - **Fog of war**: a per-episode `discovered` mask (the disk of tiles within `VIS_RADIUS` of the
+    player, marked every step from the player's integer tile, reset on reset). A `boss_seen` flag is
+    set once the boss is within vision — the boss only appears on the minimap AFTER it's been seen
+    (no undiscovered-boss reveal).
+  - **`minimap` obs** `(3, 32, 32)`: ch0 terrain (discovered walkable +1 / discovered wall -1 / fog
+    0; downsampled by block, walkable-precedence over wall over fog), ch1 player cell, ch2 boss cell
+    (only when `boss_seen`). Added to the Dict obs and the flat C obs (layout `[grid, minimap,
+    scalars]`). Local `grid` unchanged.
+  - **Scalars 6 -> 8**: append `boss_hp_frac` (boss_hp/boss_hp_max if fight_active else 0) and
+    `boss_invuln` (invuln_timer>0).
+- **Policy** (`DungeonPolicy` + `CDungeonPolicy`): a shallow minimap CNN (2 conv + flatten + linear
+  to 128) fused with the grid-CNN (256) + scalar-MLP (64) before the fusion layer.
+- **C parity**: the discovered mask + minimap terrain pool (accumulated incrementally as tiles are
+  seen, so no per-step full-map scan) + new scalars match the numpy oracle bit-faithfully. The
+  parity test now asserts minimap channels + scalars step-by-step AND fog of war (undiscovered cells
+  read exactly 0; boss channel all-zero until `boss_seen`). `boss_seen` exposed via `env_get`.
+- **Render**: the top-right minimap now respects fog (only discovered tiles, boss dot only once seen)
+  so rollout videos show what the policy actually knows.
+- **Obs shape**: flat C obs `OBS_SIZE = 7*31*31 + 3*32*32 + 8 = 9807`. This invalidates old
+  checkpoints (expected, accepted).
+- **4.0 integration PENDING**: a concurrent agent owns the 4.0 side (`puffer4/`, `scripts/*4.py`,
+  `.venv4`); this change touches only the 3.0 stack + the shared env/policy/test files. The 4.0
+  native encoder must be updated to slice the new `[grid, minimap, scalars]` layout before 4.0 runs.
+
 ## Protein sweep for the cautious-finish (2026-06-26) — score metric + sweep runner; metric pivot
 
 - **Goal**: crack the shooting-boss cautious-finish (boss_hp 300, boss_shoots, no

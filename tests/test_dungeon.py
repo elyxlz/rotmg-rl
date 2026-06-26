@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from rotmg_rl.sim.dungeon import GRID, N_AIM, NUM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
+from rotmg_rl.sim.dungeon import GRID, MM, N_AIM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
 
 
 def _aim_at(src, dst) -> int:
@@ -14,9 +14,13 @@ def test_obs_shapes_and_space():
     env = DungeonEnv()
     obs, _ = env.reset(seed=0)
     assert obs["grid"].shape == (NUM_CH, GRID, GRID)
+    assert obs["minimap"].shape == (NUM_MM_CH, MM, MM)
     assert obs["scalars"].shape == (NUM_SCALARS,)
     assert env.observation_space.contains(obs)
     assert (env.snakes[:, 2] > 0).sum() > 0  # snakes populate the dungeon
+    # fog of war: at spawn only a disk is discovered (partial), and the boss is unseen -> no boss dot.
+    assert 0 < int(env.discovered.sum()) < env.map.walkable.size
+    assert not env.boss_seen and obs["minimap"][NUM_MM_CH - 1].sum() == 0.0
 
 
 def test_random_steps_stay_in_space():

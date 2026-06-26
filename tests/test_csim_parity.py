@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
+from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, DungeonConfig, DungeonEnv
 
 binding = pytest.importorskip("rotmg_rl.csim.binding")
 from rotmg_rl.csim.dungeon import OBS_SIZE, config_to_kwargs  # noqa: E402

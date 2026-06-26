@@ -26,18 +26,25 @@ HARD CONSTRAINTS
 - Real-game work only on the self-hosted betterSkillys server (never official). NR-CORE is dead.
 
 THE PLAN (keep iterating each stage until it works; don't stop between stages)
+M4 (PRIORITY: SPEED THE LOOP). Rewrite the env in C (PufferLib Ocean style) so it is BLAZING fast.
+    The Python/numpy sim does ~20K SPS and starves the GPU; Ocean C envs do millions. Port the
+    faithful sim (sim/dungeon.py) to a C Ocean env so experiments run in minutes, not hours.
+    Do this EVEN IF the RL mechanics don't work well yet -- fast iteration is how we FIND the
+    mechanics that work. Keep the Python sim as the reference/oracle; the C env must match it
+    (same obs layout, action space, dynamics) so a policy trained in C still transfers.
 M3  Train a policy that COMPLETES the faithful sim >=80% (stochastic eval). Flat cold-start does
-    NOT work (proven: cleared=0). Use an ADAPTIVE CURRICULUM (start easy: weak boss, few/no
-    snakes, spawn in the fight; ramp to full dungeon) + RND intrinsic motivation for the
-    local-vision exploration. Tune rewards/curriculum until it clears. This is the long pole.
+    NOT clear (proven). Bootstrap exploration with a PASSIVE BOSS (boss_shoots=False -> learn
+    aim+kill), then an ADAPTIVE CURRICULUM (weak->full boss, add threat/snakes/grenades, shift
+    spawns fight->navigation). Tune rewards/curriculum until it clears. ALWAYS read run metrics
+    via the wandb API (scripts/wandb_metrics.py), not log-grepping, to inform the next experiment.
 M5  Deploy to drive the REAL client: run the betterSkillys visual client headless (Xvfb), read
     live game state (intercepted packets) -> the same local observation, inject the policy's
     actions (WASD + mouse + click + spell key) into the client. Build a gap harness; refit sim if
-    transfer fails, then retrain.
+    transfer fails, then retrain. (betterSkillys source/client vendored at vendor/betterSkillys.)
 M6 = DELIVERABLE: screen-record the real client completing a real Snake Pit on the live server.
     Save the .mp4 + copy to the user's machine.
 
-LOOP: read PROGRESS.md -> advance the lowest unmet milestone -> VERIFY with a measured number
-(completion rate, eval, reviewed recording) -> log to wandb + update PROGRESS.md + commit/push ->
-continue. Never claim success without evidence. Only stop when the deliverable .mp4 exists.
+LOOP: read wandb metrics (API) -> advance the lowest unmet milestone -> VERIFY with a measured
+number (wandb cleared rate, eval, reviewed recording) -> update PROGRESS.md + commit/push -> stop
+old wandb runs cleanly -> continue. Never claim success without evidence. Stop only when the .mp4 exists.
 ```

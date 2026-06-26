@@ -10,12 +10,17 @@ mkdir -p logs checkpoints/run
 cmd="${1:-status}"
 shift || true
 case "$cmd" in
-  kill)
-    pkill -9 -f scripts/train_dungeon.py 2>/dev/null
-    pkill -9 -f scripts/curriculum_dungeon.py 2>/dev/null
-    pkill -9 -f scripts/follow_along.py 2>/dev/null
-    sleep 5
+  kill)  # SIGTERM first so wandb finishes the run cleanly, then SIGKILL stragglers
+    pkill -f scripts/train_dungeon.py 2>/dev/null
+    pkill -f scripts/curriculum_dungeon.py 2>/dev/null
+    pkill -f scripts/follow_along.py 2>/dev/null
+    sleep 10
+    pkill -9 -f 'scripts/(train_dungeon|curriculum_dungeon|follow_along)' 2>/dev/null
+    sleep 3
     echo "remaining: $(pgrep -cf 'scripts/(train_dungeon|curriculum_dungeon|follow_along)')  load:$(uptime | grep -oE 'average.*')"
+    ;;
+  metrics)
+    uv run --extra train python scripts/wandb_metrics.py "$@"
     ;;
   train)  # launch ONE clean run; kills any existing first
     pkill -9 -f scripts/train_dungeon.py 2>/dev/null

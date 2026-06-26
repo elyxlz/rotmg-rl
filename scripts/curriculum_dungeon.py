@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 CKPT = pathlib.Path("checkpoints")
-COMMON = ["--num-envs", "256", "--num-workers", "16", "--backend", "multiprocessing"]
+COMMON = ["--num-envs", "256", "--num-workers", "16", "--backend", "multiprocessing", "--wandb", "--data-dir", "checkpoints/run"]
 
 # each stage: (name, steps, extra args). spawn-in-room/random-spawn shift fight->navigation.
 STAGES = [

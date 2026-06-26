@@ -38,6 +38,8 @@ def main() -> None:
     p.add_argument("--no-minions", action="store_true")
     p.add_argument("--init-checkpoint", default=None, help="warm-start policy from this state_dict")
     p.add_argument("--save-path", default=None, help="save the trained policy state_dict here")
+    p.add_argument("--wandb", action="store_true", help="log metrics to wandb (needs `wandb login`)")
+    p.add_argument("--data-dir", default="checkpoints/run", help="PuffeRL checkpoint dir (watched by follow_along)")
     args = p.parse_args()
     sys.argv = [sys.argv[0]]  # pufferl.load_config parses sys.argv; keep our args out of its way
 
@@ -51,7 +53,10 @@ def main() -> None:
     t["minibatch_size"] = args.num_envs * args.bptt_horizon
     t["use_rnn"] = True
     t["compile"] = False
-    cfg["wandb"] = False
+    t["data_dir"] = args.data_dir
+    t["checkpoint_interval"] = 20  # save often so follow_along renders fresh policies
+    cfg["wandb"] = args.wandb
+    cfg["wandb_project"] = "rotmg-dungeon"
     cfg["neptune"] = False
     cfg["env_name"] = "rotmg_dungeon"
 

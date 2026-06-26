@@ -24,11 +24,12 @@ MOVE_DIRS = np.stack([np.cos(np.arange(8) * np.pi / 4), np.sin(np.arange(8) * np
 N_AIM = 32
 AIM_DIRS = np.stack([np.cos(np.arange(N_AIM) * 2 * np.pi / N_AIM), np.sin(np.arange(N_AIM) * 2 * np.pi / N_AIM)], 1).astype(np.float32)
 
-CH_WALL, CH_ENEMY, CH_EBULLET, CH_EBVX, CH_EBVY, CH_PBULLET = range(6)
-NUM_CH = 6
-NUM_SCALARS = 4  # hp, mp, spell_ready, boss_visible
+CH_WALL, CH_ENEMY, CH_EBULLET, CH_EBVX, CH_EBVY, CH_PBULLET, CH_GRENADE = range(7)
+NUM_CH = 7
+NUM_SCALARS = 6  # hp, mp, spell_ready, boss_visible, confused, petrified
 BX, BY, BVX, BVY, BLIFE, BDMG = range(6)  # bullet columns
 EX, EY, EHP, ETIMER = range(4)  # enemy columns
+GX, GY, GFUSE, GRAD, GDMG, GSTATUS = range(6)  # grenade columns (status: 0 confused, 1 petrify)
 
 
 @dataclass
@@ -76,6 +77,20 @@ class DungeonConfig:
     ebullet_dmg: float = 40.0
     ebullet_radius: float = 0.4
     max_bullets: int = 8192
+    # grenades (telegraphed AoE -> status): source r3.5 dmg150 Confused (P1/P2), r1.5 dmg75 Petrify (P3)
+    grenade_fuse: int = 10  # ticks telegraphed before detonation (~1s)
+    grenade_cd_p1: int = 15
+    grenade_cd_p2: int = 10
+    grenade_radius_confuse: float = 3.5
+    grenade_dmg_confuse: float = 150.0
+    grenade_radius_petrify: float = 1.5
+    grenade_dmg_petrify: float = 75.0
+    confused_ticks: int = 10
+    petrify_ticks: int = 10
+    # Stheno Swarm minions (Reproduce up to 5 every 1.5s in P1)
+    minion_max: int = 5
+    minion_cd: int = 15
+    minion_hp: float = 30.0
     # rewards (exploration-based, no global pathfinding)
     rew_explore: float = 0.05  # per newly-visited tile
     rew_kill: float = 0.5  # per snake killed
@@ -146,6 +161,10 @@ class DungeonEnv(gym.Env):
         self.rotate_angle = 0.0
         self.enemy_bullets = np.zeros((0, 6), np.float32)
         self.player_bullets = np.zeros((0, 6), np.float32)
+        self.grenades = np.zeros((0, 6), np.float32)
+        self.confused_timer = 0
+        self.petrify_timer = 0
+        self.minion_timer = 0
         self.visited = np.zeros(self.map.walkable.shape, bool)
         self._spawn_snakes()
         return self._obs(), {}
@@ -168,8 +187,13 @@ class DungeonEnv(gym.Env):
         move_idx, aim_idx, shoot, cast = int(action[0]), int(action[1]), int(action[2]), int(action[3])
         reward = c.rew_step
 
-        if move_idx > 0:
-            self._try_move(MOVE_DIRS[move_idx - 1] * c.player_speed)
+        if move_idx > 0 and self.petrify_timer == 0:
+            mv = MOVE_DIRS[move_idx - 1] * c.player_speed
+            if self.confused_timer > 0:
+                mv = -mv  # Confused reverses movement
+            self._try_move(mv)
+        self.confused_timer = max(0, self.confused_timer - 1)
+        self.petrify_timer = max(0, self.petrify_timer - 1)
 
         # exploration reward: newly visited tile
         tx, ty = int(self.player_pos[0]), int(self.player_pos[1])
@@ -198,6 +222,7 @@ class DungeonEnv(gym.Env):
         self._snakes_tick()
         if self.fight_active:
             self._boss_tick()
+        reward += self._grenades_tick()
 
         self.player_bullets = self._advance(self.player_bullets)
         self.enemy_bullets = self._advance(self.enemy_bullets)
@@ -308,11 +333,57 @@ class DungeonEnv(gym.Env):
             return
         if self.phase == 1:
             self._aimed_shoot("p1", 3, 15, 15)
+            self._spawn_minions()
+            self._throw_grenade("g1", c.grenade_cd_p1, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
         elif self.phase == 2:
             self._rotating_shoot("p2", 4, 15, 3)
+            self._throw_grenade("g2", c.grenade_cd_p2, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
         elif self.phase == 3:
             self._aimed_shoot("p3a", 3, 15, 15)
             self._rotating_shoot("p3b", 4, 15, 5)
+            self._throw_grenade("g3", c.grenade_cd_p1, c.grenade_radius_petrify, c.grenade_dmg_petrify, 1)
+
+    def _spawn_minions(self):
+        c = self.cfg
+        if self.minion_timer > 0:
+            self.minion_timer -= 1
+            return
+        self.minion_timer = c.minion_cd
+        if int((self.snakes[:, EHP] > 0).sum()) >= self.cfg.n_snakes + c.minion_max:
+            return
+        ang = self._rng.uniform(0, 2 * np.pi, size=c.minion_max)
+        pos = self.boss_pos + np.stack([np.cos(ang), np.sin(ang)], 1) * 3.0
+        new = np.zeros((c.minion_max, 4), np.float32)
+        new[:, :2] = pos
+        new[:, EHP] = c.minion_hp
+        self.snakes = np.concatenate([self.snakes, new], 0)
+
+    def _throw_grenade(self, key, cooldown, radius, dmg, status):
+        if self.shoot_timers.get(key, 0) > 0:
+            self.shoot_timers[key] -= 1
+            return
+        self.shoot_timers[key] = cooldown
+        # telegraphed at the player's current location
+        g = [[self.player_pos[0], self.player_pos[1], self.cfg.grenade_fuse, radius, dmg, status]]
+        self.grenades = np.concatenate([self.grenades, np.asarray(g, np.float32)], 0) if self.grenades.shape[0] else np.asarray(g, np.float32)
+
+    def _grenades_tick(self) -> float:
+        if self.grenades.shape[0] == 0:
+            return 0.0
+        c = self.cfg
+        reward = 0.0
+        self.grenades[:, GFUSE] -= 1.0
+        detonated = self.grenades[:, GFUSE] <= 0
+        for g in self.grenades[detonated]:
+            if np.linalg.norm(self.player_pos - g[:2]) <= g[GRAD]:
+                self.player_hp -= g[GDMG]
+                reward -= g[GDMG] * c.rew_damage_taken
+                if int(g[GSTATUS]) == 0:
+                    self.confused_timer = c.confused_ticks
+                else:
+                    self.petrify_timer = c.petrify_ticks
+        self.grenades = self.grenades[~detonated]
+        return reward
 
     def _aimed_shoot(self, key, count, spread_deg, cooldown):
         if self.shoot_timers.get(key, 0) > 0:
@@ -398,12 +469,18 @@ class DungeonEnv(gym.Env):
             self._scatter(grid, CH_EBVY, rel, u[:, 1])
         if self.player_bullets.shape[0]:
             self._scatter(grid, CH_PBULLET, self.player_bullets[:, :2] - p, 1.0)
+        if self.grenades.shape[0]:
+            # telegraph: intensity rises as the fuse runs out, so the agent learns to flee
+            urgency = np.clip(1.0 - self.grenades[:, GFUSE] / max(c.grenade_fuse, 1), 0.2, 1.0)
+            self._scatter(grid, CH_GRENADE, self.grenades[:, :2] - p, urgency.astype(np.float32))
         scalars = np.array(
             [
                 self.player_hp / c.player_hp_max,
                 self.player_mp / c.player_mp_max,
                 1.0 if (self.player_mp >= c.spell_cost and self.spell_timer == 0) else 0.0,
                 1.0 if boss_visible else 0.0,
+                1.0 if self.confused_timer > 0 else 0.0,
+                1.0 if self.petrify_timer > 0 else 0.0,
             ],
             np.float32,
         )
@@ -429,6 +506,8 @@ class DungeonEnv(gym.Env):
             if y0 < y1 and x0 < x1:
                 img[y0:y1, x0:x1] = color
 
+        for g in self.grenades:
+            dot(g[:2], (200, 60, 200), int(g[GRAD] * px_per_tile))  # telegraphed AoE
         for s in self.snakes[self.snakes[:, EHP] > 0]:
             dot(s[:2], (180, 120, 40), 2)
         for b in self.enemy_bullets:

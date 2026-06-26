@@ -54,6 +54,21 @@ def test_staff_damages_a_snake():
     assert env.snakes[i, 2] < hp0  # the snake took staff damage
 
 
+def test_boss_grenades_minions_and_status():
+    env = DungeonEnv(DungeonConfig(n_snakes=0, invuln_ticks=1))
+    env.reset(seed=5)
+    env.player_pos = (env.boss_pos + np.array([3.0, 0.0], np.float32)).astype(np.float32)
+    env.fight_active, env.phase = True, 1
+    saw_grenade = saw_minion = False
+    for _ in range(80):
+        env.step([0, 0, 0, 0])  # stand still so a grenade lands on us
+        saw_grenade = saw_grenade or env.grenades.shape[0] > 0
+        saw_minion = saw_minion or (env.snakes[:, 2] > 0).sum() > 0
+    assert saw_grenade  # boss throws telegraphed grenades
+    assert saw_minion  # boss spawns Stheno Swarm minions
+    assert env.confused_timer > 0 or env.petrify_timer > 0 or env.player_hp < env.cfg.player_hp_max
+
+
 def test_boss_dies_to_spell():
     env = DungeonEnv(DungeonConfig(boss_hp_max=600.0, invuln_ticks=1, n_snakes=0))
     env.reset(seed=4)

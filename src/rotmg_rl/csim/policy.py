@@ -26,24 +26,33 @@ class CDungeonPolicy(nn.Module):
         self.is_multidiscrete = True
         self.is_continuous = False
         self.action_nvec = tuple(env.single_action_space.nvec)
+        # Pool before the FC: the old grid_fc was Linear(32*31*31=30752 -> 256), a ~7.9M-param GEMM that
+        # dominated SPS regardless of backend. Two MaxPool(2) downsample the local grid 31->15->7 so the
+        # FC is Linear(32*7*7=1568 -> 256) (~0.4M params), keeping spatial structure for aim/dodge.
+        gp = (GRID // 2) // 2  # 31 -> 15 -> 7
         self.cnn = nn.Sequential(
             _li(nn.Conv2d(NUM_CH, 32, 3, padding=1)),
             nn.GELU(),
+            nn.MaxPool2d(2),
             _li(nn.Conv2d(32, 32, 3, padding=1)),
             nn.GELU(),
+            nn.MaxPool2d(2),
             nn.Flatten(),
         )
-        self.grid_fc = nn.Sequential(_li(nn.Linear(32 * GRID * GRID, 256)), nn.GELU())
-        # global fog-of-war minimap: a shallow CNN giving the policy navigation context (where it is,
-        # where the boss is once seen) that the local 31x31 window cannot carry.
+        self.grid_fc = nn.Sequential(_li(nn.Linear(32 * gp * gp, 256)), nn.GELU())
+        # global fog-of-war minimap: a shallow pooled CNN giving the policy navigation context (where it
+        # is, where the boss is once seen) that the local 31x31 window cannot carry.
+        mp = (MM // 2) // 2  # 32 -> 16 -> 8
         self.mm_cnn = nn.Sequential(
             _li(nn.Conv2d(NUM_MM_CH, 16, 3, padding=1)),
             nn.GELU(),
+            nn.MaxPool2d(2),
             _li(nn.Conv2d(16, 16, 3, padding=1)),
             nn.GELU(),
+            nn.MaxPool2d(2),
             nn.Flatten(),
         )
-        self.mm_fc = nn.Sequential(_li(nn.Linear(16 * MM * MM, 128)), nn.GELU())
+        self.mm_fc = nn.Sequential(_li(nn.Linear(16 * mp * mp, 128)), nn.GELU())
         self.scalar_fc = nn.Sequential(_li(nn.Linear(NUM_SCALARS, 64)), nn.GELU())
         self.fuse = nn.Sequential(_li(nn.Linear(256 + 128 + 64, hidden_size)), nn.GELU())
         self.decoder = _li(nn.Linear(hidden_size, sum(self.action_nvec)), std=0.01)

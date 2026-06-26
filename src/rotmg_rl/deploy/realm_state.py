@@ -135,3 +135,16 @@ def action_to_intent(action) -> ActionIntent:
     if aim_idx > 0:
         return ActionIntent(move=move, shoot=True, aim=DIRS[aim_idx - 1].copy())
     return ActionIntent(move=move, shoot=False, aim=np.zeros(2, np.float32))
+
+
+def _vec_to_idx(v: np.ndarray) -> int:
+    """Nearest of the 8 directions (1-8), or 0 for a zero vector."""
+    if not np.any(v):
+        return 0
+    return int(np.argmax(DIRS @ np.asarray(v, np.float32))) + 1
+
+
+def intent_to_action(intent: ActionIntent) -> list[int]:
+    """Inverse of action_to_intent: a protocol intent back to a game action (e.g. for a sim loop)."""
+    aim_idx = _vec_to_idx(intent.aim) if intent.shoot else 0
+    return [_vec_to_idx(intent.move), aim_idx]

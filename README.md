@@ -23,20 +23,22 @@ uv sync --extra train --group dev
 ```
 
 ```bash
-# Single PPO run (multiprocessing over physical cores)
-uv run --extra train python scripts/train.py --name run1 --boss-hp 120 \
-    --total-timesteps 5000000 --num-envs 256 --num-workers 16 --backend multiprocessing
+# Reproduce the GPU-box training env (PufferLib 3.x + the fast C env)
+bash scripts/setup_box.sh
 
-# Staged cold-start curriculum toward the full boss (the M3 gate)
-uv run --extra train python scripts/curriculum.py
+# Train a stage via the box manager (kills the prior run, logs to wandb, saves checkpoints)
+./scripts/box.sh train --c-env --total-timesteps 30000000 --num-envs 1024 \
+    --boss-hp 7500 --gamma 0.95 --ent-coef 1e-4 --spawn-in-room-prob 1.0
+./scripts/box.sh follow              # POV rollout videos -> wandb (run in background)
+./scripts/box.sh status              # procs + wandb URL + latest metrics
+./scripts/box.sh metrics <run-id>    # read metrics via the wandb API (the source of truth)
 
-# Ground-truth greedy eval (M3: >=90% clear over >=200 episodes on the full boss)
-uv run --extra train python scripts/eval_policy.py --checkpoint checkpoints/curr-s5.pt \
-    --episodes 200 --boss-hp 600
+# Stochastic eval: TRUE per-episode clear rate (the >=80% deliverable criterion)
+uv run --extra train python scripts/eval_dungeon.py --checkpoint checkpoints/dungeon.pt \
+    --c-env --episodes 200 --boss-hp 7500 --spawn-in-room-prob 1.0 --render videos/eval.mp4
 
-# Headless artifacts (no GPU/display needed)
-uv run python scripts/bench_env.py            # env throughput
-uv run python scripts/record_episode.py       # render a scripted episode to mp4
+# Protein hyperparameter sweep (gamma / ent_coef / reward balance)
+uv run --extra train python scripts/sweep_dungeon.py --max-runs 24 --metric cleared
 ```
 
 To follow training live, set `WANDB_API_KEY` (or `wandb login`) on the box; otherwise runs

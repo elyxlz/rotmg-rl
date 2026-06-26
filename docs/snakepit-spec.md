@@ -52,6 +52,34 @@ angleOffset=0, defaultAngle=null, predictive=0, coolDownOffset=0, coolDown, ...)
 - Status-effect mechanics: Confused (reversed movement), Petrify (no movement) durations.
 - `ScaleHP2(20)` and base boss HP (fix a single-player value for the sim).
 
+## Player character (CHOSEN: Wizard) + full-fidelity plan
+User directive: make the sim AS CLOSE to the real game as possible, done properly. Chosen
+character = **Wizard** with **Staff** + **Spell** (the iconic default; ranged 2-shot + AoE nuke
+that makes the 7500-HP boss killable). Real stats from betterSkillys resources:
+- Wizard: base HP 100 (max 670), MP 100 (max 385); model the max-level character.
+- Staff of Destruction: NumProjectiles 2, ArcGap 0 (parallel), dmg 45-85, Speed 180,
+  LifetimeMS 475, RateOfFire 1.
+- Spell of Galactic Creation: dmg 110-205/shot, Speed 160, LifetimeMS 1000 (classic Wizard
+  spell = a burst of ~20 shots in an arc toward the cursor; MP cost ~100). The big nuke.
+
+### Unit calibration (real -> sim)
+- Tick dt = 0.1s (10 ticks/s). ROTMG projectile tiles/sec ~= XML Speed / 10:
+  staff 180 -> 18 t/s -> 1.8 tiles/tick (life 475ms -> ~8.5 tiles);
+  boss proj0 70 -> 7 t/s -> 0.7 tiles/tick (life 1500ms -> ~10.5 tiles);
+  spell 160 -> 16 t/s -> 1.6 tiles/tick.
+- Player move ~5 tiles/s -> 0.5 tiles/tick (Wizard SPD). Staff fire ~5 shots/s -> every ~2 ticks.
+- Damage per shot random in [min,max]. MP regen ~ a few/sec; Spell costs ~100 MP.
+
+### Full-fidelity checklist (the "done properly" build)
+1. Wizard: HP/MP, 2-shot staff (real dmg/speed/life/rate), Spell ability (burst nuke, MP cost),
+   MP regen. Action gains a CAST dimension.
+2. Stheno full: 7500 HP, the 3-phase shoots (done), + grenades (telegraphed AoE -> Confused
+   /Petrify status on player), + Stheno Swarm minions (Reproduce).
+3. Path enemies: snakes along the corridors (Pit Snakes/Vipers/Pythons at the map snake tiles),
+   wander + shoot.
+4. Player status effects: Confused (reversed move), Petrify (no move), timers.
+5. A simple DEBUG renderer (shapes/colors, not faithful) to follow the policy visually.
+
 ## Sim modeling plan (M1)
 Model phases as an HP-gated state machine; aimed/rotating spreads; grenades as telegraphed AoE
 circles applying Confused/Petrify; Stheno Swarm minions; Wander. Whole dungeon = navigate the

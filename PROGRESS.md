@@ -21,6 +21,18 @@ rendered .mp4 of a full run, plus a live completion on the server.
   had pufferlib 2.0.6, which ships no importable trainer).
 - Box now has: .NET 8 SDK (~/.dotnet, 8.0.422), betterSkillys cloned + built, Docker for Redis.
 
+## v3 — autonomous campaign to the deliverable (user: "do what you have to do, stop stopping")
+
+### 2026-06-26 — adaptive curriculum campaign launched (flat cold-start proven not to clear)
+- Flat training on the faithful env: cleared=0 at 13.7M (agent dies fast). Faithful task is hard.
+- Added: random-anywhere spawn (`random_spawn_prob`, user idea: coverage/less overfitting),
+  grenade/minion toggles, trainer difficulty knobs + warm-start/save. `curriculum_dungeon.py`:
+  6 stages easy->hard (s1 boss 500/in-room/no snakes -> s6 full boss + 40 snakes + grenades +
+  minions + random/entrance spawn), warm-started each stage.
+- Stage-1 config already clears 0.048 with a RANDOM policy (weak boss, in the fight) -> the easy
+  end is learnable; should climb. Campaign running (~100M+ steps, several hours). Monitor `cleared`.
+- NEXT in parallel: M5 real-client deployment (drive + screen-record the betterSkillys client).
+
 ## v3: FAITHFUL rebuild (user: "fully analyze the real game first"; sim wasn't faithful)
 
 ### 2026-06-26 — analyzed real game from source + rebuilt the env faithfully

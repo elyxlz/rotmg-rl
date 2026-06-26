@@ -23,14 +23,15 @@ def flatten_obs(d: dict[str, np.ndarray]) -> np.ndarray:
 
 
 @torch.no_grad()
-def run_episode(agent: Agent, env: SnakePitEnv, device, seed: int) -> tuple[bool, float, int]:
+def run_episode(agent: Agent, env: SnakePitEnv, device, seed: int, stochastic: bool) -> tuple[bool, float, int]:
     obs, _ = env.reset(seed=seed)
     lstm_state = agent.initial_state(1, device)
     done = torch.zeros(1, device=device)
     total = 0.0
+    act = agent.act_sample if stochastic else agent.act_greedy
     for step in range(env.cfg.max_steps):
         x = torch.tensor(flatten_obs(obs), device=device).unsqueeze(0)
-        action, lstm_state = agent.act_greedy(x, lstm_state, done)
+        action, lstm_state = act(x, lstm_state, done)
         obs, reward, term, trunc, info = env.step(action[0].cpu().numpy())
         total += reward
         done = torch.tensor([float(term or trunc)], device=device)
@@ -47,6 +48,7 @@ def main() -> None:
     parser.add_argument("--boss-fire-interval", type=int, default=18)
     parser.add_argument("--boss-burst", type=int, default=12)
     parser.add_argument("--enemy-bullet-speed", type=float, default=0.7)
+    parser.add_argument("--stochastic", action="store_true", help="sample actions (deployment-faithful) instead of greedy argmax")
     parser.add_argument("--seed", type=int, default=10_000)
     args = parser.parse_args()
 
@@ -65,13 +67,14 @@ def main() -> None:
     )
     clears, returns, lengths = [], [], []
     for i in range(args.episodes):
-        cleared, total, length = run_episode(agent, env, device, seed=args.seed + i)
+        cleared, total, length = run_episode(agent, env, device, seed=args.seed + i, stochastic=args.stochastic)
         clears.append(float(cleared))
         returns.append(total)
         lengths.append(length)
 
+    mode = "stochastic" if args.stochastic else "greedy"
     print(
-        f"episodes {args.episodes} boss_hp {args.boss_hp} | "
+        f"episodes {args.episodes} boss_hp {args.boss_hp} mode {mode} | "
         f"clear_rate {np.mean(clears):.3f} | mean_return {np.mean(returns):.2f} | "
         f"mean_length {np.mean(lengths):.1f}"
     )

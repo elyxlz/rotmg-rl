@@ -94,6 +94,14 @@ class Agent(nn.Module):
         a_aim = torch.argmax(self.actor_aim(hidden), dim=1)
         return torch.stack([a_move, a_aim], dim=1), lstm_state
 
+    @torch.no_grad()
+    def act_sample(self, obs, lstm_state, done):
+        # Deployment-faithful: the trained policy acts stochastically (and dodges better for it).
+        hidden, lstm_state = self.get_states(obs, lstm_state, done)
+        a_move = Categorical(logits=self.actor_move(hidden)).sample()
+        a_aim = Categorical(logits=self.actor_aim(hidden)).sample()
+        return torch.stack([a_move, a_aim], dim=1), lstm_state
+
     def initial_state(self, batch: int, device) -> tuple[torch.Tensor, torch.Tensor]:
         return (
             torch.zeros(1, batch, self.hidden, device=device),

@@ -36,6 +36,7 @@ case "$cmd" in
     mkdir -p checkpoints/run
     group="dungeon-$(date +%Y%m%d-%H%M%S)"  # wandb group: bundles train + rollouts runs together
     echo "$group" > logs/group.txt
+    case " $* " in *" --c-env "*) touch logs/c_env.flag ;; *) rm -f logs/c_env.flag ;; esac  # follow picks the right policy
     WANDB_RUN_GROUP="$group" PYTHONUNBUFFERED=1 setsid uv run python scripts/train_dungeon.py "$@" --wandb --data-dir checkpoints/run --save-path checkpoints/dungeon.pt </dev/null >logs/train.log 2>&1 &
     echo "train launched pid $! (group $group)"
     ;;
@@ -49,7 +50,8 @@ case "$cmd" in
       sleep 2
     done
     group=$(cat logs/group.txt 2>/dev/null || echo "")  # same group as the training run -> bundled in wandb
-    WANDB_RUN_GROUP="$group" PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --run-id "$rid" --interval 180 </dev/null >logs/follow.log 2>&1 &
+    cflag=""; [ -f logs/c_env.flag ] && cflag="--c-env"
+    WANDB_RUN_GROUP="$group" PYTHONUNBUFFERED=1 setsid uv run --extra train python scripts/follow_along.py --watch checkpoints/run --wandb --run-id "$rid" $cflag --interval 180 </dev/null >logs/follow.log 2>&1 &
     echo "follow launched pid $! (group $group, run $rid)"
     ;;
   status)

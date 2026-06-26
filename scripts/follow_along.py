@@ -64,12 +64,18 @@ def main() -> None:
     p.add_argument("--wandb", action="store_true", help="also log rollouts to wandb (needs `wandb login`)")
     p.add_argument("--run-id", default=None, help="training run id; videos go to a run named rollouts-<id>")
     p.add_argument("--fps", type=int, default=15, help="rollout video fps (lower = slower/realtime)")
+    p.add_argument("--c-env", action="store_true", help="checkpoints are from the C env -> use CDungeonPolicy")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # driver env (for policy construction + emulated obs dtype)
     venv = pvector.make(emulation.GymnasiumPufferEnv, env_kwargs={"env_creator": DungeonEnv}, num_envs=1, backend=pvector.Serial)
-    policy = DungeonPolicy(venv.driver_env, hidden_size=args.hidden)
+    if args.c_env:  # C-env checkpoints use the flat-obs policy (same flat layout the numpy env produces)
+        from rotmg_rl.csim.policy import CDungeonPolicy
+
+        policy = CDungeonPolicy(venv.driver_env, hidden_size=args.hidden)
+    else:
+        policy = DungeonPolicy(venv.driver_env, hidden_size=args.hidden)
     policy = ocean_torch.Recurrent(venv.driver_env, policy, input_size=args.hidden, hidden_size=args.hidden).to(device)
 
     if args.wandb:

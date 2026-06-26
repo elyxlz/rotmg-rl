@@ -36,6 +36,15 @@ angleOffset=0, defaultAngle=null, predictive=0, coolDownOffset=0, coolDown, ...)
 - **Pit Snake / Pit Viper / Yellow Python / Brown Python**: Wander(0.3) + `Shoot(20, coolDown:1000)`.
 - **Fire Python / Greater Pit Snake**: `Shoot(15, count:3, shootAngle:5, coolDown:1000)`.
 
+## Extracted hard numbers (betterSkillys EmbeddedData_SnakePitCXML.xml + Snake Pit.jm)
+- Stheno base **MaxHitPoints 7500** (ScaleHP2(20) scales with player count; sim uses a fixed
+  single-player value, tune for a ~feasible fight as in v1).
+- Projectiles: **id0 Speed 70, LifetimeMS 1500** (~7 tiles/s, ~10.5 tile range);
+  **id1 Speed 62, LifetimeMS 2000**. (projectileIndex 2 in phases 2/3 -> check for an id2 entry.)
+  ROTMG: tiles/sec ~= Speed/10; match the server's projectile motion when calibrating.
+- Dungeon map: `Shared/resources/worlds/Dungeons/Snake Pit.jm`, width 120, JSON `dict` of tiles
+  (ground types + wall/object ids). Defines entrance, corridors, boss room -> the navigation map.
+
 ## Still to extract for M1
 - Projectile properties (speed, lifetime, damage, size) per `projectileIndex` from Stheno's
   object XML in `Shared/resources/.../*.xml` (search the Stheno object entry).

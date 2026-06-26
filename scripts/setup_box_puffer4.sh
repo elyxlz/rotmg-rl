@@ -1,54 +1,70 @@
 #!/usr/bin/env bash
-# EXPERIMENTAL: provision PufferLib 4.0 (native C/CUDA rewrite) in a SEPARATE venv (.venv4).
+# Provision PufferLib 4.0 (native C/CUDA rewrite) in a SEPARATE venv (.venv4) with OUR dungeon env
+# compiled into its _C backend. Does NOT touch the working .venv (PufferLib 3.0) or any running 3.0
+# job. We pin a 4.0 commit and vendor a clone we extend in place (NOT a long-lived maintained fork).
 #
-# This does NOT touch the working .venv (PufferLib 3.0 / PuffeRL), which stays the default.
-# See docs/pufferlib4-migration.md for why 4.0 is investigated-but-not-adopted: it removes the
-# custom Python-env + injected-policy API this repo trains through. This script only sets up the
-# 4.0 trainer + builds its _C backend so 4.0 can be benchmarked; it does NOT port our env/policy
-# into it (that is a PufferLib fork — see the migration doc).
+# What it does: clone pinned PufferLib -> .venv4 (torch>=2.9 + deps) -> copy our env into the clone's
+# ocean/dungeon/ + config/dungeon.ini + a DungeonEncoder into pufferlib/models.py -> build.sh dungeon
+# (compiles _C with our env statically linked) -> pip install -e the clone. Then train with
+# scripts/train_dungeon4.py (or `cd .pufferlib4 && .venv4/bin/puffer train dungeon`).
 #
-# RUN ONLY on an idle box with disk headroom: torch>=2.9 + a CUDA _C build is several GB and heavy
-# I/O. Do not run while a 3.0 training job is using .venv, and check `df -h ~` first.
+# SAFETY: torch>=2.9 + a CUDA build is several GB + heavy I/O. Run with disk headroom. This script
+# never runs `uv cache clean` (a cache-clean during a live run crashed a job before) — free space
+# manually ONLY when `pgrep -f train_dungeon` is empty.
 #
-# Usage:
-#   scripts/setup_box_puffer4.sh                 # set up 4.0 + build a bundled env (breakout) to smoke-test
-#   PUFFER_ENV=breakout scripts/setup_box_puffer4.sh
+# Usage: scripts/setup_box_puffer4.sh
 set -euo pipefail
 export UV_LINK_MODE=copy
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-PUFFER_REF="${PUFFER_REF:-4.0}"
-PUFFER_ENV="${PUFFER_ENV:-breakout}"   # a bundled Ocean env, just to verify the native backend builds + trains
-PUFFER_DIR="${PUFFER_DIR:-$REPO_ROOT/.pufferlib4}"   # PufferLib clone (env compiles INTO its package)
-CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.4}"       # box: nvcc is here, not on PATH
-export CUDA_HOME PATH="$CUDA_HOME/bin:$PATH"
+PUFFER_REF="${PUFFER_REF:-9a4eb87e6b58c0aa5f22affefb65c7006d384972}"   # pinned 4.0 commit (branch HEAD 2026-06-22)
+PUFFER_DIR="${PUFFER_DIR:-$REPO_ROOT/.pufferlib4}"
+VENV4="$REPO_ROOT/.venv4"
+VENV_PY="$VENV4/bin/python"
+CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.4}"   # box: nvcc lives here, not on PATH
+export CUDA_HOME NVCC_ARCH="${NVCC_ARCH:-sm_86}" # 2x RTX 3090 = compute 8.6
 
-command -v nvcc >/dev/null || { echo "nvcc not found (set CUDA_HOME); have /usr/local/cuda-12.4?"; exit 1; }
-command -v clang >/dev/null || { echo "clang not found (build.sh needs clang)"; exit 1; }
-command -v ccache >/dev/null || echo "WARN: ccache not found; build.sh uses it (slower without)"
+command -v clang >/dev/null || { echo "ERROR: clang not found (build.sh needs it)"; exit 1; }
+[ -x "$CUDA_HOME/bin/nvcc" ] || { echo "ERROR: no nvcc at $CUDA_HOME/bin (set CUDA_HOME)"; exit 1; }
+command -v ccache >/dev/null || echo "WARN: ccache not found; build.sh uses it (slower without, not fatal)"
 
-# 1. Clone PufferLib 4.0 (GitHub-only; PyPI is still 3.0.0).
+avail_g=$(df -BG --output=avail "$REPO_ROOT" | tail -1 | tr -dc '0-9')
+echo "Free space on $REPO_ROOT: ${avail_g}G"
+[ "$avail_g" -lt 12 ] && { echo "ERROR: <12G free; a torch>=2.9 + CUDA build needs headroom. Free space (no job running) first."; exit 1; }
+
+# 1. Pinned PufferLib clone (vendored, GitHub-only; PyPI is still 3.0.0).
 if [ ! -d "$PUFFER_DIR/.git" ]; then
-    git clone --depth 1 --branch "$PUFFER_REF" https://github.com/PufferAI/PufferLib "$PUFFER_DIR"
+    git clone --branch 4.0 https://github.com/PufferAI/PufferLib "$PUFFER_DIR"
 fi
+( cd "$PUFFER_DIR" && git fetch --depth 1 origin "$PUFFER_REF" && git checkout -q "$PUFFER_REF" )
+echo "PufferLib pinned at $(cd "$PUFFER_DIR" && git rev-parse --short HEAD)"
 
-# 2. Separate venv (.venv4) — never the working .venv.
-uv venv .venv4
-VENV_PY="$REPO_ROOT/.venv4/bin/python"
-# 4.0 pyproject deps; torch>=2.9 (cu12 wheel runs on driver 580).
-"$VENV_PY" -m ensurepip -U >/dev/null 2>&1 || true
+# 2. Separate venv (.venv4) — never the working .venv. 4.0 pyproject deps; torch>=2.9 cu12.
+uv venv "$VENV4"
 uv pip install --python "$VENV_PY" "torch>=2.9" numpy pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
 
-# 3. Build the native _C backend with $PUFFER_ENV statically linked, then install the package.
-#    build.sh writes pufferlib/_C*.so INTO the clone; default mode needs nvcc + cudnn/nccl (it
-#    auto-detects torch's bundled nvidia.cudnn / nvidia.nccl).
-( cd "$PUFFER_DIR" && PATH="$REPO_ROOT/.venv4/bin:$PATH" ./build.sh "$PUFFER_ENV" )
+# 3. Assemble our env into the clone (single source of truth: env .h files copied from csim/).
+mkdir -p "$PUFFER_DIR/ocean/dungeon"
+cp "$REPO_ROOT/src/rotmg_rl/csim/dungeon.h" "$PUFFER_DIR/ocean/dungeon/dungeon.h"          # -DPUFFER4 set inside binding.c
+cp "$REPO_ROOT/src/rotmg_rl/csim/snakepit_map.h" "$PUFFER_DIR/ocean/dungeon/snakepit_map.h"
+cp "$REPO_ROOT/puffer4/binding.c" "$PUFFER_DIR/ocean/dungeon/binding.c"
+cp "$REPO_ROOT/puffer4/dungeon.ini" "$PUFFER_DIR/config/dungeon.ini"
+# DungeonEncoder -> pufferlib/models.py (idempotent: only append once)
+if ! grep -q "class DungeonEncoder" "$PUFFER_DIR/pufferlib/models.py"; then
+    printf '\n\n' >> "$PUFFER_DIR/pufferlib/models.py"
+    cat "$REPO_ROOT/puffer4/dungeon_encoder.py" >> "$PUFFER_DIR/pufferlib/models.py"
+fi
+
+# 4. Build _C with the dungeon env statically linked (default = CUDA backend).
+( cd "$PUFFER_DIR" && PATH="$VENV4/bin:$CUDA_HOME/bin:$PATH" ./build.sh dungeon )
+
+# 5. Install the package (the _C*.so is already built in place; no rebuild).
 uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"
 
-# 4. Smoke test: native trainer trains a bundled env end to end.
-( cd "$PUFFER_DIR" && "$VENV_PY" -c "from pufferlib import pufferl, _C; print('puffer4 OK, _C env =', getattr(_C, 'env_name', '?'))" )
+# 6. Smoke: the native backend imports and reports our env baked in.
+( cd "$PUFFER_DIR" && "$VENV_PY" -c "from pufferlib import _C; print('puffer4 _C OK, env =', getattr(_C, 'env_name', '?'))" )
 echo
-echo "Set up. Smoke-train with:  ( cd $PUFFER_DIR && $REPO_ROOT/.venv4/bin/puffer train $PUFFER_ENV )"
-echo "To train OUR env you must port it into the clone (ocean/dungeon/ + config/dungeon.ini +"
-echo "a DungeonNet encoder in pufferlib/models.py) — see docs/pufferlib4-migration.md."
+echo "Done. Train our env on 4.0:"
+echo "  $REPO_ROOT/.venv4/bin/python scripts/train_dungeon4.py --total-timesteps 2000000"
+echo "or directly:  ( cd $PUFFER_DIR && $VENV4/bin/puffer train dungeon )"

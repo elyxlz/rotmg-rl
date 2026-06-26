@@ -105,9 +105,20 @@ typedef struct {
 typedef struct {
     Log log;
     float* observations;  /* OBS_SIZE float32 */
+#ifdef PUFFER4
+    /* PufferLib 4.0 vecenv.h wires float* action/reward/terminal buffers and reads num_agents + rng
+     * (the env index, used to seed rng_state in my_init). Same env dynamics as the 3.0 build; only
+     * the buffer dtypes differ (actions are cast to int per-dim in c_step). */
+    float* actions;       /* 4 dims: move, aim, shoot, cast (delivered as float, cast to int) */
+    float* rewards;       /* 1 float */
+    float* terminals;     /* 1 float */
+    int num_agents;       /* 1 game per env */
+    unsigned int rng;     /* env index, set by vecenv.h before my_init */
+#else
     int* actions;         /* 4 ints: move, aim, shoot, cast */
     float* rewards;       /* 1 float */
     unsigned char* terminals;
+#endif
 
     Config cfg;
 
@@ -658,8 +669,13 @@ static void c_reset(Dungeon* env) {
 
 static void c_step(Dungeon* env) {
     Config* c = &env->cfg;
+#ifdef PUFFER4
+    int move_idx = (int)env->actions[0], aim_idx = (int)env->actions[1];
+    int shoot = (int)env->actions[2], cast = (int)env->actions[3];
+#else
     int move_idx = env->actions[0], aim_idx = env->actions[1];
     int shoot = env->actions[2], cast = env->actions[3];
+#endif
     double reward = c->rew_step;
 
     if (move_idx > 0 && env->petrify_timer == 0) {

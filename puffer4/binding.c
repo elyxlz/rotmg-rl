@@ -92,6 +92,7 @@ void my_init(Env* env, Dict* kwargs) {
     c->rew_clear = dict_get(kwargs, "rew_clear")->value;
     c->rew_death = dict_get(kwargs, "rew_death")->value;
     c->rew_step = dict_get(kwargs, "rew_step")->value;
+    c->rew_approach = dict_get(kwargs, "rew_approach")->value;
 
     env->rng_state = (uint64_t)env->rng * 2654435761ULL + 0x9E3779B97F4A7C15ULL;
     if (env->rng_state == 0) env->rng_state = 1;
@@ -108,4 +109,8 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "player_hp_frac", log->player_hp_frac);
     dict_set(out, "reward", log->reward);
     dict_set(out, "perf", log->perf);
+    /* score/episodes: per-episode end-state sums (both already /n); the ratio is the per-episode
+     * mean score (1.0 if cleared else 1-boss_hp_frac_at_end) -- the sweep metric. */
+    dict_set(out, "score", log->episodes > 0.0f ? log->score / log->episodes : 0.0f);
+    dict_set(out, "episodes", log->episodes);
 }

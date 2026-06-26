@@ -34,16 +34,22 @@ case "$cmd" in
     echo "=== 4.0 TRAINING RUN FINISHED (wandb run $rid) ==="
     grep -aE 'boss_hp_frac|cleared |perf |Steps |SPS ' logs4/train.log 2>/dev/null | tail -8
     ;;
-  train)  # launch ONE clean run; kills any existing 4.0 train first
+  train)  # launch ONE clean run; kills any existing 4.0 train first. Defaults to --slowly (our CNN,
+          # renderable, the recommended path); pass --native for the flat native encoder instead.
     pkill -9 -f scripts/train_dungeon4.py 2>/dev/null
     pkill -9 -f 'puffer train dungeon' 2>/dev/null
     sleep 4
     rm -rf checkpoints4/dungeon
     group="dungeon4-$(date +%Y%m%d-%H%M%S)"   # wandb group: bundles train + rollouts4 runs
     echo "$group" > logs4/group.txt
-    case " $* " in *" --slowly "*) touch logs4/slowly.flag ;; *) rm -f logs4/slowly.flag ;; esac  # follow only renders --slowly runs
+    set -- "$@"  # default to the CNN (--slowly) unless --native was explicitly requested
+    case " $* " in
+      *" --native "*) args=$(printf '%s ' "$@" | sed 's/ --native / /'); set -- $args; rm -f logs4/slowly.flag ;;
+      *" --slowly "*) touch logs4/slowly.flag ;;
+      *) set -- "$@" --slowly; touch logs4/slowly.flag ;;
+    esac
     WANDB_RUN_GROUP="$group" PYTHONUNBUFFERED=1 setsid "$PY" scripts/train_dungeon4.py "$@" --wandb --checkpoint-dir checkpoints4 </dev/null >logs4/train.log 2>&1 &
-    echo "4.0 train launched pid $! (group $group, GPU $CUDA_VISIBLE_DEVICES)"
+    echo "4.0 train launched pid $! (group $group, GPU $CUDA_VISIBLE_DEVICES, $* )"
     ;;
   follow)  # render the latest checkpoint to POV mp4 + wandb (only meaningful for --slowly runs)
     if [ ! -f logs4/slowly.flag ]; then
@@ -69,6 +75,12 @@ case "$cmd" in
     echo "cleared: $(grep -aoE 'cleared +[0-9.]+' logs4/train.log 2>/dev/null | tail -1)   boss_hp: $(grep -aoE 'boss_hp_frac +[0-9.]+' logs4/train.log 2>/dev/null | tail -1)"
     echo "follow:  $(grep -aoE 'rendered .*|skip .*' logs4/follow.log 2>/dev/null | tail -1)"
     ;;
+  metrics)  # latest per-episode + per-step metrics from the dashboard log (score = per-episode mean)
+    echo "wandb: $(grep -aoE 'https://wandb.ai/[^ ]+/runs/[a-z0-9]+' logs4/train.log 2>/dev/null | tail -1)"
+    for k in score episodes cleared boss_hp_frac perf reward entropy SPS Steps; do
+      printf '%-13s %s\n' "$k:" "$(grep -aoE "$k +[-0-9.]+ *[KM]?" logs4/train.log 2>/dev/null | tail -1)"
+    done
+    ;;
   *)
-    echo "usage: box4.sh {kill|train <args>|follow|wait|status}" ;;
+    echo "usage: box4.sh {kill|train [--native] <args>|follow|wait|status|metrics}" ;;
 esac

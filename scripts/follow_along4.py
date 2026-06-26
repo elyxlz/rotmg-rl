@@ -25,14 +25,14 @@ import numpy as np
 import torch
 
 import pufferlib.models as models
-from rotmg_rl.sim.dungeon import GRID, NUM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
+from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
 
-OBS_SIZE = NUM_CH * GRID * GRID + NUM_SCALARS
+OBS_SIZE = NUM_CH * GRID * GRID + NUM_MM_CH * MM * MM + NUM_SCALARS
 ACT_SIZES = [9, 32, 2, 2]
 
 
-def flatten(obs) -> np.ndarray:
-    return np.concatenate([obs["grid"].ravel(), obs["scalars"]]).astype(np.float32)
+def flatten(obs) -> np.ndarray:  # C obs layout: [grid, minimap, scalars]
+    return np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
 
 
 def build_policy(hidden: int, num_layers: int, device) -> torch.nn.Module:

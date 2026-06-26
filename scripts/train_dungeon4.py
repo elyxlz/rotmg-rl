@@ -40,8 +40,15 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=256, help="-> policy.hidden_size")
     p.add_argument("--learning-rate", type=float, default=None)
     p.add_argument("--ent-coef", type=float, default=None)
+    p.add_argument("--gamma", type=float, default=None, help="discount (LOWER ~0.95 cures the cautious finish)")
+    p.add_argument("--gae-lambda", type=float, default=None)
+    p.add_argument("--vf-coef", type=float, default=None)
     p.add_argument("--boss-hp", type=float, default=None)
     p.add_argument("--n-snakes", type=int, default=None)
+    p.add_argument("--rew-boss-dmg", type=float, default=None, help="-> env.rew_boss_dmg")
+    p.add_argument("--rew-clear", type=float, default=None, help="-> env.rew_clear")
+    p.add_argument("--rew-death", type=float, default=None, help="-> env.rew_death")
+    p.add_argument("--rew-approach", type=float, default=None, help="distance-to-boss shaping (~0.02 for nav)")
     p.add_argument("--spawn-in-room-prob", type=float, default=None)
     p.add_argument("--random-spawn-prob", type=float, default=None)
     p.add_argument("--no-grenades", action="store_true")
@@ -74,10 +81,24 @@ def main() -> None:
         cmd += ["--train.learning-rate", str(args.learning_rate)]
     if args.ent_coef is not None:
         cmd += ["--train.ent-coef", str(args.ent_coef)]
+    if args.gamma is not None:
+        cmd += ["--train.gamma", str(args.gamma)]
+    if args.gae_lambda is not None:
+        cmd += ["--train.gae-lambda", str(args.gae_lambda)]
+    if args.vf_coef is not None:
+        cmd += ["--train.vf-coef", str(args.vf_coef)]
     if args.boss_hp is not None:
         cmd += ["--env.boss-hp-max", str(args.boss_hp)]
     if args.n_snakes is not None:
         cmd += ["--env.n-snakes", str(args.n_snakes)]
+    if args.rew_boss_dmg is not None:
+        cmd += ["--env.rew-boss-dmg", str(args.rew_boss_dmg)]
+    if args.rew_clear is not None:
+        cmd += ["--env.rew-clear", str(args.rew_clear)]
+    if args.rew_death is not None:
+        cmd += ["--env.rew-death", str(args.rew_death)]
+    if args.rew_approach is not None:
+        cmd += ["--env.rew-approach", str(args.rew_approach)]
     if args.spawn_in_room_prob is not None:
         cmd += ["--env.spawn-in-room-prob", str(args.spawn_in_room_prob)]
     if args.random_spawn_prob is not None:

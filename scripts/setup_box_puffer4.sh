@@ -57,6 +57,9 @@ uv pip install --python "$VENV_PY" "torch>=2.9" --index-url https://download.pyt
 uv pip install --python "$VENV_PY" numpy pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
 
 # 3. Assemble our env into the clone (single source of truth: env .h files copied from csim/).
+# Reset the two files we patch in place to pristine so re-runs pick up the CURRENT encoder/wiring
+# (the append/patch below are otherwise idempotent-skip and would keep a stale DungeonEncoder).
+git -C "$PUFFER_DIR" checkout -- pufferlib/models.py src/ocean.cu 2>/dev/null || true
 mkdir -p "$PUFFER_DIR/ocean/dungeon"
 cp "$REPO_ROOT/src/rotmg_rl/csim/dungeon.h" "$PUFFER_DIR/ocean/dungeon/dungeon.h"          # -DPUFFER4 set inside binding.c
 cp "$REPO_ROOT/src/rotmg_rl/csim/snakepit_map.h" "$PUFFER_DIR/ocean/dungeon/snakepit_map.h"
@@ -68,10 +71,14 @@ if ! grep -q "class DungeonEncoder" "$PUFFER_DIR/pufferlib/models.py"; then
     cat "$REPO_ROOT/puffer4/dungeon_encoder.py" >> "$PUFFER_DIR/pufferlib/models.py"
 fi
 
-# Native CUDA CNN encoder -> src/dungeon_encoder.cu + wire into ocean.cu's create_custom_encoder, so
-# the NATIVE _C backend trains with our conv encoder (12x speed WITH the CNN; not --slowly, not flat).
-cp "$REPO_ROOT/puffer4/dungeon_encoder.cu" "$PUFFER_DIR/src/dungeon_encoder.cu"
-"$VENV_PY" - "$PUFFER_DIR/src/ocean.cu" <<'PYEOF'
+# OPT-IN native CUDA CNN encoder. Off by default: it is at the PRE-minimap architecture (single
+# grid branch, no pooling/minimap), so on the current [grid, minimap, scalars] obs it would mis-slice
+# -> native defaults to the flat DefaultEncoder (correct for any obs; fast but not our arch). The
+# --slowly torch path (puffer4/dungeon_encoder.py) is the CNN daily driver. To use the native CNN,
+# set PUFFER_NATIVE_CNN=1 (and first update puffer4/dungeon_encoder.cu for the new obs; see docs §7).
+if [ "${PUFFER_NATIVE_CNN:-0}" = "1" ]; then
+    cp "$REPO_ROOT/puffer4/dungeon_encoder.cu" "$PUFFER_DIR/src/dungeon_encoder.cu"
+    "$VENV_PY" - "$PUFFER_DIR/src/ocean.cu" <<'PYEOF'
 import sys
 p = sys.argv[1]
 src = open(p).read()
@@ -83,8 +90,9 @@ if "create_dungeon_encoder(enc)" not in src:
     src = src.replace(anchor + "\n",
         anchor + '\n    if (env_name == "dungeon") { create_dungeon_encoder(enc); return; }\n', 1)
 open(p, "w").write(src)
-print("ocean.cu: dungeon encoder wired")
+print("ocean.cu: native dungeon CNN encoder wired (PUFFER_NATIVE_CNN=1)")
 PYEOF
+fi
 
 # 3.5 Link prerequisites: build.sh links `-lcudnn -lnccl -lnvidia-ml`, but the pip nvidia wheels ship
 # only versioned .so files (no libcudnn.so / libnccl.so for `-l`) and NVML lives in the CUDA stubs

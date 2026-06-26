@@ -37,8 +37,16 @@ rendered .mp4 of a full run, plus a live completion on the server.
   Redis host currently `redis` (repoint to 127.0.0.1 for direct run), resourceFolder `./resources`
   (Shared/resources, 26M, with a `data` subdir of game XMLs). Built DLLs at
   {App,WorldServer}/bin/Release/net8.0/. No compose file -> launch DLLs directly.
-- NEXT: patch configs (redis host + abs resource path), launch App + WorldServer, create an
-  account (redis-cli per README), then a headless client connects = M0 complete.
+- SERVER IS LIVE: App/account server on :8080, WorldServer (game) on :2050, Redis on :6379,
+  behaviors loaded ("Behavior Database initialized"). Launch recipe (box, ~/rotmg-realgame):
+    docker run -d --name rotmg-redis -p 6379:6379 redis:7
+    (App)   cd betterSkillys/source/App/bin/Release/net8.0 && setsid dotnet App.dll </dev/null >log 2>&1 &
+    (World) cd betterSkillys/source/WorldServer/bin/Release/net8.0 && IS_DOCKER=1 setsid dotnet WorldServer.dll </dev/null >log 2>&1 &
+  Fix that made WorldServer run on Linux: set IS_DOCKER=1 (selects SignalListenerLinux instead of
+  the Windows Kernel32 P/Invoke handler). Local server.json already points Redis at 127.0.0.1.
+- M0 remaining: create an account + a HEADLESS client connects to :2050 and reads state. The
+  protocol is the 7.0/TKR era (betterSkillys ships its ActionScript client as the protocol ref);
+  need a headless client matching it (adapt nrelay/realmlib or build a minimal one).
 - The resources/data XMLs + BehaviorDb.SnakePit.cs are the ground truth for the M1 faithful sim
   (Stheno's real projectile speeds/patterns).
 

@@ -28,7 +28,7 @@ def main() -> None:
     p.add_argument("--num-workers", type=int, default=16)
     p.add_argument("--bptt-horizon", type=int, default=16)
     p.add_argument("--hidden", type=int, default=256)
-    p.add_argument("--learning-rate", type=float, default=2.5e-4)
+    p.add_argument("--learning-rate", type=float, default=None, help="override PuffeRL's tuned LR (0.015); leave unset")
     p.add_argument("--backend", choices=["serial", "multiprocessing"], default="multiprocessing")
     p.add_argument("--spawn-in-room-prob", type=float, default=0.0)
     p.add_argument("--random-spawn-prob", type=float, default=0.0)
@@ -47,7 +47,8 @@ def main() -> None:
     t = cfg["train"]
     t["device"] = "cuda"
     t["total_timesteps"] = args.total_timesteps
-    t["learning_rate"] = args.learning_rate
+    if args.learning_rate is not None:  # else keep PuffeRL's tuned default (0.015)
+        t["learning_rate"] = args.learning_rate
     t["bptt_horizon"] = args.bptt_horizon
     t["batch_size"] = args.num_envs * args.bptt_horizon * 4
     t["minibatch_size"] = args.num_envs * args.bptt_horizon

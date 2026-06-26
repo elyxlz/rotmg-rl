@@ -70,7 +70,9 @@ def main() -> None:
     cmd += ["--train.total-timesteps", str(args.total_timesteps)]
     cmd += ["--vec.total-agents", str(args.num_envs)]
     cmd += ["--policy.hidden-size", str(args.hidden)]  # the LSTM network is sized from policy.hidden_size
-    cmd += ["--checkpoint-dir", args.checkpoint_dir, "--checkpoint-interval", str(args.checkpoint_interval)]
+    # absolute checkpoint dir: puffer runs with cwd=CLONE, so a relative path would land in .pufferlib4
+    ckpt_dir = args.checkpoint_dir if os.path.isabs(args.checkpoint_dir) else str(REPO / args.checkpoint_dir)
+    cmd += ["--checkpoint-dir", ckpt_dir, "--checkpoint-interval", str(args.checkpoint_interval)]
     if args.num_workers is not None:
         cmd += ["--vec.num-threads", str(args.num_workers)]
     if args.slowly:

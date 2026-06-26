@@ -381,3 +381,28 @@ class DungeonEnv(gym.Env):
         inb = (cells[:, 0] >= 0) & (cells[:, 0] < GRID) & (cells[:, 1] >= 0) & (cells[:, 1] < GRID)
         cx, cy = cells[inb, 0], cells[inb, 1]
         grid[ch, cy, cx] = value[inb] if isinstance(value, np.ndarray) else value
+
+    # --- debug render (not faithful; just to follow along) -----------------
+
+    def render(self, px_per_tile: int = 5):
+        if self.render_mode != "rgb_array":
+            return None
+        h, w = self.map.walkable.shape
+        img = np.where(self.map.walkable[..., None], np.array([40, 40, 48], np.uint8), np.array([12, 12, 16], np.uint8))
+        img = np.repeat(np.repeat(img, px_per_tile, 0), px_per_tile, 1)
+
+        def dot(pos, color, r=2):
+            cx, cy = int(pos[0] * px_per_tile), int(pos[1] * px_per_tile)
+            y0, y1 = max(0, cy - r), min(img.shape[0], cy + r + 1)
+            x0, x1 = max(0, cx - r), min(img.shape[1], cx + r + 1)
+            if y0 < y1 and x0 < x1:
+                img[y0:y1, x0:x1] = color
+
+        for b in self.enemy_bullets:
+            dot(b[:2], (255, 140, 0), 1)
+        for b in self.player_bullets:
+            dot(b[:2], (90, 200, 255), 1)
+        if self.fight_active:
+            dot(self.boss_pos, (220, 40, 40), 4)
+        dot(self.player_pos, (60, 230, 90), 3)
+        return img

@@ -90,6 +90,21 @@ rendered .mp4 of a full run, plus a live completion on the server.
 - NEXT M2: custom CNN-LSTM policy for PuffeRL + a real training run; verify navigation->fight->
   completion learns. Then M1 faithfulness layers + renderer for the deliverable mp4.
 
+### 2026-06-26 — fidelity pass: faithful Wizard + renderer; full dungeon completable
+- User directive: make the sim as close to real as possible (most important), + a basic renderer
+  to follow along. Deliverable clarified = recording of the REAL client on the real server (not
+  sim render); sim render is just for following.
+- Chosen character: **Wizard** (staff + Spell), real stats from source. Built into the env:
+  670 HP / 385 MP, 2-shot staff (45-85 dmg, calibrated speed/life/rate), Spell nuke (burst of 20,
+  110-205 dmg, MP cost 100), MP regen. Action -> MultiDiscrete([9,9,2]) (move,aim,cast). Boss HP
+  -> real 7500. Per-shot damage. 4 tests pass.
+- Debug renderer (`render()`) + `scripts/record_dungeon.py`. A scripted oracle (geodesic nav ->
+  staff + spell) COMPLETES the full dungeon (enter -> boss -> clear) = the whole-dungeon env is
+  faithful enough + completable with the real Wizard. Demo video copied to the user's machine.
+- REMAINING fidelity (spec checklist): boss grenades + Confused/Petrify, Stheno Swarm minions,
+  path enemies (corridor snakes). Then RETRAIN the RL policy on the faithful env (the new training
+  run; old run was the generic char).
+
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |

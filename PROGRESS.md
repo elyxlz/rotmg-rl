@@ -3,6 +3,19 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## CURRENT STATE (2026-06-26)
+
+- **Sim**: faithful (sim/dungeon.py) + POV/minimap render. betterSkillys vendored at
+  vendor/betterSkillys. Snake Pit is a FIXED map (confirmed in source), train on the real layout.
+- **RL learns** (proven via wandb API, not logs): passive-boss bootstrap drove boss_hp_frac
+  0.55->0.22 = the agent learns to damage the boss. Cold-start "cleared down" was a red herring.
+- **Lesson**: PuffeRL anneals LR->0 over total_timesteps; short runs stop learning mid-progress.
+  Use long horizon (>=50M). Reward = net-negative existence + dominant boss-damage (no flee pay).
+- **Tooling**: scripts/box.sh (kill/train/follow/status/metrics), wandb_metrics.py (read via API).
+  train+rollout runs share a wandb group. ssh ripbox is multiplexed.
+- **In flight**: run dainty-sponge-14 (50M passive boss) testing whether long-horizon clears.
+  C-env port (M4, blazing-fast iteration) underway. Next: ramp threat back once it clears.
+
 ## SCOPE CHANGE (2026-06-26): whole dungeon + open server + latest PufferLib
 
 GOAL.md was rewritten. New mission: cold-start RL agent that ENTERS and COMPLETES the whole

@@ -11,10 +11,12 @@ the dungeon entrance, through the rooms, to killing the boss Stheno through all 
 deliverable mp4 exists and a real completion on the server is verified.
 
 THE DELIVERABLE (the definition of done)
-- A full .mp4 of the BEST policy ENTERING and COMPLETING the Snake Pit dungeon end to end,
-  rendered to look like the ACTUAL game (real ROTMG sprites/tiles/projectiles from the server
-  assets, HP bars, etc.) -- not abstract dots. Saved in the repo and copied to the user's machine.
-- Plus M6: the same policy completes a real Snake Pit on the betterSkillys server (live).
+- A full .mp4 SCREEN RECORDING of the REAL game client (the betterSkillys client) connected to
+  the REAL betterSkillys server, with the RL policy CONTROLLING the character, entering and
+  COMPLETING the Snake Pit dungeon end to end. This is the actual game visuals on the live
+  server -- NOT the custom sim rendered with sprites. Saved + copied to the user's machine.
+- The sim is for TRAINING ONLY; it does not need a pretty renderer, only mechanical fidelity so
+  the policy transfers to the real client/server.
 
 GROUND TRUTH
 - Repo (source of truth): ~/Repos/rotmg-rl. Read PROGRESS.md + the spec FIRST each time.
@@ -53,18 +55,20 @@ M0  Stack ready: latest PufferLib (3.x) + PuffeRL smoke run logs a curve; better
     RUNS (Redis via Docker + resources configured); a headless client connects + reads state.
 M1  Faithful Snake Pit sim from betterSkillys source: dungeon map (entrance -> rooms -> boss
     room) + navigation, real Stheno 3-phase fight, minions, projectile properties from XMLs.
-    Plus a GAME-FAITHFUL renderer using the real ROTMG assets (sprites/tiles/projectiles).
-    Target >=1M steps/s/core; numpy reference first if needed, then fast/C if required.
-M2  Cold-start training on PuffeRL (recurrent PPO): observation covers navigation + combat;
+    Mechanical fidelity only (so the policy transfers); a basic debug render is fine, NO sprite
+    renderer needed. Fast enough for large-scale PuffeRL training.
+M2  Cold-start training on PuffeRL (recurrent CNN-LSTM): observation covers navigation + combat;
     reward shapes whole-dungeon progress (explore -> reach boss -> clear phases -> COMPLETE);
     curriculum + intrinsic motivation for the long, sparse navigation horizon.
-M3  Sim completion: policy completes the full simulated dungeon (enter -> clear) >=90%
-    (stochastic, >=200 eps). Record the game-faithful completion mp4 = THE DELIVERABLE.
+M3  Sim completion (training checkpoint, NOT the deliverable): policy completes the full
+    simulated dungeon (enter -> clear) >=90% (stochastic, >=200 eps).
 M4  Robustness: >=90% completion across the domain-randomization range.
-M5  Deploy adapters to the betterSkillys server (headless protocol I/O): read state -> shared
-    observation, send actions; gap-measurement harness (sim vs real); refit sim if needed.
-M6  Real completion: the same policy enters and completes a real Snake Pit on the betterSkillys
-    server, verified end to end.
+M5  Deploy to the betterSkillys server: drive the REAL client. Read game state (intercepted
+    packets / the betterSkillys protocol) -> shared observation; inject the policy's actions into
+    the real client. Stand up a visual client + screen-capture path. Gap-measure sim vs real and
+    refit the sim if needed.
+M6 = THE DELIVERABLE: the policy enters and completes a real Snake Pit on the betterSkillys
+    server, SCREEN-RECORDED from the real game client to .mp4 (the actual game visuals, live).
 
 REUSE FROM v1 (boss-only radial sim, now superseded): the training infra pattern, the deploy
 bridge (observation schema, bullet reconstruction, policy server, RealmShark adapter), and the

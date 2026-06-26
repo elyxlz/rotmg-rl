@@ -16,6 +16,7 @@ import pufferlib.vector as pvector
 from pufferlib import pufferl
 from pufferlib.ocean import torch as ocean_torch
 
+from rotmg_rl.puffer_policy import DungeonPolicy
 from rotmg_rl.sim.dungeon import DungeonEnv
 
 
@@ -55,7 +56,7 @@ def main() -> None:
         **vec_kwargs,
     )
 
-    policy = ocean_torch.Policy(vecenv.driver_env, hidden_size=args.hidden)
+    policy = DungeonPolicy(vecenv.driver_env, hidden_size=args.hidden)
     policy = ocean_torch.Recurrent(vecenv.driver_env, policy, input_size=args.hidden, hidden_size=args.hidden)
     policy = policy.to("cuda")
 

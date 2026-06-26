@@ -28,8 +28,31 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   spread, 0.0026-0.0119, across the first 3 trials), so the sweep maximizes `environment/cleared`.
   `score` stays logged for reference. (Implication: to make the per-episode score itself
   discriminate, the episode budget would have to be tight enough that a slow finish truncates.)
-- Sweep running on GPU 0 (`.venv`, group `sweep-cleared`, 20 trials x 15M warm-started, ~52K SPS,
-  ~7 min/trial). Best config + finish verdict to follow.
+- **RESULT — the lever is gamma, and it's the INVERSE of the hypothesis: LOWER gamma cures the
+  caution.** The `cleared` sweep (group `sweep-cleared`, 9 trials x 15M warm-started on GPU 0) gave a
+  clean monotonic signal: gamma 0.997 -> final cleared ~0.003 (cautious), 0.993 -> 0.019, 0.982 ->
+  0.034, 0.956 -> 0.31, **0.95 -> 0.42**. A myopic (low-gamma) agent maximizes the immediate
+  boss-damage reward and finishes the kill at once; high gamma (0.997, the default-ish) over-values
+  long-horizon survival -> the cautious dodge. (Mechanism on this easy boss: spawned in-room, a
+  single 20-bolt spell ~3000 dmg one-shots the 300-HP boss before the phase-invuln can trigger
+  between steps -> clears in ~3 steps taking ZERO damage, player_hp_frac 1.0.) Note every config
+  scored `score`=1.0 INCLUDING the cautious ones -- the per-episode score saturates; `cleared` is the
+  metric that discriminated.
+- **Best config (sweep trial T8, final cleared 0.4332)**: gamma 0.95, gae_lambda 0.8, ent_coef 1e-4,
+  vf_coef 0.55, lr 0.0104; rew_clear 0.5, rew_death 0.66, rew_boss_dmg 0.3. gamma is the dominant
+  lever but NOT sufficient alone: a 40M isolation run at gamma 0.95 with otherwise-default knobs
+  (ent 0.001, default rewards) plateaued at cleared ~0.074 (still 18x the cautious 0.004) -- the full
+  0.42 needs the combination (low gamma + low ent + the reward balance).
+- **Finish CRACKED + STABLE (40M confirmation, group `confirm-t8full`)**: the T8 config held cleared
+  **flat at 0.425 from 6M -> 22M+** while entropy collapsed 2.0 -> 0.88. The original caution emerged
+  at 40-60M as entropy/LR annealed AT HIGH gamma; at gamma 0.95 the aggressive finish is a stable
+  attractor that survives the entropy collapse (no late regression). Saved `confirm-t8full.pt`.
+- **Recommended `train_dungeon.py` config for the shooting boss**: warm-start passive.pt, add
+  `--gamma 0.95` (the one change that matters most; default 0.995/0.997 is what caused the caution).
+  For the strongest fast clear also `--ent-coef 1e-4 --gae-lambda 0.8 --rew-boss-dmg 0.3`. CAVEAT:
+  this fix is validated on the EASY 300-HP boss where one-shot is possible; the full 7500-HP boss
+  can't be one-shot, so the finish there is a genuinely different (sustained-fight) problem -- treat
+  low gamma as the validated anti-caution lever, re-sweep gamma when the boss HP scales up.
 
 ## PufferLib 4.0 migration: ADOPTED + VALIDATED (2026-06-26) — clears; CNN daily driver
 

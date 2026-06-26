@@ -31,7 +31,7 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--learning-rate", type=float, default=None, help="override PuffeRL's tuned LR (0.015); leave unset")
     p.add_argument("--ent-coef", type=float, default=None, help="entropy bonus; raise above default 0.001 to avoid collapse")
-    p.add_argument("--gamma", type=float, default=None, help="discount; raise toward 0.999 so the future +clear isn't over-discounted")
+    p.add_argument("--gamma", type=float, default=None, help="discount (default 0.995); LOWER (~0.95) cures the cautious finish -- myopia favors the immediate kill over the long dodge (sweep finding)")
     p.add_argument("--gae-lambda", type=float, default=None, help="GAE lambda (default 0.90)")
     p.add_argument("--vf-coef", type=float, default=None, help="value loss coef (default 2.0)")
     p.add_argument("--rew-clear", type=float, default=None, help="reward for finishing the kill (default 1.0)")

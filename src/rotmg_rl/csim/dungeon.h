@@ -293,7 +293,7 @@ static double resolve_collisions(Dungeon* env) {
         if (any) {
             env->n_pbul = w;
             env->boss_hp -= dmg;
-            reward += dmg * c->rew_boss_dmg;
+            reward += (dmg / c->boss_hp_max) * c->rew_boss_dmg;
         }
     }
 
@@ -313,7 +313,7 @@ static double resolve_collisions(Dungeon* env) {
         if (any) {
             env->n_ebul = w;
             env->player_hp -= (float)dmg;
-            reward -= dmg * c->rew_damage_taken;
+            reward -= (dmg / c->player_hp_max) * c->rew_damage_taken;
         }
     }
     return reward;
@@ -465,7 +465,7 @@ static double grenades_tick(Dungeon* env) {
         if (g.fuse <= 0.0f) {
             if (dist_ff(env->px, env->py, g.x, g.y) <= g.rad) {
                 env->player_hp -= g.dmg;
-                reward -= g.dmg * c->rew_damage_taken;
+                reward -= (g.dmg / c->player_hp_max) * c->rew_damage_taken;
                 if ((int)g.status == 0)
                     env->confused_timer = c->confused_ticks;
                 else

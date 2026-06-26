@@ -161,6 +161,20 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   the ACTUAL sim-vs-real gap. Champions retained: `m3-final.pt` (full boss, 0.92 fixed) for
   deployment; `curr-dr2-c01.pt` / `curr-dr-c07.pt` as DR-robust evidence.
 
+### 2026-06-26 — M5 deploy bridge (Python half) built + tested
+- `src/rotmg_rl/deploy/realm_state.py`: `RealmState` + `EnemyShootEvent` (packet-level data),
+  `reconstruct_bullets` (forward-simulate bursts -> live bullet field, the vrelay technique),
+  `realm_to_observation` (reuses the shared schema), `action_to_intent` (policy MultiDiscrete
+  -> Move/PlayerShoot). 4 tests: reconstruction matches the sim's linear motion exactly,
+  culling works, realm observation is in the env space, action mapping correct. 9 tests green.
+- This is the half fully under our control and headless-testable. REMAINING M5/M6 is heavy
+  external integration:
+  1. NR-CORE private server running headless on Linux (.NET/mono + Redis; runtime TBD).
+  2. Headless nrelay fork: connect to NR-CORE, parse player/boss/EnemyShoot packets -> RealmState,
+     send Move/PlayerShoot from `action_to_intent`. Bridges to a Python policy server (IPC).
+  3. Gap-measurement harness: real Snake Pit (Stheno's true patterns) almost certainly differs
+     from this sim's radial-burst approx -> measure, then fix sim + retrain (the planned loop).
+
 ### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.

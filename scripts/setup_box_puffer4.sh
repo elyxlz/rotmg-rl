@@ -52,7 +52,7 @@ echo "PufferLib pinned at $(cd "$PUFFER_DIR" && git rev-parse --short HEAD)"
 # 2. Separate venv (.venv4) — never the working .venv. 4.0 pyproject deps.
 # torch MUST match the box CUDA toolkit major: nvcc is 12.4, so use CUDA 12.x wheels (cu128), NOT
 # torch's default cu130 wheels — a CUDA-13 torch mismatches the 12.4 nvcc/cudart the _C build links.
-uv venv "$VENV4"
+[ -d "$VENV4" ] || uv venv "$VENV4"
 uv pip install --python "$VENV_PY" "torch>=2.9" --index-url https://download.pytorch.org/whl/cu128
 uv pip install --python "$VENV_PY" numpy pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
 

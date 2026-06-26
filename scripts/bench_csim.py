@@ -20,7 +20,7 @@ from rotmg_rl.sim.dungeon import DungeonConfig
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--num-envs", type=int, default=4096)
+    p.add_argument("--num-envs", type=int, default=1024)  # ~peak SPS (working set stays in cache)
     p.add_argument("--seconds", type=float, default=5.0)
     p.add_argument("--n-snakes", type=int, default=40)
     p.add_argument("--no-boss-shoots", action="store_true")

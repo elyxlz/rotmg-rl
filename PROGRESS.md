@@ -3,6 +3,30 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## M4 DONE (2026-06-26): C (PufferLib Ocean) env port — blazing fast, parity-verified
+
+- **What**: `sim/dungeon.py` ported to C in `src/rotmg_rl/csim/` (`dungeon.h` env + `binding.c`
+  Ocean binding + `dungeon.py` PufferEnv wrapper + `policy.py` flat CNN-LSTM). Map baked to
+  `snakepit_map.h` via `gen_map_header.py`. Build: `uv run python -m rotmg_rl.csim.build`
+  (no raylib/torch; render is a stub — the numpy sim still does debug rendering). All config
+  toggles supported (boss_shoots, grenades, minions, n_snakes, boss_hp, spawn probs).
+- **Parity (acceptance)**: `tests/test_csim_parity.py` — same seed + same actions -> matching obs
+  and rewards vs the numpy oracle. Exact on a deterministic config (no snakes/minions, point-mass
+  damage): entrance-wander (200 steps), boss fight full window (movement, walls, staff+spell
+  bullets, physics, collisions, boss aimed/rotating patterns, phase transitions + invuln,
+  grenades + Confused/Petrify), and through-death + clear. Snake spawn/wander + minion placement
+  use per-env RNG (not bit-matched — stochastic by design). 4 tests pass.
+- **Speed** (measured on the box): numpy `DungeonEnv` baseline 1,364 SPS/core (default, 40 snakes)
+  / 8,045 SPS/core (passive). C env: 243K SPS single-thread; **3.39M SPS peak** (full config, 1024
+  envs, 16 OpenMP threads) ~= **2,500x**. Optimizations: OpenMP per-env step loop (per-env
+  xorshift RNG, race-free), shared map/direction tables, wall-channel caching, `-O3 -march=native`
+  (`-ffp-contract=off` keeps floats bit-faithful to the oracle so parity holds). Plateau past ~16
+  threads / >2k envs is memory-bandwidth bound (obs is 6733 floats/env).
+- **Training**: `scripts/train_dungeon.py --c-env` uses the native Ocean vecenv + flat policy
+  through PuffeRL. Verified end-to-end (4.3M steps, metrics flowing); the env is now ~3% of step
+  time so it no longer starves the GPU (end-to-end becomes policy/GPU-bound). Bench:
+  `scripts/bench_csim.py`.
+
 ## CURRENT STATE (2026-06-26)
 
 - **Sim**: faithful (sim/dungeon.py) + POV/minimap render. betterSkillys vendored at

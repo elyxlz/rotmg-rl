@@ -105,6 +105,16 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 - Next: M4 robustness = domain randomization (bullet speed, HP, spawn, obs noise) + retrain,
   require >=0.90 across the full DR range. Then M5 deploy adapters (headless protocol I/O).
 
+### 2026-06-26 — M4 started: domain randomization
+- Added per-episode DR to the env: bullet speed x[0.85,1.15], boss speed x[0.7,1.3], player
+  speed x[0.9,1.1], fire-interval +-2, spawn jitter 12% arena, obs gaussian noise std 0.02.
+  `--randomize` flag in train/eval; DR test added (5 tests green).
+- Quantified the fragility: M3 champion (fixed-dynamics) under DR = **0.345** stochastic.
+  A fixed-dynamics policy collapses when dynamics vary -> this is the sim-to-real risk, and
+  why M4 (train under DR) is the real prerequisite for M5/M6 transfer.
+- `m4-dr`: finetune from m3-final WITH --randomize, LR 1.5e-4, 40M steps; chained DR stochastic
+  eval gates M4 (>=0.90 across the DR range).
+
 ### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.

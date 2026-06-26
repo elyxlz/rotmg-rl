@@ -32,7 +32,15 @@ rendered .mp4 of a full run, plus a live completion on the server.
   episode_return improving. PuffeRL trains end to end.
 - Note: PuffeRL CLI env_name = the `[base] env_name` field (e.g. `puffer_squared`), not the
   filename. For our env I'll drive PuffeRL programmatically: `PuffeRL(config, vecenv, policy)`.
-- M0 remaining: run the betterSkillys server (Redis + resources) + headless client connects.
+- M0 server bring-up (in progress): Redis up via Docker (`rotmg-redis`, PONG). Server run config
+  mapped: App/account server (port 2000) + world servers (2001/2002) in Docker/ServerConfig/*.json,
+  Redis host currently `redis` (repoint to 127.0.0.1 for direct run), resourceFolder `./resources`
+  (Shared/resources, 26M, with a `data` subdir of game XMLs). Built DLLs at
+  {App,WorldServer}/bin/Release/net8.0/. No compose file -> launch DLLs directly.
+- NEXT: patch configs (redis host + abs resource path), launch App + WorldServer, create an
+  account (redis-cli per README), then a headless client connects = M0 complete.
+- The resources/data XMLs + BehaviorDb.SnakePit.cs are the ground truth for the M1 faithful sim
+  (Stheno's real projectile speeds/patterns).
 
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 

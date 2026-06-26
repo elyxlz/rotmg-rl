@@ -1,4 +1,4 @@
-"""Whole-dungeon env: map connectivity/navigation works and the boss fight is winnable."""
+"""Whole-dungeon env: navigation works, and the Wizard can kill the boss (staff + spell)."""
 
 import numpy as np
 
@@ -8,7 +8,6 @@ _TILE_OFFSETS = [(int(round(d[0])), int(round(d[1]))) for d in DIRS]
 
 
 def _nav_move(env: DungeonEnv) -> int:
-    """Descend the geodesic gradient toward the boss (neighbour tile with lowest geodist)."""
     px, py = int(env.player_pos[0]), int(env.player_pos[1])
     h, w = env.geodist.shape
     best_a, best_gd = 0, env._geodist_at(env.player_pos)
@@ -29,30 +28,44 @@ def test_obs_shapes_and_space():
     env = DungeonEnv()
     obs, _ = env.reset(seed=0)
     assert env.observation_space.contains(obs)
-    assert np.isfinite(env.prev_geodist)  # entrance connected to boss
+    assert np.isfinite(env.prev_geodist)
 
 
 def test_navigation_reaches_boss_room():
     env = DungeonEnv()
     env.reset(seed=0)
     for _ in range(env.cfg.max_steps):
-        env.step([_nav_move(env), 0])  # navigate, no shooting
+        env.step([_nav_move(env), 0, 0])
         if env.fight_active:
             break
-    assert env.fight_active  # reached the boss room over the real map
+    assert env.fight_active
 
 
-def test_boss_dies_when_shot():
-    cfg = DungeonConfig(boss_hp_max=150.0, player_hp_max=5000.0, invuln_ticks=1)
+def test_wizard_staff_kills_boss():
+    cfg = DungeonConfig(boss_hp_max=300.0, invuln_ticks=1)
     env = DungeonEnv(cfg)
     env.reset(seed=0)
-    env.player_pos = (env.boss_pos + np.array([5.0, 0.0], np.float32)).astype(np.float32)  # skip navigation
+    env.player_pos = (env.boss_pos + np.array([5.0, 0.0], np.float32)).astype(np.float32)
     cleared = False
     for _ in range(env.cfg.max_steps):
-        _, _, term, trunc, info = env.step([0, _aim_at(env.player_pos, env.boss_pos)])
+        _, _, term, trunc, info = env.step([0, _aim_at(env.player_pos, env.boss_pos), 0])
         if info["cleared"]:
             cleared = True
             break
         if term or trunc:
             break
     assert cleared
+
+
+def test_wizard_spell_consumes_mp_and_damages_boss():
+    cfg = DungeonConfig(boss_hp_max=7500.0, invuln_ticks=1)
+    env = DungeonEnv(cfg)
+    env.reset(seed=0)
+    env.player_pos = (env.boss_pos + np.array([4.0, 0.0], np.float32)).astype(np.float32)
+    env.fight_active, env.phase = True, 1  # in the fight
+    mp_before, hp_before = env.player_mp, env.boss_hp
+    env.step([0, _aim_at(env.player_pos, env.boss_pos), 1])  # cast spell
+    for _ in range(8):  # let the burst reach the boss
+        env.step([0, 0, 0])
+    assert env.player_mp < mp_before  # spell consumed MP
+    assert env.boss_hp < hp_before  # spell damaged the boss

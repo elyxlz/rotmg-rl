@@ -1,9 +1,11 @@
 """Whole-dungeon Snake Pit env over the real map: navigate entrance -> boss room, then fight the
-faithful 3-phase Stheno (spec: docs/snakepit-spec.md, extracted from betterSkillys source).
+faithful 3-phase Stheno as a WIZARD (staff + spell). Calibrated to the betterSkillys source
+(docs/snakepit-spec.md). Tick dt = 0.1s; projectile tiles/tick ~= XML Speed / 10.
 
-Stage 1 (here): navigation (BFS geodesic reward) + core boss fight (HP-gated 3 phases with
-invuln transitions, aimed + rotating bullet spreads, projectiles, player shooting, completion).
-Grenades/status-effects and minions layer on next. Completion = Stheno dead = dungeon cleared.
+Modeled: real map navigation (BFS geodesic reward), Wizard (HP/MP, 2-shot staff, Spell nuke
+burst, MP regen), Stheno 3-phase fight (HP gates, aimed + rotating spreads). NEXT fidelity
+layers (noted in spec): boss grenades + Confused/Petrify, Stheno Swarm minions, path enemies,
+debug renderer. Completion = Stheno dead = dungeon cleared.
 """
 
 from __future__ import annotations
@@ -16,50 +18,63 @@ import numpy as np
 
 from rotmg_rl.sim.snakepit_map import DungeonMap, find_objects, load_jm
 
-GRID = 15  # egocentric local view (tiles), player-centered
+GRID = 15
 _ANGLES = np.arange(8, dtype=np.float32) * (np.pi / 4.0)
 DIRS = np.stack([np.cos(_ANGLES), np.sin(_ANGLES)], axis=1).astype(np.float32)  # (8,2)
 
-# grid channels
 CH_WALL, CH_BOSS, CH_EBULLET, CH_EBVX, CH_EBVY, CH_PBULLET = range(6)
 NUM_CH = 6
-NUM_SCALARS = 8  # dir_to_obj(2), geodist_norm, hp_frac, boss_hp_frac, phase_norm, in_room, aim_ready
+NUM_SCALARS = 9  # dir(2), geodist, hp, mp, boss_hp, phase, in_room, spell_ready
+# bullet columns: x, y, vx, vy, life, dmg
+BX, BY, BVX, BVY, BLIFE, BDMG = range(6)
 
 
 @dataclass
 class DungeonConfig:
     # navigation
-    player_speed: float = 0.6
+    player_speed: float = 0.5  # tiles/tick (~5 tiles/s)
     player_radius: float = 0.4
     max_steps: int = 4000
-    boss_room_radius: float = 10.0  # within this of boss = in the boss room (fight active)
+    boss_room_radius: float = 10.0
     activation_range: float = 20.0
-    # player combat
-    player_hp_max: float = 200.0
-    shoot_cooldown: int = 2
-    player_bullet_speed: float = 1.2
-    player_bullet_dmg: float = 40.0
-    player_bullet_radius: float = 0.5
-    player_bullet_life: int = 25
-    # boss (ScaleHP2(20) in source; sim uses a feasible single-player value)
-    boss_hp_max: float = 2500.0
+    # Wizard (max-level stats, calibrated)
+    player_hp_max: float = 670.0
+    player_mp_max: float = 385.0
+    mp_regen: float = 0.5  # per tick (~5/s)
+    # staff: 2 parallel shots, dmg 45-85, speed 180->1.8 t/tick, life 475ms->~8 ticks, ~5 shots/s
+    staff_cooldown: int = 2
+    staff_num: int = 2
+    staff_dmg: tuple[float, float] = (45.0, 85.0)
+    staff_speed: float = 1.8
+    staff_life: int = 8
+    staff_radius: float = 0.5
+    staff_offset: float = 0.5  # parallel-shot lateral offset (tiles)
+    # spell nuke: burst of ~20 shots in an arc, dmg 110-205, speed 160->1.6, life 1000ms->10
+    spell_cost: float = 100.0
+    spell_cooldown: int = 5
+    spell_num: int = 20
+    spell_arc_deg: float = 70.0
+    spell_dmg: tuple[float, float] = (110.0, 205.0)
+    spell_speed: float = 1.6
+    spell_life: int = 10
+    # boss
+    boss_hp_max: float = 7500.0  # ScaleHP2(20) in source; this is the base
     boss_radius: float = 2.0
     boss_speed: float = 0.12
     invuln_ticks: int = 15
-    # projectiles (tiles/tick, lifetime ticks ~ source Speed/10, LifetimeMS/100)
-    ebullet_speed: float = 0.7
+    ebullet_speed: float = 0.7  # proj0 70->0.7
     ebullet_life: int = 15
-    ebullet_dmg: float = 30.0
+    ebullet_dmg: float = 40.0
     ebullet_radius: float = 0.4
-    max_bullets: int = 4096
+    max_bullets: int = 8192
     # rewards
     rew_progress: float = 0.1
     rew_reach: float = 20.0
-    rew_boss_dmg: float = 0.01  # per HP
+    rew_boss_dmg: float = 0.004  # per HP (boss has 7500)
     rew_survive: float = 0.002
-    rew_damage_taken: float = 0.02  # per HP
-    rew_clear: float = 100.0
-    rew_death: float = 20.0
+    rew_damage_taken: float = 0.01
+    rew_clear: float = 150.0
+    rew_death: float = 30.0
     rew_step: float = -0.002
 
 
@@ -109,7 +124,7 @@ class DungeonEnv(gym.Env):
                 "scalars": gym.spaces.Box(-1.0, 1.0, (NUM_SCALARS,), np.float32),
             }
         )
-        self.action_space = gym.spaces.MultiDiscrete([9, 9])  # move(0=stay,1-8), aim(0=none,1-8)
+        self.action_space = gym.spaces.MultiDiscrete([9, 9, 2])  # move, aim(staff), cast spell
         self._rng = np.random.default_rng()
 
     # --- core loop ---------------------------------------------------------
@@ -122,72 +137,73 @@ class DungeonEnv(gym.Env):
         self.steps = 0
         self.player_pos = np.array([self.entrance_xy[0] + 0.5, self.entrance_xy[1] + 0.5], np.float32)
         self.player_hp = c.player_hp_max
+        self.player_mp = c.player_mp_max
         self.prev_geodist = self._geodist_at(self.player_pos)
-        self.shoot_timer = 0
+        self.staff_timer = 0
+        self.spell_timer = 0
         self.boss_pos = np.array([self.boss_xy[0] + 0.5, self.boss_xy[1] + 0.5], np.float32)
         self.boss_hp = c.boss_hp_max
-        self.phase = 0  # 0 none(nav), 1/2/3 fight phases, -1 transition
+        self.phase = 0
         self.fight_active = False
         self.invuln_timer = 0
-        self.phase_shoot_timers: dict = {}
+        self.shoot_timers: dict = {}
         self.rotate_angle = 0.0
-        self.enemy_bullets = np.zeros((0, 5), np.float32)  # x,y,vx,vy,life
-        self.player_bullets = np.zeros((0, 5), np.float32)
+        self.enemy_bullets = np.zeros((0, 6), np.float32)
+        self.player_bullets = np.zeros((0, 6), np.float32)
         return self._obs(), {}
 
     def step(self, action):
         c = self.cfg
-        move_idx, aim_idx = int(action[0]), int(action[1])
+        move_idx, aim_idx, cast = int(action[0]), int(action[1]), int(action[2])
         reward = c.rew_step
-        in_room = float(np.linalg.norm(self.player_pos - self.boss_pos)) <= c.boss_room_radius
 
-        # player movement (wall-sliding)
         if move_idx > 0:
             self._try_move(DIRS[move_idx - 1] * c.player_speed)
 
-        # navigation reward until the boss room
         gd = self._geodist_at(self.player_pos)
         if not self.fight_active:
             reward += (self.prev_geodist - gd) * c.rew_progress
         self.prev_geodist = gd
 
-        # activate fight when close enough
         if not self.fight_active and np.linalg.norm(self.player_pos - self.boss_pos) <= c.activation_range:
             self.fight_active = True
             self.phase = 1
             reward += c.rew_reach
 
-        # player shooting
-        self.shoot_timer = max(0, self.shoot_timer - 1)
-        if aim_idx > 0 and self.shoot_timer == 0:
-            vel = DIRS[aim_idx - 1] * c.player_bullet_speed
-            self.player_bullets = self._append(self.player_bullets, [[*self.player_pos, vel[0], vel[1], c.player_bullet_life]])
-            self.shoot_timer = c.shoot_cooldown
+        # Wizard staff: 2 parallel shots toward aim
+        self.staff_timer = max(0, self.staff_timer - 1)
+        self.spell_timer = max(0, self.spell_timer - 1)
+        self.player_mp = min(c.player_mp_max, self.player_mp + c.mp_regen)
+        if aim_idx > 0 and self.staff_timer == 0:
+            self._fire_staff(DIRS[aim_idx - 1])
+            self.staff_timer = c.staff_cooldown
+        # Spell nuke (toward aim, or toward boss if no aim) if MP available
+        if cast == 1 and self.spell_timer == 0 and self.player_mp >= c.spell_cost:
+            direction = DIRS[aim_idx - 1] if aim_idx > 0 else self._unit(self.boss_pos - self.player_pos)
+            self._cast_spell(direction)
+            self.player_mp -= c.spell_cost
+            self.spell_timer = c.spell_cooldown
 
         if self.fight_active:
-            reward += self._boss_tick()
+            self._boss_tick()
 
-        # advance bullets
         self.player_bullets = self._advance(self.player_bullets)
         self.enemy_bullets = self._advance(self.enemy_bullets)
 
-        # player bullets vs boss (only when vulnerable)
         if self.player_bullets.shape[0] and self.invuln_timer == 0 and self.phase > 0:
-            hit = np.linalg.norm(self.player_bullets[:, :2] - self.boss_pos, axis=1) < (c.boss_radius + c.player_bullet_radius)
-            n = int(hit.sum())
-            if n:
-                dmg = n * c.player_bullet_dmg
+            hit = np.linalg.norm(self.player_bullets[:, :2] - self.boss_pos, axis=1) < (c.boss_radius + c.staff_radius)
+            if hit.any():
+                dmg = float(self.player_bullets[hit, BDMG].sum())
                 self.boss_hp -= dmg
                 reward += dmg * c.rew_boss_dmg
                 self.player_bullets = self.player_bullets[~hit]
 
-        # enemy bullets vs player
         if self.enemy_bullets.shape[0]:
             hit = np.linalg.norm(self.enemy_bullets[:, :2] - self.player_pos, axis=1) < (c.player_radius + c.ebullet_radius)
-            n = int(hit.sum())
-            if n:
-                self.player_hp -= n * c.ebullet_dmg
-                reward -= n * c.ebullet_dmg * c.rew_damage_taken
+            if hit.any():
+                dmg = float(self.enemy_bullets[hit, BDMG].sum())
+                self.player_hp -= dmg
+                reward -= dmg * c.rew_damage_taken
                 self.enemy_bullets = self.enemy_bullets[~hit]
 
         if self.fight_active:
@@ -202,14 +218,37 @@ class DungeonEnv(gym.Env):
             terminated = True
             reward -= c.rew_death
         truncated = (not terminated) and self.steps >= c.max_steps
-        info = {"cleared": cleared, "in_room": in_room, "phase": self.phase, "boss_hp_frac": max(self.boss_hp, 0) / c.boss_hp_max, "steps": self.steps}
+        info = {"cleared": cleared, "in_room": float(self.fight_active), "phase": self.phase, "boss_hp_frac": max(self.boss_hp, 0) / c.boss_hp_max, "steps": self.steps}
         return self._obs(), float(reward), terminated, truncated, info
 
-    # --- boss behaviour (faithful core; grenades/status/minions next) ------
+    # --- Wizard ------------------------------------------------------------
 
-    def _boss_tick(self) -> float:
+    def _fire_staff(self, direction):
         c = self.cfg
-        # HP-gated phase transitions with invulnerability
+        perp = np.array([-direction[1], direction[0]], np.float32) * c.staff_offset
+        vel = direction * c.staff_speed
+        rows = []
+        for i in range(c.staff_num):
+            off = perp * (i - (c.staff_num - 1) / 2.0)
+            dmg = self._rng.uniform(*c.staff_dmg)
+            rows.append([self.player_pos[0] + off[0], self.player_pos[1] + off[1], vel[0], vel[1], c.staff_life, dmg])
+        self.player_bullets = self._append(self.player_bullets, rows)
+
+    def _cast_spell(self, direction):
+        c = self.cfg
+        base = np.arctan2(direction[1], direction[0])
+        arc = np.radians(c.spell_arc_deg)
+        angles = base + np.linspace(-arc / 2, arc / 2, c.spell_num)
+        vel = np.stack([np.cos(angles), np.sin(angles)], 1).astype(np.float32) * c.spell_speed
+        dmg = self._rng.uniform(*c.spell_dmg, size=(c.spell_num, 1)).astype(np.float32)
+        pos = np.tile(self.player_pos, (c.spell_num, 1)).astype(np.float32)
+        life = np.full((c.spell_num, 1), c.spell_life, np.float32)
+        self.player_bullets = self._append(self.player_bullets, np.concatenate([pos, vel, life, dmg], 1))
+
+    # --- boss (core; grenades/minions/status next) -------------------------
+
+    def _boss_tick(self):
+        c = self.cfg
         if self.invuln_timer > 0:
             self.invuln_timer -= 1
         else:
@@ -218,41 +257,33 @@ class DungeonEnv(gym.Env):
                 self.phase, self.invuln_timer = 2, c.invuln_ticks
             elif self.phase == 2 and frac <= 0.33:
                 self.phase, self.invuln_timer = 3, c.invuln_ticks
-        # drift toward player (Wander/approach)
         to_p = self.player_pos - self.boss_pos
-        d = np.linalg.norm(to_p) + 1e-6
-        self.boss_pos = self.boss_pos + (to_p / d) * c.boss_speed
+        self.boss_pos = self.boss_pos + self._unit(to_p) * c.boss_speed
         if self.invuln_timer > 0:
-            return 0.0
-        # phase shoots (aimed spreads; rotating in phases 2-3)
+            return
         if self.phase == 1:
-            self._aimed_shoot("p1", count=3, spread_deg=15, cooldown=15)
+            self._aimed_shoot("p1", 3, 15, 15)
         elif self.phase == 2:
-            self._rotating_shoot("p2", count=4, step_deg=15, cooldown=3)
+            self._rotating_shoot("p2", 4, 15, 3)
         elif self.phase == 3:
-            self._aimed_shoot("p3a", count=3, spread_deg=15, cooldown=15)
-            self._rotating_shoot("p3b", count=4, step_deg=15, cooldown=5)
-        return 0.0
+            self._aimed_shoot("p3a", 3, 15, 15)
+            self._rotating_shoot("p3b", 4, 15, 5)
 
     def _aimed_shoot(self, key, count, spread_deg, cooldown):
-        t = self.phase_shoot_timers.get(key, 0)
-        if t > 0:
-            self.phase_shoot_timers[key] = t - 1
+        if self.shoot_timers.get(key, 0) > 0:
+            self.shoot_timers[key] -= 1
             return
-        self.phase_shoot_timers[key] = cooldown
+        self.shoot_timers[key] = cooldown
         base = np.arctan2(*(self.player_pos - self.boss_pos)[::-1])
-        gap = np.radians(spread_deg)
-        self._spawn_burst(base, count, gap)
+        self._spawn_burst(base, count, np.radians(spread_deg))
 
     def _rotating_shoot(self, key, count, step_deg, cooldown):
-        t = self.phase_shoot_timers.get(key, 0)
-        if t > 0:
-            self.phase_shoot_timers[key] = t - 1
+        if self.shoot_timers.get(key, 0) > 0:
+            self.shoot_timers[key] -= 1
             return
-        self.phase_shoot_timers[key] = cooldown
+        self.shoot_timers[key] = cooldown
         self.rotate_angle += np.radians(step_deg)
-        gap = 2 * np.pi / count
-        self._spawn_burst(self.rotate_angle, count, gap)
+        self._spawn_burst(self.rotate_angle, count, 2 * np.pi / count)
 
     def _spawn_burst(self, base_angle, count, gap):
         c = self.cfg
@@ -261,9 +292,14 @@ class DungeonEnv(gym.Env):
         vel = np.stack([np.cos(angles), np.sin(angles)], 1).astype(np.float32) * c.ebullet_speed
         pos = np.tile(self.boss_pos, (count, 1)).astype(np.float32)
         life = np.full((count, 1), c.ebullet_life, np.float32)
-        self.enemy_bullets = self._append(self.enemy_bullets, np.concatenate([pos, vel, life], 1))
+        dmg = np.full((count, 1), c.ebullet_dmg, np.float32)
+        self.enemy_bullets = self._append(self.enemy_bullets, np.concatenate([pos, vel, life, dmg], 1))
 
     # --- helpers -----------------------------------------------------------
+
+    @staticmethod
+    def _unit(v):
+        return v / (np.linalg.norm(v) + 1e-6)
 
     def _walkable_at(self, pos) -> bool:
         x, y = int(pos[0]), int(pos[1])
@@ -288,16 +324,15 @@ class DungeonEnv(gym.Env):
         if bullets.shape[0] == 0:
             return bullets
         bullets = bullets.copy()
-        bullets[:, :2] += bullets[:, 2:4]
-        bullets[:, 4] -= 1.0
+        bullets[:, :2] += bullets[:, BVX:BVY + 1]
+        bullets[:, BLIFE] -= 1.0
         h, w = self.map.walkable.shape
-        ix = np.clip(bullets[:, 0].astype(int), 0, w - 1)
-        iy = np.clip(bullets[:, 1].astype(int), 0, h - 1)
-        alive = (bullets[:, 4] > 0) & self.map.walkable[iy, ix]
-        return bullets[alive]
+        ix = np.clip(bullets[:, BX].astype(int), 0, w - 1)
+        iy = np.clip(bullets[:, BY].astype(int), 0, h - 1)
+        return bullets[(bullets[:, BLIFE] > 0) & self.map.walkable[iy, ix]]
 
     def _append(self, arr, new):
-        new = np.asarray(new, np.float32)
+        new = np.asarray(new, np.float32).reshape(-1, 6)
         out = np.concatenate([arr, new], 0) if arr.shape[0] else new
         return out[-self.cfg.max_bullets :] if out.shape[0] > self.cfg.max_bullets else out
 
@@ -312,12 +347,12 @@ class DungeonEnv(gym.Env):
         wy = (p[1] + ys - half).astype(int)
         inb = (wx >= 0) & (wx < w) & (wy >= 0) & (wy < h)
         grid[CH_WALL][inb] = (~self.map.walkable[np.clip(wy, 0, h - 1), np.clip(wx, 0, w - 1)])[inb].astype(np.float32)
-        self._scatter(grid, CH_BOSS, (self.boss_pos - p).reshape(1, 2), 1.0) if self.fight_active else None
+        if self.fight_active:
+            self._scatter(grid, CH_BOSS, (self.boss_pos - p).reshape(1, 2), 1.0)
         if self.enemy_bullets.shape[0]:
             rel = self.enemy_bullets[:, :2] - p
             self._scatter(grid, CH_EBULLET, rel, 1.0)
-            spd = np.linalg.norm(self.enemy_bullets[:, 2:4], axis=1, keepdims=True) + 1e-6
-            u = self.enemy_bullets[:, 2:4] / spd
+            u = self.enemy_bullets[:, BVX:BVY + 1] / (np.linalg.norm(self.enemy_bullets[:, BVX:BVY + 1], axis=1, keepdims=True) + 1e-6)
             self._scatter(grid, CH_EBVX, rel, u[:, 0])
             self._scatter(grid, CH_EBVY, rel, u[:, 1])
         if self.player_bullets.shape[0]:
@@ -330,10 +365,11 @@ class DungeonEnv(gym.Env):
                 to_obj[1] / dist,
                 self._geodist_at(p) / self.max_geodist,
                 self.player_hp / c.player_hp_max,
+                self.player_mp / c.player_mp_max,
                 max(self.boss_hp, 0) / c.boss_hp_max,
                 self.phase / 3.0,
                 1.0 if self.fight_active else 0.0,
-                1.0 if self.shoot_timer == 0 else 0.0,
+                1.0 if (self.player_mp >= c.spell_cost and self.spell_timer == 0) else 0.0,
             ],
             np.float32,
         )

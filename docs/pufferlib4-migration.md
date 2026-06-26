@@ -16,8 +16,17 @@ Validated on the box: it learns and **clears** (eval rollouts `cleared=True`). T
 
 We also implemented our CNN **natively in the `_C` backend** to chase "12x WITH the CNN" (§7): it's
 parity-verified and trains, but **12x-with-CNN turns out to be physically impossible** — the CNN's
-compute (esp. the 30752->256 grid_fc GEMM, identical in torch) caps any CNN near the `--slowly` level,
-not 600K. So `--slowly` remains the recommendation.
+compute (esp. the old 30752->256 grid_fc GEMM) caps any CNN near the `--slowly` level, not 600K. So
+`--slowly` remains the recommendation.
+
+**As of 2026-06-26, 4.0 (`--slowly` CNN) is the PRIMARY trainer; 3.0 is the fallback** (kept until
+4.0 is confirmed equal-or-better on the full curriculum). The 4.0 path tracks the current obs —
+`[grid (7,31,31), minimap (3,32,32), scalars (8)]` = 9807, with the two-MaxPool CNNs (grid_fc
+1568->256, mm_fc 1024->128) — and exposes the curriculum knobs (`--gamma/--gae-lambda/--vf-coef/
+--rew-*/--init-checkpoint/...`). `box4.sh` (train/follow/wait/status/metrics) defaults to `--slowly`;
+`eval_dungeon4.py` reports the true per-episode clear rate. The native CNN encoder (§7) is now
+**opt-in** (`PUFFER_NATIVE_CNN=1`) and parked at the pre-minimap architecture; native defaults to the
+flat encoder (correct for the 9807 obs).
 
 Pinned PufferLib commit: `9a4eb87e6b58c0aa5f22affefb65c7006d384972` (branch `4.0`, release "4.0
 Experiments"). PyPI is still 3.0.0 — 4.0 is GitHub-only.

@@ -22,23 +22,26 @@ Training runs on a GPU box. Install with the `train` extra (torch + pufferlib):
 uv sync --extra train --group dev
 ```
 
-```bash
-# Reproduce the GPU-box training env (PufferLib 3.x + the fast C env)
-bash scripts/setup_box.sh
+# PRIMARY: PufferLib 4.0 (native rewrite), our CNN via the --slowly torch path. See
+# docs/pufferlib4-migration.md. Provisions a separate .venv4 + a pinned vendored clone.
+bash scripts/setup_box_puffer4.sh
 
-# Train a stage via the box manager (kills the prior run, logs to wandb, saves checkpoints)
-./scripts/box.sh train --c-env --total-timesteps 30000000 --num-envs 1024 \
+# Train a stage (box4 defaults to --slowly = our CNN; logs to wandb, saves renderable checkpoints)
+./scripts/box4.sh train --total-timesteps 30000000 --num-envs 1024 \
     --boss-hp 7500 --gamma 0.95 --ent-coef 1e-4 --spawn-in-room-prob 1.0
-./scripts/box.sh follow              # POV rollout videos -> wandb (run in background)
-./scripts/box.sh status              # procs + wandb URL + latest metrics
-./scripts/box.sh metrics <run-id>    # read metrics via the wandb API (the source of truth)
+./scripts/box4.sh follow             # POV rollout videos -> wandb (run in background)
+./scripts/box4.sh status             # procs + wandb URL + latest metrics
+./scripts/box4.sh metrics            # latest per-episode (score) + per-step metrics
+./scripts/box4.sh wait               # block until the run ends, print final metrics
 
 # Stochastic eval: TRUE per-episode clear rate (the >=80% deliverable criterion)
-uv run --extra train python scripts/eval_dungeon.py --checkpoint checkpoints/dungeon.pt \
-    --c-env --episodes 200 --boss-hp 7500 --spawn-in-room-prob 1.0 --render videos/eval.mp4
+.venv4/bin/python scripts/eval_dungeon4.py --checkpoint checkpoints4/dungeon/<run>/<step>.bin \
+    --episodes 200 --boss-hp 7500 --spawn-in-room-prob 1.0
 
-# Protein hyperparameter sweep (gamma / ent_coef / reward balance)
-uv run --extra train python scripts/sweep_dungeon.py --max-runs 24 --metric cleared
+# FALLBACK: the PufferLib 3.x stack (kept until 4.0 is confirmed equal-or-better)
+bash scripts/setup_box.sh
+./scripts/box.sh train --c-env --total-timesteps 30000000 --num-envs 1024 --boss-hp 7500 --gamma 0.95
+uv run --extra train python scripts/eval_dungeon.py --checkpoint checkpoints/dungeon.pt --c-env --episodes 200 --boss-hp 7500
 ```
 
 To follow training live, set `WANDB_API_KEY` (or `wandb login`) on the box; otherwise runs

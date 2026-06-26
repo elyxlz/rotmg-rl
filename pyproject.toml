@@ -20,7 +20,7 @@ dev = ["pytest>=8.0"]
 [project.optional-dependencies]
 train = [
     "torch>=2.4",
-    "pufferlib>=2.0",
+    "pufferlib>=3.0",  # 3.x ships the PuffeRL trainer (2.0.x had no importable trainer)
 ]
 
 [build-system]

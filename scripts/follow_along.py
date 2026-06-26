@@ -77,8 +77,16 @@ def main() -> None:
         name = f"rollouts-{args.run_id}" if args.run_id else "rollouts"
         wandb.init(project="rotmg-dungeon", name=name, job_type="eval", group=os.environ.get("WANDB_RUN_GROUP"))
     pathlib.Path("videos").mkdir(exist_ok=True)
-    # show the fight (where the action is): spawn in the boss room
-    cfg = DungeonConfig(boss_hp_max=args.boss_hp, spawn_in_room_prob=1.0)
+    # match the training env (train_dungeon writes env_config.json); start in the fight for a watchable video
+    cfg_path = pathlib.Path(args.watch) / "env_config.json"
+    if cfg_path.exists():
+        import json
+
+        d = json.loads(cfg_path.read_text())
+        d["spawn_in_room_prob"], d["random_spawn_prob"] = 1.0, 0.0
+        cfg = DungeonConfig(**d)
+    else:
+        cfg = DungeonConfig(boss_hp_max=args.boss_hp, spawn_in_room_prob=1.0)
     last = None
     while True:
         ckpt = newest_ckpt(args.watch)

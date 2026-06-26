@@ -30,7 +30,7 @@ OBS = NUM_CH * GRID * GRID + NUM_SCALARS
 def build_harness(tmp: pathlib.Path) -> pathlib.Path:
     exe = tmp / "test_encoder"
     cmd = [f"{CUDA}/bin/nvcc", "-DPRECISION_FLOAT", "-O2", "-arch=sm_86", f"-I{CLONE}/src",
-           str(REPO / "puffer4" / "test_encoder.cu"), "-lcudart", "-lcublas", "-o", str(exe)]
+           str(REPO / "puffer4" / "test_encoder.cu"), "-lcudart", "-lcublas", "-lcurand", "-o", str(exe)]
     subprocess.run(cmd, check=True, cwd=str(CLONE))
     return exe
 

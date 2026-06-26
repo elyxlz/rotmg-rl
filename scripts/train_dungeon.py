@@ -36,6 +36,7 @@ def main() -> None:
     p.add_argument("--n-snakes", type=int, default=40)
     p.add_argument("--no-grenades", action="store_true")
     p.add_argument("--no-minions", action="store_true")
+    p.add_argument("--no-boss-shoots", action="store_true", help="passive boss target (bootstrap aim+kill)")
     p.add_argument("--init-checkpoint", default=None, help="warm-start policy from this state_dict")
     p.add_argument("--save-path", default=None, help="save the trained policy state_dict here")
     p.add_argument("--wandb", action="store_true", help="log metrics to wandb (needs `wandb login`)")
@@ -70,6 +71,7 @@ def main() -> None:
         n_snakes=args.n_snakes,
         enable_grenades=not args.no_grenades,
         enable_minions=not args.no_minions,
+        boss_shoots=not args.no_boss_shoots,
     )
     vecenv = pvector.make(
         emulation.GymnasiumPufferEnv,

@@ -72,6 +72,7 @@ class DungeonConfig:
     boss_hp_max: float = 7500.0
     boss_radius: float = 2.0
     boss_speed: float = 0.12
+    boss_shoots: bool = True  # curriculum stage 0 sets False: passive target, learn aim+kill first
     invuln_ticks: int = 15
     ebullet_speed: float = 0.7
     ebullet_life: int = 15
@@ -339,15 +340,18 @@ class DungeonEnv(gym.Env):
         if self.invuln_timer > 0:
             return
         if self.phase == 1:
-            self._aimed_shoot("p1", 3, 15, 15)
+            if c.boss_shoots:
+                self._aimed_shoot("p1", 3, 15, 15)
             self._spawn_minions()
             self._throw_grenade("g1", c.grenade_cd_p1, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
         elif self.phase == 2:
-            self._rotating_shoot("p2", 4, 15, 3)
+            if c.boss_shoots:
+                self._rotating_shoot("p2", 4, 15, 3)
             self._throw_grenade("g2", c.grenade_cd_p2, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
         elif self.phase == 3:
-            self._aimed_shoot("p3a", 3, 15, 15)
-            self._rotating_shoot("p3b", 4, 15, 5)
+            if c.boss_shoots:
+                self._aimed_shoot("p3a", 3, 15, 15)
+                self._rotating_shoot("p3b", 4, 15, 5)
             self._throw_grenade("g3", c.grenade_cd_p1, c.grenade_radius_petrify, c.grenade_dmg_petrify, 1)
 
     def _spawn_minions(self):

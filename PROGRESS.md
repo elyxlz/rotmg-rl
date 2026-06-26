@@ -50,6 +50,15 @@ rendered .mp4 of a full run, plus a live completion on the server.
 - The resources/data XMLs + BehaviorDb.SnakePit.cs are the ground truth for the M1 faithful sim
   (Stheno's real projectile speeds/patterns).
 
+### 2026-06-26 — M1 brick: real dungeon map loader
+- `sim/snakepit_map.py` parses the real `Snake Pit.jm` (base64+zlib uint16 tiles) into a navigable
+  grid. Tested. Map: 120x119, 5175 floor tiles. Located via `find_objects`: entrance **Portal
+  (110,21)**, boss **Stheno (16,73)**, spawn (16,76). So the whole-dungeon nav path (entrance ->
+  boss room) is grounded in the real layout. Map committed to `data/maps/snakepit.jm`.
+- Next M1 bricks: navigation env over this map (entrance->boss), faithful 3-phase boss fight
+  (spec in docs/snakepit-spec.md: 7500 HP, proj id0 spd70/1500ms, id1 spd62/2000ms, grenades,
+  status, minions), then the game-faithful renderer (real sprites from Shared/resources).
+
 ## Milestones (v1 — boss-only, superseded by the whole-dungeon goal above)
 
 | ID | Milestone | Status |

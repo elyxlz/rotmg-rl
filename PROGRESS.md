@@ -136,6 +136,17 @@ Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
   (curr-dr-c07, 0.88). No fixed->DR collapse risk since the base is already DR-trained.
   Chained DR stochastic eval (300 eps) = M4 gate (>=0.90).
 
+### 2026-06-26 — M4 is hard; finer sustained DR curriculum
+- Sustained full-boss DR finetune from the hp175 base was flat-stuck (clear 0.00, return frozen
+  ~170): the hp175->250 jump under DR is too big to find improving gradients. Distinct from the
+  M3 finetune (return climbed). Big difficulty jumps under DR create unlearnable tasks.
+- Made `curriculum.py` resumable (--start-d/--init/--inc/--chunk-steps/--lr). Resuming the DR
+  curriculum from curr-dr-c07 (hp175 DR 0.88) at d=0.625 with HALF increments (0.0625, ~hp+12.5
+  per level), 10M-step sustained chunks, low LR 1e-4 (no per-chunk LR-restart shock). Climbs
+  hp175->187->200->212->225->237->250 under DR. Full-boss DR stochastic >=0.90 = M4.
+- NOTE: M4 robustness is genuinely hard = the sim-to-real gap is real, which is exactly why
+  M4 exists before attempting M5/M6 transfer.
+
 ### Recipe queue (add only if a later milestone plateaus)
 1. Curriculum: start stationary/weak boss, ramp HP + fire-rate + burst as clear-rate clears a
    threshold. Add as env config schedule driven by the trainer.

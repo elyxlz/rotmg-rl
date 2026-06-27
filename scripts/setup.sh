@@ -67,8 +67,13 @@ uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"
 uv pip install --python "$VENV_PY" -e "$REPO_ROOT" --no-deps
 uv pip install --python "$VENV_PY" gymnasium imageio imageio-ffmpeg
 
-# 5. Smoke: the native backend imports and reports our env baked in.
-( cd "$PUFFER_DIR" && "$VENV_PY" -c "from pufferlib import _C; print('_C OK, env =', getattr(_C, 'env_name', '?'))" )
+# 4.5. Build the single-env eval binding (csim/binding.c -> rotmg_rl.csim.binding). This is separate
+# from the _C training backend above; train.py imports rotmg_rl.eval, which imports this binding, so a
+# clean install must compile it or train/eval fail at import.
+"$VENV_PY" -m rotmg_rl.csim.build
+
+# 5. Smoke: the native backend AND the full import chain (training -> eval -> csim binding) load clean.
+( cd "$PUFFER_DIR" && "$VENV_PY" -c "from pufferlib import _C; import rotmg_rl.training; print('_C OK, env =', getattr(_C, 'env_name', '?'), '| rotmg_rl.training imports clean')" )
 echo
 echo "Done. Train the Snake Pit (use --slowly for our CNN + renderable videos):"
 echo "  python3 train.py --wandb                                   # the one-command sweep -> full run"

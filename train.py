@@ -411,9 +411,10 @@ def main() -> None:
     trainer.save_weights(str(final))
     trainer.close()
 
-    rate = eval_clear_rate(policy, max(a.eval_episodes, 100), d=1.0, boss_hp=a.boss_hp, n_snakes_max=a.n_snakes_max)
+    rate = eval_clear_rate(policy, a.eval_episodes, d=1.0, boss_hp=a.boss_hp, n_snakes_max=a.n_snakes_max)
     print(f"\n== DONE -> {final} ({a.full_steps / 1e6:.0f}M steps) ==", flush=True)
-    print(f"== FULL-DIFFICULTY (d=1) CLEAR RATE: {rate:.1%} ==", flush=True)
+    print(f"== FULL-DIFFICULTY (d=1) CLEAR RATE: {rate:.1%} over {a.eval_episodes} eps "
+          f"(robust 100-ep number: scripts/eval_dungeon4.py --checkpoint {final}) ==", flush=True)
     if a.wandb:
         import wandb
 

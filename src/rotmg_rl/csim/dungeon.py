@@ -21,7 +21,9 @@ __all__ = ["OBS_SIZE", "CDungeon"]
 
 
 class CDungeon(pufferlib.PufferEnv):
-    def __init__(self, config: DungeonConfig | None = None, num_envs: int = 1, render_mode=None, log_interval: int = 128, buf=None, seed: int = 0):
+    def __init__(
+        self, config: DungeonConfig | None = None, num_envs: int = 1, render_mode=None, log_interval: int = 128, buf=None, seed: int = 0
+    ):
         self.cfg = config or DungeonConfig()
         self.single_observation_space = gymnasium.spaces.Box(low=-1.0, high=1.0, shape=(OBS_SIZE,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([9, N_AIM, 2, 2])
@@ -29,7 +31,9 @@ class CDungeon(pufferlib.PufferEnv):
         self.num_agents = num_envs
         self.log_interval = log_interval
         super().__init__(buf)
-        self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs, seed, **asdict(self.cfg))
+        self.c_envs = binding.vec_init(
+            self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs, seed, **asdict(self.cfg)
+        )
 
     @property
     def agents_per_batch(self) -> int:

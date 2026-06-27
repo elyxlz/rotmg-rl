@@ -48,8 +48,16 @@ def test_damage_clamp_player_blade():
     per_blade = _defended(100.0, 8.0)
     assert per_blade == 92.0
     cfg = DungeonConfig(
-        boss_hp_max=1e9, player_hp_max=810.0, hp_regen=0.0, n_snakes=0, boss_wander_speed=0.0,
-        enable_grenades=False, ebullet_dmg=100.0, blade_cd=1000, invuln_ticks=0, opening_invuln_ticks=0,
+        boss_hp_max=1e9,
+        player_hp_max=810.0,
+        hp_regen=0.0,
+        n_snakes=0,
+        boss_wander_speed=0.0,
+        enable_grenades=False,
+        ebullet_dmg=100.0,
+        blade_cd=1000,
+        invuln_ticks=0,
+        opening_invuln_ticks=0,
     )
     env = CDungeonSingle(cfg, seed=2)
     env.reset(seed=2)
@@ -65,8 +73,16 @@ def test_hp_regen_after_idle_ticks():
     the player is hurt (one 3-blade volley -> 534) and then idles T ticks far from any threat, HP rises
     by exactly hp_regen * T."""
     cfg = DungeonConfig(
-        boss_hp_max=1e9, player_hp_max=810.0, hp_regen=1.54, n_snakes=0, boss_wander_speed=0.0,
-        enable_grenades=False, ebullet_dmg=100.0, blade_cd=1000, invuln_ticks=0, opening_invuln_ticks=0,
+        boss_hp_max=1e9,
+        player_hp_max=810.0,
+        hp_regen=1.54,
+        n_snakes=0,
+        boss_wander_speed=0.0,
+        enable_grenades=False,
+        ebullet_dmg=100.0,
+        blade_cd=1000,
+        invuln_ticks=0,
+        opening_invuln_ticks=0,
     )
     env = CDungeonSingle(cfg, seed=2)
     env.reset(seed=2)
@@ -90,8 +106,16 @@ def test_spell_nova_total_vs_boss():
     per_bullet = _defended(D, 19.0)
     assert per_bullet == 166.0
     cfg = DungeonConfig(
-        boss_hp_max=7500.0, player_hp_max=1e9, n_snakes=0, boss_wander_speed=0.0, boss_shoots=False,
-        enable_grenades=False, spell_dmg_lo=D, spell_dmg_hi=D, invuln_ticks=0, opening_invuln_ticks=0,
+        boss_hp_max=7500.0,
+        player_hp_max=1e9,
+        n_snakes=0,
+        boss_wander_speed=0.0,
+        boss_shoots=False,
+        enable_grenades=False,
+        spell_dmg_lo=D,
+        spell_dmg_hi=D,
+        invuln_ticks=0,
+        opening_invuln_ticks=0,
     )
     env = CDungeonSingle(cfg, seed=1)
     env.reset(seed=1)
@@ -105,8 +129,14 @@ def test_spell_nova_total_vs_boss():
 def test_full_clear_terminates():
     """Killing the boss (boss_hp <= 0 in a fight) terminates the episode with cleared=True."""
     cfg = DungeonConfig(
-        boss_hp_max=50.0, player_hp_max=1e9, n_snakes=0, boss_wander_speed=0.0, boss_shoots=False,
-        enable_grenades=False, invuln_ticks=0, opening_invuln_ticks=0,
+        boss_hp_max=50.0,
+        player_hp_max=1e9,
+        n_snakes=0,
+        boss_wander_speed=0.0,
+        boss_shoots=False,
+        enable_grenades=False,
+        invuln_ticks=0,
+        opening_invuln_ticks=0,
     )
     env = CDungeonSingle(cfg, seed=1)
     env.reset(seed=1)
@@ -125,8 +155,14 @@ def test_timeout_truncates():
     and the episode is not flagged cleared."""
     max_steps = 15
     cfg = DungeonConfig(
-        boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, boss_wander_speed=0.0, boss_shoots=False,
-        enable_grenades=False, max_steps=max_steps, spawn_in_room_prob=1.0,
+        boss_hp_max=300.0,
+        player_hp_max=1e9,
+        n_snakes=0,
+        boss_wander_speed=0.0,
+        boss_shoots=False,
+        enable_grenades=False,
+        max_steps=max_steps,
+        spawn_in_room_prob=1.0,
     )
     env = CDungeonSingle(cfg, seed=1)
     env.reset(seed=1)

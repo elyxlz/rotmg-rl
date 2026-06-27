@@ -120,8 +120,18 @@ def run_sweep(num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes,
         trial["env"]["boss_hp_max"] = sweep_boss_hp
         t0 = time.time()
         try:
-            trainer, _, evals = train_continuous(trial, trial_steps, hp["ramp_frac"], hp["rew_approach"], n_snakes_max, out,
-                                                 use_wandb=False, eval_every=eval_every, eval_episodes=eval_episodes, boss_hp=sweep_boss_hp)
+            trainer, _, evals = train_continuous(
+                trial,
+                trial_steps,
+                hp["ramp_frac"],
+                hp["rew_approach"],
+                n_snakes_max,
+                out,
+                use_wandb=False,
+                eval_every=eval_every,
+                eval_episodes=eval_episodes,
+                boss_hp=sweep_boss_hp,
+            )
             trainer.close()
         except Exception as exc:
             print(f"TRIAL {i + 1} FAILED: {exc}", flush=True)
@@ -162,8 +172,11 @@ def main() -> None:
     out = repo / a.out_dir
     out.mkdir(parents=True, exist_ok=True)
     best = run_sweep(a.num_envs, a.sweep_trials, a.trial_steps, a.sweep_boss_hp, a.eval_episodes, a.n_snakes_max, out)
-    print(f"\n== BEST CONFIG: {best} ==\n   run it full: python3 train.py --wandb --no-sweep "
-          + " ".join(f"--{k.replace('_', '-')} {v}" for k, v in (best or {}).items()), flush=True)
+    print(
+        f"\n== BEST CONFIG: {best} ==\n   run it full: python3 train.py --wandb --no-sweep "
+        + " ".join(f"--{k.replace('_', '-')} {v}" for k, v in (best or {}).items()),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

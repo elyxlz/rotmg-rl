@@ -32,7 +32,9 @@ def build_policy(hidden: int, num_layers: int, device) -> torch.nn.Module:
     return models.Policy(encoder, decoder, network).to(device)
 
 
-def eval_clear_rate(policy, episodes: int, d: float = 1.0, boss_hp: float = BOSS_HP, n_snakes_max: int = N_SNAKES_MAX, seed0: int = 50_000) -> float:
+def eval_clear_rate(
+    policy, episodes: int, d: float = 1.0, boss_hp: float = BOSS_HP, n_snakes_max: int = N_SNAKES_MAX, seed0: int = 50_000
+) -> float:
     """TRUE per-episode clear rate at difficulty d (default full) on the single-env C wrapper -- the
     sweep objective. Eval uses the deterministic full-difficulty spawn (always entrance) at d=1."""
     device = next(policy.parameters()).device

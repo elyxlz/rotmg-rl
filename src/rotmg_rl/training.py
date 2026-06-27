@@ -66,7 +66,22 @@ def build_args(num_envs: int, hp: dict, total_steps: int, boss_hp: float) -> dic
     return args
 
 
-def train_continuous(args, total_steps, ramp_frac, rew_approach, n_snakes_max, out, use_wandb, cum_step=0, refresh_steps=REFRESH_STEPS, save_every=SAVE_EVERY, verbose=True, eval_every=0, eval_episodes=24, boss_hp=BOSS_HP):
+def train_continuous(
+    args,
+    total_steps,
+    ramp_frac,
+    rew_approach,
+    n_snakes_max,
+    out,
+    use_wandb,
+    cum_step=0,
+    refresh_steps=REFRESH_STEPS,
+    save_every=SAVE_EVERY,
+    verbose=True,
+    eval_every=0,
+    eval_episodes=24,
+    boss_hp=BOSS_HP,
+):
     """Run the continuous-difficulty schedule under ONE PuffeRL trainer. Returns (trainer, policy,
     evals) where evals is a list of {step, uptime, clear_d1} sampled every `eval_every` steps (empty
     when eval_every<=0) -- the cost-aware trajectory the Protein sweep observes."""
@@ -78,7 +93,10 @@ def train_continuous(args, total_steps, ramp_frac, rew_approach, n_snakes_max, o
     evals: list[dict] = []
     last_log, last_save, last_refresh, last_eval, cur_d = 0.0, 0, 0, 0, -1.0
     while trainer.global_step < total_steps:
-        if eval_every > 0 and (trainer.global_step - last_eval >= eval_every or trainer.global_step + trainer.total_agents * args["train"]["horizon"] >= total_steps):
+        if eval_every > 0 and (
+            trainer.global_step - last_eval >= eval_every
+            or trainer.global_step + trainer.total_agents * args["train"]["horizon"] >= total_steps
+        ):
             last_eval = trainer.global_step
             clear_d1 = eval_clear_rate(policy, eval_episodes, d=1.0, boss_hp=boss_hp, n_snakes_max=n_snakes_max)
             evals.append({"step": trainer.global_step, "uptime": trainer.uptime, "clear_d1": clear_d1})
@@ -121,8 +139,11 @@ def train_continuous(args, total_steps, ramp_frac, rew_approach, n_snakes_max, o
             flat["difficulty"] = cur_d
             flat["global_step"] = step
             if verbose:
-                print(f"[train] step={step / 1e6:.1f}M d={cur_d:.3f} SPS={flat.get('SPS', 0) / 1e3:.0f}K "
-                      f"clear_rate={flat.get('env/clear_rate', 0):.2f} boss_left={flat.get('env/boss_hp_remaining', 0):.2f}", flush=True)
+                print(
+                    f"[train] step={step / 1e6:.1f}M d={cur_d:.3f} SPS={flat.get('SPS', 0) / 1e3:.0f}K "
+                    f"clear_rate={flat.get('env/clear_rate', 0):.2f} boss_left={flat.get('env/boss_hp_remaining', 0):.2f}",
+                    flush=True,
+                )
             if use_wandb:
                 import wandb
 
@@ -138,9 +159,16 @@ def main() -> None:
     p.add_argument("--num-envs", type=int, default=1024)
     p.add_argument("--full-steps", type=int, default=460_000_000, help="length of the final full-difficulty (7500-HP) run")
     # sweep knobs
-    p.add_argument("--sweep-trials", type=int, default=24, help="Protein trials. The 15-knob space wants ~40+ for a thorough search; 24 is a coarse pass.")
+    p.add_argument(
+        "--sweep-trials", type=int, default=24, help="Protein trials. The 15-knob space wants ~40+ for a thorough search; 24 is a coarse pass."
+    )
     p.add_argument("--trial-steps", type=int, default=35_000_000, help="steps per sweep trial")
-    p.add_argument("--sweep-boss-hp", type=float, default=7500.0, help="boss HP for sweep trials (default = the real 7500 target; the schedule's easy early-d gives gradient. Lower it only if a task genuinely has none)")
+    p.add_argument(
+        "--sweep-boss-hp",
+        type=float,
+        default=7500.0,
+        help="boss HP for sweep trials (default = the real 7500 target; the schedule's easy early-d gives gradient. Lower it only if a task genuinely has none)",
+    )
     p.add_argument("--eval-episodes", type=int, default=24, help="d=1 clear-rate eval episodes (per sweep eval + the final eval)")
     # full-run hyperparameters (defaults for --no-sweep / the fallback if the sweep finds nothing)
     p.add_argument("--ramp-frac", type=float, default=0.6, help="fraction of training spent ramping d 0->1 (rest at d=1)")
@@ -156,7 +184,11 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true", help="print the plan, run nothing")
     a = p.parse_args()
 
-    mode = "DIRECT (--no-sweep)" if a.no_sweep else f"SWEEP ({a.sweep_trials} trials x {a.trial_steps / 1e6:.0f}M @ boss_hp {a.sweep_boss_hp:g}) -> winner"
+    mode = (
+        "DIRECT (--no-sweep)"
+        if a.no_sweep
+        else f"SWEEP ({a.sweep_trials} trials x {a.trial_steps / 1e6:.0f}M @ boss_hp {a.sweep_boss_hp:g}) -> winner"
+    )
     print(f"== train.py: {mode} -> full {a.full_steps / 1e6:.0f}M-step {a.boss_hp:g}-HP run, ramp_frac={a.ramp_frac} ==", flush=True)
     for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
         d = difficulty_at(int(frac * a.full_steps), a.full_steps, a.ramp_frac)
@@ -174,8 +206,16 @@ def main() -> None:
 
     # the CLI-default hyperparameters (the --no-sweep config + the sweep-empty fallback). Only the
     # original good-default knobs; the rest stay at the ini defaults (apply_hparams sets only what's present).
-    cli_hp = dict(learning_rate=a.lr, gamma=a.gamma, gae_lambda=a.gae_lambda, ent_coef=a.ent_coef, ramp_frac=a.ramp_frac,
-                  hidden_size=a.hidden_size, rew_approach=a.rew_approach, rew_boss_dmg=a.rew_boss_dmg)
+    cli_hp = dict(
+        learning_rate=a.lr,
+        gamma=a.gamma,
+        gae_lambda=a.gae_lambda,
+        ent_coef=a.ent_coef,
+        ramp_frac=a.ramp_frac,
+        hidden_size=a.hidden_size,
+        rew_approach=a.rew_approach,
+        rew_boss_dmg=a.rew_boss_dmg,
+    )
 
     # pick the hyperparameters: sweep for the winner, or the CLI defaults on --no-sweep.
     if a.no_sweep:
@@ -193,15 +233,20 @@ def main() -> None:
 
         wandb.init(project="rotmg-dungeon", name=f"continuous-{int(time.time())}", group="continuous", config=hp)
     args = build_args(a.num_envs, hp, a.full_steps, a.boss_hp)
-    trainer, policy, _ = train_continuous(args, a.full_steps, hp["ramp_frac"], hp["rew_approach"], a.n_snakes_max, out, a.wandb, boss_hp=a.boss_hp)
+    trainer, policy, _ = train_continuous(
+        args, a.full_steps, hp["ramp_frac"], hp["rew_approach"], a.n_snakes_max, out, a.wandb, boss_hp=a.boss_hp
+    )
     final = out / "finish.pt"
     trainer.save_weights(str(final))
     trainer.close()
 
     rate = eval_clear_rate(policy, a.eval_episodes, d=1.0, boss_hp=a.boss_hp, n_snakes_max=a.n_snakes_max)
     print(f"\n== DONE -> {final} ({a.full_steps / 1e6:.0f}M steps) ==", flush=True)
-    print(f"== FULL-DIFFICULTY (d=1) CLEAR RATE: {rate:.1%} over {a.eval_episodes} eps "
-          f"(robust 100-ep number: python -m rotmg_rl.eval --checkpoint {final}) ==", flush=True)
+    print(
+        f"== FULL-DIFFICULTY (d=1) CLEAR RATE: {rate:.1%} over {a.eval_episodes} eps "
+        f"(robust 100-ep number: python -m rotmg_rl.eval --checkpoint {final}) ==",
+        flush=True,
+    )
     if a.wandb:
         import wandb
 

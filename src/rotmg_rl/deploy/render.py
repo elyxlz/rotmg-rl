@@ -63,28 +63,28 @@ def render_frame(ob: RealObsBuilder, state: dict, size: int = 480, pov_radius: f
     mdots = [(int(p[0]), int(p[1]), (70, 240, 110))]
     if ob.boss_seen and boss is not None:
         mdots.append((int(boss["x"]), int(boss["y"]), (230, 50, 50)))
-    for (wx, wy, col) in mdots:
+    for wx, wy, col in mdots:
         mx, my = int(wx * mm / w), int(wy * mm / h)
-        mini[max(0, my - 2):my + 3, max(0, mx - 2):mx + 3] = col
-    img[6:6 + mm, size - mm - 6:size - 6] = mini
+        mini[max(0, my - 2) : my + 3, max(0, mx - 2) : mx + 3] = col
+    img[6 : 6 + mm, size - mm - 6 : size - 6] = mini
 
     # boss HP bar (red), top
     if ob.fight_active and boss is not None:
         bw = size - mm - 24
         bf = max(float(boss["hp"]), 0.0) / max(float(boss["hp_max"]), 1.0)
-        img[8:16, 8:8 + bw] = (60, 20, 20)
-        img[8:16, 8:8 + int(bf * bw)] = (235, 45, 45)
+        img[8:16, 8 : 8 + bw] = (60, 20, 20)
+        img[8:16, 8 : 8 + int(bf * bw)] = (235, 45, 45)
 
     # player HP (green) / MP (blue) bars, bottom-left
     for j, (frac, col) in enumerate(
         [(float(pl["hp"]) / max(float(pl["hp_max"]), 1.0), (60, 220, 60)), (float(pl["mp"]) / max(float(pl["mp_max"]), 1.0), (60, 120, 255))]
     ):
         yb = size - 18 + j * 8
-        img[yb:yb + 6, 8:8 + 160] = (35, 35, 38)
-        img[yb:yb + 6, 8:8 + int(max(0.0, frac) * 160)] = col
+        img[yb : yb + 6, 8 : 8 + 160] = (35, 35, 38)
+        img[yb : yb + 6, 8 : 8 + int(max(0.0, frac) * 160)] = col
 
     # status effects (confused=purple, petrified=grey)
     for k, (active, col) in enumerate([(pl["confused"], (200, 60, 200)), (pl["petrified"], (170, 170, 170))]):
         if active:
-            img[size - 27:size - 20, 8 + k * 11:16 + k * 11] = col
+            img[size - 27 : size - 20, 8 + k * 11 : 16 + k * 11] = col
     return img.astype(np.uint8)

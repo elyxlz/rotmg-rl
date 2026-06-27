@@ -20,7 +20,9 @@ from rotmg_rl.csim.dungeon import OBS_SIZE, CDungeon  # noqa: E402
 def test_metrics_per_step_boss_full_when_undamaged():
     """Passive boss spawned in-room, NO shooting: the boss is never damaged, so the per-step metrics
     report boss_hp_frac ~= 1.0 and cleared = 0 (the bug aggregated per-EPISODE -> boss_hp_frac=0)."""
-    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0)
+    cfg = DungeonConfig(
+        boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0
+    )
     env = CDungeon(cfg, num_envs=64, seed=1, log_interval=100)
     env.reset(seed=1)
     noop = np.zeros((64, 4), np.int32)
@@ -39,7 +41,9 @@ def test_metrics_per_step_boss_full_when_undamaged():
 def test_metrics_cleared_is_a_per_step_rate():
     """With shooting, episodes DO clear fast (per-episode rate ~1), but the per-step `cleared` metric
     is a low rate and boss_hp_frac stays well above 0 -- per-step (numpy) semantics, not per-episode."""
-    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0)
+    cfg = DungeonConfig(
+        boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0
+    )
     env = CDungeon(cfg, num_envs=128, seed=0, log_interval=200)
     env.reset(seed=0)
     rng = np.random.RandomState(0)
@@ -59,7 +63,16 @@ def test_score_metric_per_episode():
     """`score` is the per-EPISODE mean end-of-episode score (1 if cleared else damage fraction). With a
     passive boss, huge HP, noop actions and a tiny max_steps, every episode truncates at full boss HP
     -> per-episode score == 0, and episodes > 0 (truncations counted)."""
-    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0, max_steps=20)
+    cfg = DungeonConfig(
+        boss_hp_max=300.0,
+        player_hp_max=1e9,
+        n_snakes=0,
+        enable_grenades=False,
+        enable_minions=False,
+        boss_shoots=False,
+        spawn_in_room_prob=1.0,
+        max_steps=20,
+    )
     env = CDungeon(cfg, num_envs=64, seed=1, log_interval=200)
     env.reset(seed=1)
     noop = np.zeros((64, 4), np.int32)
@@ -77,7 +90,9 @@ def test_score_metric_per_episode():
 def test_score_metric_clears_reach_one():
     """When the boss dies fast (tiny HP, shooting toward it), episodes clear and the per-episode
     `score` approaches 1.0 -- distinct from the per-step `cleared` rate."""
-    cfg = DungeonConfig(boss_hp_max=20.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0)
+    cfg = DungeonConfig(
+        boss_hp_max=20.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, spawn_in_room_prob=1.0
+    )
     env = CDungeon(cfg, num_envs=128, seed=0, log_interval=300)
     env.reset(seed=0)
     a = np.zeros((128, 4), np.int32)

@@ -62,16 +62,16 @@ def render_pov(rs: dict, walkable: np.ndarray, size: int = 480, pov_radius: floa
     dots = [(int(px), int(py), (70, 240, 110))]
     if bool(rs["boss_seen"]):  # boss only on the minimap once seen (no cheat reveal)
         dots.append((int(boss[0]), int(boss[1]), (230, 50, 50)))
-    for (wx, wy, col) in dots:
+    for wx, wy, col in dots:
         mx, my = int(wx * mm / w), int(wy * mm / h)
-        mini[max(0, my - 2):my + 3, max(0, mx - 2):mx + 3] = col
-    img[6:6 + mm, size - mm - 6:size - 6] = mini
+        mini[max(0, my - 2) : my + 3, max(0, mx - 2) : mx + 3] = col
+    img[6 : 6 + mm, size - mm - 6 : size - 6] = mini
 
     # BOSS HP bar (red) across the top + 3-phase markers
     if fight_active or boss_hp < boss_hp_max:
         bw = size - mm - 24  # leave room for the minimap on the right
-        img[8:16, 8:8 + bw] = (60, 20, 20)  # empty (dark)
-        img[8:16, 8:8 + int(max(0.0, boss_hp / boss_hp_max) * bw)] = (235, 45, 45)  # boss hp fill
+        img[8:16, 8 : 8 + bw] = (60, 20, 20)  # empty (dark)
+        img[8:16, 8 : 8 + int(max(0.0, boss_hp / boss_hp_max) * bw)] = (235, 45, 45)  # boss hp fill
         for ph in range(3):  # phase 1/2/3 segments; active phase lit
             seg = bw // 3
             col = (250, 205, 60) if phase == ph + 1 else (85, 75, 40)
@@ -82,11 +82,11 @@ def render_pov(rs: dict, walkable: np.ndarray, size: int = 480, pov_radius: floa
     mp_frac = float(rs["player_mp"]) / max(float(rs["player_mp_max"]), 1.0)
     for j, (frac, col) in enumerate([(hp_frac, (60, 220, 60)), (mp_frac, (60, 120, 255))]):
         yb = size - 18 + j * 8
-        img[yb:yb + 6, 8:8 + 160] = (35, 35, 38)
-        img[yb:yb + 6, 8:8 + int(max(0, frac) * 160)] = col
+        img[yb : yb + 6, 8 : 8 + 160] = (35, 35, 38)
+        img[yb : yb + 6, 8 : 8 + int(max(0, frac) * 160)] = col
 
     # status effects (confused = purple, petrified = grey) when active, above the player bars
     for k, (active, col) in enumerate([(bool(rs["confused"]), (200, 60, 200)), (bool(rs["petrified"]), (170, 170, 170))]):
         if active:
-            img[size - 27:size - 20, 8 + k * 11 : 16 + k * 11] = col
+            img[size - 27 : size - 20, 8 + k * 11 : 16 + k * 11] = col
     return img.astype(np.uint8)

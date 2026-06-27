@@ -79,7 +79,9 @@ def test_p1_blades_are_point_blank_only():
     """Fidelity: in P1 the boss fires its 3-blade shot ONLY within the point-blank acquire radius (2).
     At range it fires no blades (only the Confused grenade); point-blank, the blades hit the player."""
     # at range (8 tiles), grenades off: no blades reach, so the player takes no damage.
-    cfg = DungeonConfig(n_snakes=0, invuln_ticks=1, boss_wander_speed=0.0, opening_invuln_ticks=0, enable_grenades=False, player_hp_max=1e9, hp_regen=0.0)
+    cfg = DungeonConfig(
+        n_snakes=0, invuln_ticks=1, boss_wander_speed=0.0, opening_invuln_ticks=0, enable_grenades=False, player_hp_max=1e9, hp_regen=0.0
+    )
     env = CDungeonSingle(cfg, seed=5)
     env.reset(seed=5)
     env.put(player_x=BOSS_TILE[0] + 8.0, player_y=BOSS_TILE[1] + 0.5, fight_active=1, phase=1)

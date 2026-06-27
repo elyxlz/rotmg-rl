@@ -3,7 +3,25 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
-## FULL DUNGEON >=80% — deliverable MET (2026-06-27): entrance + all threats + 7500 boss = 81%
+## FULL DUNGEON 95% — deliverable (A) MET, confirmed (2026-06-27): entrance + all threats + 7500 boss
+
+- **`full_dungeon_95.pt` (= `full_dungeon_best.pt`) clears the FULL deliverable config 95%** (57/60
+  stochastic eps via `eval_dungeon.py`, DIRECT per-episode count — not a per-step estimate): entrance
+  spawn + 40 snakes + grenades + minions + 7500-HP 3-phase shooting boss, boss dead at end, ~647
+  steps/ep. No in-room cheat: navigates from the entrance with only local vision + fog-of-war minimap.
+- **The lever that broke the plateau: gamma.** An incremental curriculum (combat+threats in-room all
+  100%, then a spawn-distance ramp combining navigation+combat) plateaued at ~70-73% on gamma 0.95.
+  Bumping **gamma 0.95 -> 0.97** (warm-started from the 73% policy, GAE-lambda 0.85) jumped it to 95%:
+  the short in-room nuke wants myopic gamma, but the ~600-step navigate-then-clear is a long horizon
+  that needs to value the eventual clear. Trajectory: 0% -> 60% -> 73% (gamma 0.95 plateau) -> 95%.
+- **clear_rate metric added**: the C `Log` now reports `environment/clear_rate` = clears/episodes (the
+  true per-episode rate) alongside the misleading per-step `cleared` (clears/steps, ~0.03 even at 100%).
+- Warm-start chain: stage_7500a (in-room boss 100%) -> +snakes 100% -> +grenades 100% -> +minions
+  (full in-room combat) 100% -> spawn-ramp combine 60% -> 73% -> **gamma 0.97 -> 95%**.
+- Supersedes an earlier nav4 entry that ESTIMATED 81% as per-step(0.0006)*length(1311); that estimate
+  was never a direct eval. The confirmed 95% policy is both higher and ~2x faster (647 vs 1311 steps).
+
+## (superseded) nav4 estimate 81%
 
 - **`full_dungeon_best.pt` (= `full_boss_best.pt`) clears the FULL deliverable config 81%** (81/100
   stochastic eps via `eval_dungeon.py`): entrance spawn + 40 snakes + grenades + minions + 7500-HP

@@ -1,15 +1,11 @@
-"""Follow a PufferLib 4.0 (--slowly / torch backend) training run visually: render the latest
-checkpoint to a POV mp4 and log it to wandb, like follow_along.py does for the 3.0 runs.
+"""POV rollout video of a dungeon policy, painted from the read-only render-state of the single-env C
+wrapper (the same C dynamics training acts on -- never a re-simulation).
 
-4.0's torch backend saves checkpoints as `checkpoints4/dungeon/<run_id>/<global_step>.bin` — a plain
-torch state_dict of pufferlib.models.Policy(DungeonEncoder, DefaultDecoder, LSTM) (our CNN). We
-reconstruct that exact policy, load the weights, and drive the single-env C wrapper (the same flat
-[grid, minimap, scalars] obs the encoder trains on), painting the debug POV from its render-state.
+`render_rollout` renders one full-difficulty episode of a live in-process policy (the training loop
+logs it to the same wandb run); `main` watches a checkpoint dir and renders the newest --slowly
+checkpoint to an mp4 (+ wandb) on an interval, like a live training follow-along:
 
-ONLY works for --slowly checkpoints (our CNN, torch state_dict). The native _C backend saves opaque
-flat-weight dumps with puffernet's flat encoder — not renderable here (see docs/pufferlib4-migration.md).
-
-    .venv4/bin/python scripts/follow_along4.py --watch checkpoints4/dungeon --wandb --run-id <id>
+    python -m rotmg_rl.video --watch checkpoints/dungeon --wandb --run-id <id>
 """
 
 from __future__ import annotations
@@ -23,20 +19,33 @@ import time
 import imageio.v2 as imageio
 import torch
 
-import pufferlib.models as models
 from rotmg_rl.config import DungeonConfig
 from rotmg_rl.csim.render import render_pov
-from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle
+from rotmg_rl.csim.single import CDungeonSingle
+from rotmg_rl.eval import build_policy
+from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX
 from rotmg_rl.sim.snakepit_map import load_jm
 
-ACT_SIZES = [9, 32, 2, 2]
 
-
-def build_policy(hidden: int, num_layers: int, device) -> torch.nn.Module:
-    encoder = models.DungeonEncoder(OBS_SIZE, hidden)
-    decoder = models.DefaultDecoder(ACT_SIZES, hidden)
-    network = models.LSTM(hidden, num_layers=num_layers)
-    return models.Policy(encoder, decoder, network).to(device)
+def render_rollout(policy, max_frames: int = 1200):
+    """In-process POV video of one full-difficulty episode on the single-env C wrapper, painted by the
+    read-only render-state. Returns the frame list (the caller logs it to wandb)."""
+    device = next(policy.parameters()).device
+    walkable = load_jm().walkable
+    env = CDungeonSingle(DungeonConfig(boss_hp_max=BOSS_HP, n_snakes=N_SNAKES_MAX, spawn_in_room_prob=0.0), seed=777)
+    obs = env.reset(seed=777)
+    state = policy.initial_state(1, device)
+    frames = []
+    with torch.no_grad():
+        for _ in range(max_frames):
+            frames.append(render_pov(env.render_state(), walkable))  # render the state the policy acts on
+            logits, _, state = policy.forward_eval(torch.tensor(obs, device=device).unsqueeze(0), state)
+            action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+            obs, _, term, trunc, _ = env.step(action)
+            if term or trunc:
+                break
+    env.close()
+    return frames
 
 
 @torch.no_grad()
@@ -67,12 +76,12 @@ def newest_ckpt(watch):
 
 
 def step_of(ckpt: str) -> int:
-    return int(pathlib.Path(ckpt).stem)  # 4.0 names checkpoints <global_step>.bin
+    return int(pathlib.Path(ckpt).stem)  # checkpoints are named <global_step>.bin
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--watch", default="checkpoints4/dungeon", help="dir of 4.0 <run_id>/<step>.bin checkpoints")
+    p.add_argument("--watch", default="checkpoints/dungeon", help="dir of <run_id>/<step>.bin checkpoints")
     p.add_argument("--interval", type=int, default=120, help="seconds between renders")
     p.add_argument("--hidden", type=int, default=256)
     p.add_argument("--num-layers", type=int, default=1)
@@ -93,7 +102,7 @@ def main() -> None:
     if args.wandb:
         import wandb
 
-        name = f"rollouts4-{args.run_id}" if args.run_id else "rollouts4"
+        name = f"rollouts-{args.run_id}" if args.run_id else "rollouts"
         wandb.init(project="rotmg-dungeon", name=name, job_type="eval", group=os.environ.get("WANDB_RUN_GROUP"))
     pathlib.Path("videos").mkdir(exist_ok=True)
 
@@ -105,7 +114,7 @@ def main() -> None:
                 policy.load_state_dict(torch.load(ckpt, map_location=device))
                 policy.eval()
                 frames, cleared = rollout(policy, cfg, device, seed=int(time.time()) % 10000, max_frames=args.max_frames)
-                out = f"videos/follow4_{step_of(ckpt)}.mp4"
+                out = f"videos/follow_{step_of(ckpt)}.mp4"
                 imageio.mimsave(out, frames, fps=args.fps)
                 if args.wandb:
                     import wandb

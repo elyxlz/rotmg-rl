@@ -1,22 +1,15 @@
-"""Train the dungeon env on PufferLib 4.0's native trainer.
+"""Launch a single configurable PufferLib `puffer train dungeon` run (the box.sh curriculum-iteration
+path, distinct from the one-command sweep+schedule flow in rotmg_rl.training).
 
-4.0 trains via `puffer train <env>` against the env compiled into its _C backend (see
-scripts/setup_box_puffer4.sh, which bakes our env into the pinned clone at .pufferlib4). This is a
-thin launcher: it maps our familiar knobs to 4.0's `--section.key` overrides and execs the .venv4
-`puffer` CLI inside the clone. The 3.0 path stays `scripts/train_dungeon.py` (untouched).
+A thin launcher: maps our familiar knobs to 4.0's `--section.key` overrides and execs the venv
+`puffer` CLI against the env compiled into _C. Three encoder paths (see pufferlib/README.md):
+  --slowly (torch):  OUR DungeonEncoder CNN + renderable torch checkpoints (the recommended daily
+    driver; rotmg_rl.video renders it).
+  default (native _C, OUR CNN): a native CUDA port of the CNN, parity-verified but slower (im2col).
+  native flat (set [torch] encoder=DefaultEncoder): puffernet's flat encoder, fast but the WRONG
+    architecture for the spatial grid.
 
-Three encoder paths (see docs/pufferlib4-migration.md):
-  --slowly (torch):  OUR DungeonEncoder CNN (pufferlib.models) + renderable torch checkpoints, ~63K
-    SPS. The recommended CNN daily driver (follow_along4 renders it).
-  default (native _C, OUR CNN): a native CUDA port of the CNN (puffer4/dungeon_encoder.cu, im2col
-    conv) compiled into _C. Parity-verified vs torch and learns, but ~20K SPS (im2col-bound, slower
-    than --slowly) and needs minibatch <=1024 (NaN above). Opaque flat checkpoints.
-  native flat (set [torch] encoder=DefaultEncoder): puffernet's flat Linear encoder, ~600K SPS but
-    the WRONG architecture for the spatial grid. The 12x is ONLY this flat path.
-
-    .venv4/bin/python scripts/train_dungeon4.py --total-timesteps 2000000 --slowly --wandb
-
-(Runs with any Python; it only subprocess-execs the .venv4 puffer binary.)
+    python -m rotmg_rl.puffer_cli --total-timesteps 2000000 --slowly --wandb
 """
 
 from __future__ import annotations
@@ -27,9 +20,9 @@ import pathlib
 import subprocess
 import sys
 
-REPO = pathlib.Path(__file__).resolve().parents[1]
-CLONE = REPO / ".pufferlib4"
-PUFFER = REPO / ".venv4" / "bin" / "puffer"
+REPO = pathlib.Path(__file__).resolve().parents[2]
+CLONE = REPO / "pufferlib"
+PUFFER = REPO / ".venv" / "bin" / "puffer"
 
 
 def main() -> None:
@@ -56,7 +49,7 @@ def main() -> None:
     p.add_argument("--no-boss-shoots", action="store_true")
     p.add_argument("--slowly", action="store_true", help="torch backend = OUR CNN + renderable checkpoints")
     p.add_argument("--init-checkpoint", default=None, help="warm-start from this .bin (same backend only)")
-    p.add_argument("--checkpoint-dir", default="checkpoints4", help="where 4.0 writes <env>/<run_id>/*.bin")
+    p.add_argument("--checkpoint-dir", default="checkpoints", help="where 4.0 writes <env>/<run_id>/*.bin")
     p.add_argument("--checkpoint-interval", type=int, default=50, help="epochs between checkpoints (low = fresh videos)")
     p.add_argument("--tag", default=None, help="wandb tag")
     p.add_argument("--wandb", action="store_true")
@@ -64,13 +57,13 @@ def main() -> None:
     args = p.parse_args()
 
     if not PUFFER.exists():
-        sys.exit(f"{PUFFER} not found — run scripts/setup_box_puffer4.sh first")
+        sys.exit(f"{PUFFER} not found — run scripts/setup.sh first")
 
     cmd = [str(PUFFER), "train", "dungeon"]
     cmd += ["--train.total-timesteps", str(args.total_timesteps)]
     cmd += ["--vec.total-agents", str(args.num_envs)]
     cmd += ["--policy.hidden-size", str(args.hidden)]  # the LSTM network is sized from policy.hidden_size
-    # absolute checkpoint dir: puffer runs with cwd=CLONE, so a relative path would land in .pufferlib4
+    # absolute checkpoint dir: puffer runs with cwd=CLONE, so a relative path would land in pufferlib/
     ckpt_dir = args.checkpoint_dir if os.path.isabs(args.checkpoint_dir) else str(REPO / args.checkpoint_dir)
     cmd += ["--checkpoint-dir", ckpt_dir, "--checkpoint-interval", str(args.checkpoint_interval)]
     if args.num_workers is not None:
@@ -114,7 +107,7 @@ def main() -> None:
     if args.tag is not None:
         cmd += ["--tag", args.tag]
     if args.wandb:
-        group = args.wandb_group or os.environ.get("WANDB_RUN_GROUP") or "dungeon4"
+        group = args.wandb_group or os.environ.get("WANDB_RUN_GROUP") or "dungeon"
         cmd += ["--wandb", "--wandb-project", "rotmg-dungeon", "--wandb-group", group]
 
     print("exec:", " ".join(cmd), flush=True)

@@ -1,12 +1,12 @@
-"""TRUE per-episode clear-rate eval for a PufferLib 4.0 (--slowly / torch) dungeon checkpoint.
+"""TRUE per-episode clear-rate evaluation for a trained dungeon policy (the >=80% deliverable metric,
+NOT the per-step `cleared` rate the dashboard shows). Runs N stochastic episodes on the single-env C
+wrapper (the same C dynamics training uses) and reports the per-episode clear fraction.
 
-Mirrors scripts/eval_dungeon.py but for the 4.0 torch CNN: reconstructs
-Policy(DungeonEncoder, DefaultDecoder, LSTM) (like follow_along4.py), loads the torch state_dict
-checkpoint, and runs N stochastic episodes on the single-env C wrapper reporting the per-episode
-clear fraction (the >=80% deliverable metric) -- NOT the per-step `cleared` rate the dashboard shows.
+`eval_clear_rate` is the in-process objective the training loop + Protein sweep observe; `main` is the
+standalone entry for a saved checkpoint:
 
-    .venv4/bin/python scripts/eval_dungeon4.py --checkpoint checkpoints4/dungeon/<run>/<step>.bin \
-        --episodes 200 --boss-hp 300 --no-grenades --no-minions --no-boss-shoots --spawn-in-room-prob 1.0
+    python -m rotmg_rl.eval --checkpoint checkpoints/curriculum/finish.pt \
+        --episodes 100 --boss-hp 7500 --n-snakes 40 --spawn-in-room-prob 0.0
 """
 
 from __future__ import annotations
@@ -19,15 +19,42 @@ import torch
 import pufferlib.models as models
 from rotmg_rl.config import DungeonConfig
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle
+from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, difficulty_config
 
-ACT_SIZES = [9, 32, 2, 2]
+ACT_SIZES = [9, 32, 2, 2]  # MultiDiscrete: move, aim, shoot, cast
 
 
-def build_policy(hidden: int, num_layers: int, device):
+def build_policy(hidden: int, num_layers: int, device) -> torch.nn.Module:
+    """Reconstruct the --slowly torch policy: Policy(DungeonEncoder, DefaultDecoder, LSTM)."""
     encoder = models.DungeonEncoder(OBS_SIZE, hidden)
     decoder = models.DefaultDecoder(ACT_SIZES, hidden)
     network = models.LSTM(hidden, num_layers=num_layers)
     return models.Policy(encoder, decoder, network).to(device)
+
+
+def eval_clear_rate(policy, episodes: int, d: float = 1.0, boss_hp: float = BOSS_HP, n_snakes_max: int = N_SNAKES_MAX, seed0: int = 50_000) -> float:
+    """TRUE per-episode clear rate at difficulty d (default full) on the single-env C wrapper -- the
+    sweep objective. Eval uses the deterministic full-difficulty spawn (always entrance) at d=1."""
+    device = next(policy.parameters()).device
+    cfg_kw = difficulty_config(d, n_snakes_max)
+    cfg_kw["spawn_in_room_prob"] = 0.0 if d >= 1.0 else cfg_kw["spawn_in_room_prob"]
+    cfg_kw["n_snakes_jitter"] = 0  # eval the nominal density, not the training band
+    cfg = DungeonConfig(boss_hp_max=boss_hp, **cfg_kw)
+    clears = 0
+    with torch.no_grad():
+        for i in range(episodes):
+            env = CDungeonSingle(cfg, seed=seed0 + i)
+            obs = env.reset(seed=seed0 + i)
+            state = policy.initial_state(1, device)
+            for _ in range(cfg.max_steps):
+                logits, _, state = policy.forward_eval(torch.tensor(obs, device=device).unsqueeze(0), state)
+                action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+                obs, _, term, trunc, info = env.step(action)
+                if term or trunc:
+                    clears += int(info["cleared"])
+                    break
+            env.close()
+    return clears / max(1, episodes)
 
 
 @torch.no_grad()
@@ -84,7 +111,7 @@ def main() -> None:
         lengths.append(n)
         hp_left.append(hp)
     rate = float(np.mean(clears))
-    print(f"=== EVAL4 {args.checkpoint} ({args.episodes} eps, boss_hp={args.boss_hp:g}) ===")
+    print(f"=== EVAL {args.checkpoint} ({args.episodes} eps, boss_hp={args.boss_hp:g}) ===")
     print(f"  CLEAR RATE: {rate:.1%}   ({sum(clears)}/{args.episodes})")
     print(f"  avg episode length: {np.mean(lengths):.0f} steps")
     print(f"  avg boss_hp_frac at end: {np.mean(hp_left):.3f}  (cleared eps end at 0)")

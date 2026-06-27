@@ -327,8 +327,8 @@ class ImpalaEncoder(nn.Module):
         return self.network(observations.permute(0, 3, 1, 2).float() / 255.0)
 
 
-# --- rotmg-rl DungeonEncoder (appended to pufferlib/models.py by scripts/setup_box_puffer4.sh) ---
-# Mirrors rotmg_rl.csim.policy.CDungeonPolicy exactly so the --slowly 4.0 path uses our real
+# --- rotmg-rl DungeonEncoder (our env's --slowly torch CNN; committed in place in this vendored tree) ---
+# Mirrors rotmg_rl.csim.policy.CDungeonPolicy exactly so the --slowly path uses our real
 # architecture. Flat float obs layout [grid (7,31,31), minimap (3,32,32), scalars (8)] = 9807.
 #   grid CNN:    Conv(7->32,k3) + GELU + MaxPool2 + Conv(32->32,k3) + GELU + MaxPool2 -> Linear(32*7*7=1568 -> 256)
 #   minimap CNN: Conv(3->16,k3) + GELU + MaxPool2 + Conv(16->16,k3) + GELU + MaxPool2 -> Linear(16*8*8=1024 -> 128)

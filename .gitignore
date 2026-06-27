@@ -9,16 +9,15 @@ dist/
 # uv
 .uv/
 
-# PufferLib 4.0 (vendored clone + separate venv + ccache shim; assembled by setup_box_puffer4.sh)
-.venv4/
-.venv4-shim/
-.pufferlib4/
+# PufferLib build artifacts (the vendored source at pufferlib/ is committed; these are generated)
+.venv-shim/
+pufferlib/_C*
+pufferlib/raylib-*/
 
 # RL / training artifacts
 wandb/
 checkpoints/
-checkpoints4/
-logs4/
+logs/
 runs/
 *.pt
 *.ckpt

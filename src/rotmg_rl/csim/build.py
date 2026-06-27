@@ -22,6 +22,7 @@ def main() -> None:
     here = pathlib.Path(__file__).resolve().parent
     repo_root = here.parents[2]
     vendor = repo_root / "vendor" / "puffer"
+    dungeon_dir = repo_root / "pufferlib" / "ocean" / "dungeon"  # the single home of dungeon.h + snakepit_map.h
     ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
     out = here / f"binding{ext_suffix}"
     py_inc = sysconfig.get_path("include")
@@ -42,6 +43,7 @@ def main() -> None:
         f"-I{numpy.get_include()}",
         f"-I{py_inc}",
         f"-I{here}",
+        f"-I{dungeon_dir}",  # dungeon.h + snakepit_map.h live in the vendored pufferlib tree
         f"-I{vendor}",
         str(here / "binding.c"),
         "-lm",

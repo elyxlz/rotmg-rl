@@ -1,19 +1,18 @@
 """The env Config struct is the single source of truth; every binding + ini must stay in lockstep.
 
-Plain-text parse (no compilation), so it runs in the cheap test tier. This is the guard that would
-have caught the stale-_C bug: the 4.0 binding/ini still listed the OLD Config fields (spell_arc_deg,
-snake_hp, boss_speed, ...) and were missing the faithful ones, so build.sh failed and every retrain
-silently ran the previous _C. A field added to or removed from dungeon.h's Config now fails here
-until both 4.0 surfaces (and, as a bonus, the 3.0 parity binding) are updated to match.
+`dungeon.h` is the one dynamics source, but its `Config` fields are re-listed by three surfaces that
+must agree with it: the vendored 4.0 Ocean binding + ini, and the standalone eval binding. A field
+added to or removed from `Config` fails here until all three are updated to match. Plain-text parse
+(no compilation), so it runs in the cheap test tier.
 """
 
 import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-DUNGEON_H = REPO / "src" / "rotmg_rl" / "csim" / "dungeon.h"
-BINDING_4 = REPO / "puffer4" / "binding.c"
-INI_4 = REPO / "puffer4" / "dungeon.ini"
+DUNGEON_H = REPO / "pufferlib" / "ocean" / "dungeon" / "dungeon.h"
+BINDING_4 = REPO / "pufferlib" / "ocean" / "dungeon" / "binding.c"
+INI_4 = REPO / "pufferlib" / "config" / "dungeon.ini"
 BINDING_3 = REPO / "src" / "rotmg_rl" / "csim" / "binding.c"
 
 # kwargs a binding reads that are NOT Config fields (env wiring, not stored on cfg).

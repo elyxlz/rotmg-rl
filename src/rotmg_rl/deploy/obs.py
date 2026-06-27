@@ -4,9 +4,6 @@ Ground truth: the C env's obs (pufferlib/ocean/dungeon/dungeon.h compute_obs / u
 bit-for-bit so the 95%-clear CDungeonPolicy sees the same 9807-float vector on the real server that
 it saw in sim: an egocentric 7x31x31 grid + a 3x32x32 fog-of-war minimap + 8 scalars, flattened
 [grid, minimap, scalars]. Constants + normalization come from rotmg_rl.config, never re-hardcoded.
-
-This is the v3 packet->obs bridge. The stale v1 (deploy/realm_state.py, grid+scalars only, 8-dir
-action) is reference, not reused.
 """
 
 from __future__ import annotations

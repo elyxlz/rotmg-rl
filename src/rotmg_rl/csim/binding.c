@@ -110,7 +110,7 @@ static int my_log(PyObject* dict, Log* log) {
     return 0;
 }
 
-/* Parity-test hook: inject deterministic player position + fight state, then refresh obs. */
+/* Scenario-test hook: inject deterministic player position + fight state, then refresh obs. */
 static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
     (void)args;
     PyObject* v;

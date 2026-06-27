@@ -11,7 +11,7 @@ map in `src/rotmg_rl/config.py` + `snakepit_map.h`). Faithful T7 Wizard fight de
 betterSkillys source: Staff of Destruction (90-170 with the x2.0 maxed-ATT multiplier, ~8 shots/s),
 Burning Retribution spell, DEF 8 / HP 810 / MP 455, HP regen 1.54/tick (the dominant survivability
 fix), boss `ReturnToSpawn` anchoring. Local 31x31 egocentric vision + a fog-of-war minimap (no
-cheats). `parity` + `config_sync` tests green.
+cheats). The spec-derived scenario + golden + `config_sync` tests are green.
 
 **Training (one stack, one command).** `python3 train.py --wandb` runs a Protein (cost-aware
 Bayesian) hyperparameter sweep then trains the winner, as one process + one continuous wandb run, on
@@ -28,9 +28,9 @@ eps: entrance spawn + 40 snakes + grenades + minions + 7500-HP 3-phase boss). Th
 ~73% plateau was **gamma 0.95 -> 0.97**: the short in-room nuke wants a myopic discount, but the
 ~600-step navigate-then-clear is a long horizon that must value the eventual clear.
 
-**Deploy (untouched).** The live betterSkillys bridge (`src/rotmg_rl/deploy/`) still runs the deployed
-3.0-trained `full_dungeon_95.pt` via `CDungeonPolicy`. Switching it to a policy trained on the current
-stack is a deliberate later step (retrain + revalidate first).
+**Deploy (untouched).** The live betterSkillys bridge (`src/rotmg_rl/deploy/`) still runs the
+previously deployed `full_dungeon_95.pt` via `CDungeonPolicy`. Switching it to a policy trained on the
+current stack is a deliberate later step (retrain + revalidate first).
 
 **Open question — sim-to-real fidelity.** The deploy revealed a real gap: the real Wizard spell is a
 weak 360 nova (not our nuke), the real Snake Pit is a large maze with the boss far in, and real

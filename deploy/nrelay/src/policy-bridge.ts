@@ -7,8 +7,8 @@ import { ConditionEffect, hasEffect } from "./models";
 import { Runtime } from "./runtime/runtime";
 import { Logger, LogLevel } from "./services";
 
-const UV = "/home/audiogen/.local/bin/uv";
 const RL_DIR = "/home/audiogen/rotmg-rl";
+const PYTHON = `${RL_DIR}/.venv/bin/python`;  // the scripts/setup.sh-provisioned venv (torch + vendored pufferlib)
 const CKPT = "checkpoints/full_dungeon_95.pt";
 const INVINCIBLE_MASK = ConditionEffect.INVINCIBLE | ConditionEffect.INVULNERABLE;
 const SNAKE_PIT_PORTAL_TYPE = 0x0718;
@@ -47,7 +47,7 @@ class PolicyBridge {
 
   constructor(private runtime: Runtime) {
     Logger.log("PolicyBridge", "Spawning policy server...", LogLevel.Info);
-    this.proc = spawn(UV, ["run", "--extra", "train", "python", "-m", "rotmg_rl.deploy.v3.server", "--checkpoint", CKPT], { cwd: RL_DIR });
+    this.proc = spawn(PYTHON, ["-m", "rotmg_rl.deploy.server", "--checkpoint", CKPT], { cwd: RL_DIR });
     const rl = readline.createInterface({ input: this.proc.stdout });
     rl.on("line", (line: string) => this.onLine(line));
     this.proc.stderr.on("data", (d: Buffer) => { const s = d.toString().trim(); if (s.length > 0 && /error|traceback|exception/i.test(s)) Logger.log("PolicyBridge", "py: " + s.split("\n")[0], LogLevel.Warning); });

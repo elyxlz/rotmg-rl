@@ -1,13 +1,12 @@
 /* PufferLib 4.0 Ocean binding for the rotmg Snake Pit dungeon env.
  *
- * Copied to <PufferLib clone>/ocean/dungeon/binding.c by scripts/setup_box_puffer4.sh, alongside
- * dungeon.h + snakepit_map.h (copied verbatim from src/rotmg_rl/csim/, the single source of truth
- * for the env dynamics). dungeon.h must be compiled with -DPUFFER4 (float action/terminal buffers,
- * num_agents + rng fields) — build.sh passes our flag via the env's binding.
+ * Lives here alongside dungeon.h + snakepit_map.h (this dir is the env's single home). dungeon.h
+ * is compiled with -DPUFFER4 (float action/terminal buffers, num_agents + rng fields), set just
+ * below. The env compiles into the monolithic _C backend via vecenv.h; there is no per-env Python
+ * wrapper and actions/terminals are float* (vecenv.h owns the buffers).
  *
- * Replaces the 3.0 standalone-extension binding (src/rotmg_rl/csim/binding.c + the vendored
- * env_binding.h). In 4.0 the env compiles into the monolithic _C backend via vecenv.h; there is no
- * per-env Python wrapper and actions/terminals are float* (vecenv.h owns the buffers).
+ * Counterpart: the standalone eval binding (src/rotmg_rl/csim/binding.c + the vendored
+ * env_binding.h) compiles the SAME dungeon.h into a numpy-only single-env wrapper for eval/render.
  */
 #define PUFFER4  /* dungeon.h: float action/terminal buffers + num_agents/rng fields (4.0 vecenv.h owns the buffers) */
 #include "dungeon.h"  /* defines OBS_SIZE, NUM_CH, GRID, NUM_SCALARS, the Dungeon Env, c_step/c_reset/c_close, init_globals */

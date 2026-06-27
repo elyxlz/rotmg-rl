@@ -1,8 +1,7 @@
-"""Load + run the trained recurrent CDungeonPolicy on a flat real-game obs.
+"""Load + run the deployed recurrent CDungeonPolicy on a flat real-game obs.
 
-Mirrors scripts/eval_dungeon.py / scripts/pov_rollout.py exactly: the checkpoint is the
-pufferlib.ocean.torch.Recurrent (LSTM) wrapper around CDungeonPolicy, the obs is the flat
-[grid, minimap, scalars] Box(9807), the LSTM state is a dict carried across steps (in-place
+The checkpoint is the recurrent (LSTM) wrapper around CDungeonPolicy; the obs is the flat
+[grid, minimap, scalars] Box(9807); the LSTM state is a dict carried across steps (in-place
 mutated by forward_eval), reset per episode. Action = one sample per MultiDiscrete head.
 """
 
@@ -21,7 +20,7 @@ class PolicyRunner:
 
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         # The C env is the policy's native env (flat [grid, minimap, scalars] Box obs + the
-        # MultiDiscrete action); use it directly as the driver env rather than emulating a numpy env.
+        # MultiDiscrete action); use it directly as the driver env.
         driver = CDungeon(num_envs=1)
         policy = CDungeonPolicy(driver, hidden_size=hidden)
         policy = ocean_torch.Recurrent(driver, policy, input_size=hidden, hidden_size=hidden).to(self.device)

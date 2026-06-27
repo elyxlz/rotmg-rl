@@ -37,12 +37,11 @@ HARD CONSTRAINTS
 - Keep the workspace tidy/simple/abstracted; keep PROGRESS.md + GOAL.md up to date.
 
 THE PLAN (keep iterating each stage until it works; don't stop between stages)
-M4 (PRIORITY: SPEED THE LOOP). Rewrite the env in C (PufferLib Ocean style) so it is BLAZING fast.
-    The Python/numpy sim does ~20K SPS and starves the GPU; Ocean C envs do millions. Port the
-    faithful sim (sim/dungeon.py) to a C Ocean env so experiments run in minutes, not hours.
-    Do this EVEN IF the RL mechanics don't work well yet -- fast iteration is how we FIND the
-    mechanics that work. Keep the Python sim as the reference/oracle; the C env must match it
-    (same obs layout, action space, dynamics) so a policy trained in C still transfers.
+M4 (DONE). The env is rewritten in C (PufferLib Ocean style): pufferlib/ocean/dungeon/dungeon.h is
+    the single source of the Snake Pit dynamics (the slow Python sim is removed). Ocean C envs do
+    millions of SPS where the old Python sim did ~20K and starved the GPU, so experiments run in
+    minutes. The C env defines the obs layout, action space, and dynamics; a policy trained in C
+    transfers to the real client on the same shared obs schema.
 M3  Train a policy that COMPLETES the faithful sim >=80% (stochastic eval). Flat cold-start does
     NOT clear (proven). Bootstrap exploration with a PASSIVE BOSS (boss_shoots=False -> learn
     aim+kill), then an ADAPTIVE CURRICULUM (weak->full boss, add threat/snakes/grenades, shift

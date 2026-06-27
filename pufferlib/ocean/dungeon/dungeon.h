@@ -1,11 +1,10 @@
-/* Faithful C port of rotmg_rl.sim.dungeon.DungeonEnv (the Snake Pit dungeon sim).
+/* The Snake Pit dungeon dynamics — the single source of truth for the env (obs layout, action
+ * space, dynamics) a policy trains on and transfers from.
  *
- * The Python sim is the oracle; this matches its obs layout, action space, and dynamics so a
- * policy trained here transfers. Determinism notes for the parity test: with n_snakes=0,
- * enable_minions=0, boss_wander_speed=0 (stationary boss) and point-mass damage ranges (lo==hi),
- * the whole sim is RNG-free and matches the Python oracle bit-faithfully (positions float32,
- * distances float64, as in numpy<2.0). Snake spawn/drift, boss Wander and minion placement use
- * rand() and are not bit-matched (stochastic by design).
+ * Determinism notes for the fixed-seed golden test: with n_snakes=0, enable_minions=0,
+ * boss_wander_speed=0 (stationary boss) and point-mass damage ranges (lo==hi), the whole sim is
+ * RNG-free and reproducible bit-for-bit (positions float32, distances float64). Snake spawn/drift,
+ * boss Wander and minion placement use rand() and are not bit-matched (stochastic by design).
  */
 #ifndef ROTMG_DUNGEON_H
 #define ROTMG_DUNGEON_H
@@ -26,7 +25,7 @@
 #define NUM_SCALARS 8
 #define GRID_SIZE (NUM_CH * GRID * GRID)
 /* Fog-of-war global minimap: MM x MM cells, 3 channels (terrain, player, boss). Obs layout is
- * [grid, minimap, scalars] to match the numpy oracle's flattened Dict order. */
+ * [grid, minimap, scalars], the flattened Dict order. */
 #define MM 32
 #define NUM_MM_CH 3
 #define MM_SIZE (NUM_MM_CH * MM * MM)
@@ -48,8 +47,8 @@
 #define MAX_SNAKES 512
 #define MAX_GRENADES 64
 
-/* Per-STEP accumulators (vec_log divides every field by n). This matches the numpy oracle's
- * per-step info semantics: the gym vector backend feeds PuffeRL one info dict per env per step,
+/* Per-STEP accumulators (vec_log divides every field by n). Per-step info semantics: the gym
+ * vector backend feeds PuffeRL one info dict per env per step,
  * so environment/boss_hp_frac is a per-step mean (~1.0 while the boss is healthy, dropping as it
  * is damaged) and environment/cleared is the per-step clear rate (~0, spiking only on the death
  * step), NOT per-episode values. n increments every step. */
@@ -82,8 +81,8 @@ typedef struct {
     float x, y, hp, timer, type;
 } Snake;
 
-/* Real Snake Pit enemies (EmbeddedData_SnakePitCXML.xml + BehaviorDb.SnakePit.cs), mirroring the
- * numpy oracle's SNAKE_TYPES. Columns: hp, defense, dmg, bvspeed, blife(ticks), count, arc(rad),
+/* Real Snake Pit enemies (EmbeddedData_SnakePitCXML.xml + BehaviorDb.SnakePit.cs), the SNAKE_TYPES
+ * table. Columns: hp, defense, dmg, bvspeed, blife(ticks), count, arc(rad),
  * cooldown(ticks), follow, follow_speed, acquire_range, shoot_range. */
 #define N_SNAKE_TYPES 5
 #define ST_HP 0
@@ -152,8 +151,8 @@ typedef struct {
     float* observations;  /* OBS_SIZE float32 */
 #ifdef PUFFER4
     /* PufferLib 4.0 vecenv.h wires float* action/reward/terminal buffers and reads num_agents + rng
-     * (the env index, used to seed rng_state in my_init). Same env dynamics as the 3.0 build; only
-     * the buffer dtypes differ (actions are cast to int per-dim in c_step). */
+     * (the env index, used to seed rng_state in my_init). The env dynamics are identical with or
+     * without PUFFER4; only the buffer dtypes differ (actions are cast to int per-dim in c_step). */
     float* actions;       /* 4 dims: move, aim, shoot, cast (delivered as float, cast to int) */
     float* rewards;       /* 1 float */
     float* terminals;     /* 1 float */
@@ -167,13 +166,13 @@ typedef struct {
 
     Config cfg;
 
-    float px, py;          /* player pos (float32 in oracle) */
+    float px, py;          /* player pos (float32) */
     float player_hp, player_mp;
-    double staff_timer; /* fractional staff cooldown accumulator (double, parity-matched to the oracle) */
+    double staff_timer; /* fractional staff cooldown accumulator (double, for cooldown fidelity) */
     int spell_timer;
-    double boss_x, boss_y; /* boss_pos becomes float64 in oracle after first move */
+    double boss_x, boss_y; /* boss pos is float64 for movement/collision fidelity */
     double boss_spawn_x, boss_spawn_y; /* ReturnToSpawn anchor: the boss is pulled back toward here in P1 */
-    double boss_hp; /* float64 like the numpy oracle (Python float), for phase/collision fidelity */
+    double boss_hp; /* float64 for phase/collision fidelity */
     int phase, fight_active, invuln_timer;
     int confused_timer, petrify_timer, minion_timer;
     int t_p1, t_p3a, t_g1, t_g2, t_g3card, t_g3diag;
@@ -243,7 +242,7 @@ static inline float frand(Dungeon* env) { return (float)(rng_next(env) >> 8) / (
 static inline float uniform_f(Dungeon* env, float lo, float hi) { return lo + (hi - lo) * frand(env); }
 
 static float randn(Dungeon* env) {
-    /* Box-Muller; training-only randomness (boss wander + snake drift), not parity-matched */
+    /* Box-Muller; training-only randomness (boss wander + snake drift), not seed-deterministic */
     float u1 = frand(env), u2 = frand(env);
     if (u1 < 1e-7f) u1 = 1e-7f;
     return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
@@ -256,7 +255,7 @@ static inline int walkable_at(float fx, float fy) {
 }
 
 static double dist_ff(float ax, float ay, float bx, float by) {
-    float dx = ax - bx, dy = ay - by;  /* float32 subtraction, as in numpy */
+    float dx = ax - bx, dy = ay - by;  /* float32 subtraction, then float64 distance below */
     return sqrt((double)dx * dx + (double)dy * dy);
 }
 
@@ -650,7 +649,7 @@ static void spawn_snakes(Dungeon* env) {
         if (want < 0) want = 0;
     }
     if (want > g_n_walk) want = g_n_walk;
-    /* sample distinct walkable tiles + a weighted archetype (training randomness; not parity-matched) */
+    /* sample distinct walkable tiles + a weighted archetype (training randomness; not seed-deterministic) */
     for (int s = 0; s < want; s++) {
         if (env->n_snake >= MAX_SNAKES) break;
         int idx = rng_next(env) % g_n_walk;
@@ -682,7 +681,7 @@ static void scatter_f(float* obs, int ch, float relx, float rely, float v) {
 }
 
 /* Fog of war: mark the disk of tiles within VIS_RADIUS of the player as discovered (integer tile
- * arithmetic, matching the numpy oracle), accumulate the minimap terrain pool for newly-seen tiles,
+ * arithmetic), accumulate the minimap terrain pool for newly-seen tiles,
  * and flag whether the boss has been seen. The boss only enters the minimap once seen (no cheat). */
 static void update_visibility(Dungeon* env) {
     int ipx = (int)env->px, ipy = (int)env->py;
@@ -928,8 +927,8 @@ static void c_step(Dungeon* env) {
     env->rewards[0] = (float)reward;
     env->terminals[0] = terminated ? 1 : 0;
 
-    /* Per-step metrics on the post-step (terminal) state, before any auto-reset, so they match
-     * the numpy oracle's per-step info dict. On a clear step boss_hp<=0 -> boss_hp_frac=0,
+    /* Per-step metrics on the post-step (terminal) state, before any auto-reset, so they reflect
+     * the just-ended step in the per-step info dict. On a clear step boss_hp<=0 -> boss_hp_frac=0,
      * cleared=1; on a normal step the boss's remaining HP fraction is recorded. */
     env->log.boss_hp_frac += (env->boss_hp > 0.0f ? env->boss_hp : 0.0f) / c->boss_hp_max;
     env->log.in_room += env->fight_active ? 1.0f : 0.0f;

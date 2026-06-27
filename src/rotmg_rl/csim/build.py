@@ -3,9 +3,9 @@
     uv run python -m rotmg_rl.csim.build
 
 Produces `binding.<EXT_SUFFIX>.so` next to binding.c, importable as
-`rotmg_rl.csim.binding`. Rendering is a no-op stub in C, so we don't link raylib here; the
-Python sim handles all debug rendering. Avoids -ffast-math so float results stay bit-faithful
-to the numpy oracle (parity test).
+`rotmg_rl.csim.binding`. Rendering is a no-op stub in C, so we don't link raylib here;
+rotmg_rl.csim.render paints the debug POV in Python. Avoids -ffast-math so float results stay
+deterministic for the fixed-seed golden trajectory test.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def main() -> None:
         "-march=native",
         "-funroll-loops",
         "-fopenmp",  # parallelize the per-env step loop across cores (vec_step)
-        "-ffp-contract=off",  # no FMA contraction -> float results stay bit-faithful to the numpy oracle
+        "-ffp-contract=off",  # no FMA contraction -> float results stay deterministic (golden test)
         "-fno-math-errno",
         "-fPIC",
         "-shared",

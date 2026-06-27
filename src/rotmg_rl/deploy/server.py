@@ -1,4 +1,4 @@
-"""policy_server v3: line-delimited JSON bridge between the nrelay real-game client (TypeScript) and
+"""policy_server: line-delimited JSON bridge between the nrelay real-game client (TypeScript) and
 the trained CDungeonPolicy. Read one tick-state JSON object per line on stdin -> reconstruct the
 9807-float obs (RealObsBuilder) -> run the recurrent policy -> write one action JSON line on stdout.
 

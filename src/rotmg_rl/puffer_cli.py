@@ -2,12 +2,11 @@
 path, distinct from the one-command sweep+schedule flow in rotmg_rl.training).
 
 A thin launcher: maps our familiar knobs to 4.0's `--section.key` overrides and execs the venv
-`puffer` CLI against the env compiled into _C. Three encoder paths (see pufferlib/README.md):
+`puffer` CLI against the env compiled into _C. Two encoder paths (see pufferlib/README.md):
   --slowly (torch):  OUR DungeonEncoder CNN + renderable torch checkpoints (the recommended daily
     driver; rotmg_rl.video renders it).
-  default (native _C, OUR CNN): a native CUDA port of the CNN, parity-verified but slower (im2col).
-  native flat (set [torch] encoder=DefaultEncoder): puffernet's flat encoder, fast but the WRONG
-    architecture for the spatial grid.
+  default (native flat): puffernet's flat encoder, fast but the WRONG architecture for the spatial
+    grid (use --slowly for our CNN).
 
     python -m rotmg_rl.puffer_cli --total-timesteps 2000000 --slowly --wandb
 """

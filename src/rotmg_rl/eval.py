@@ -14,8 +14,8 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
-import pufferlib.models as models
-import torch
+import pufferlib.models as models  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
+import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
 
 from rotmg_rl.config import DungeonConfig
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle

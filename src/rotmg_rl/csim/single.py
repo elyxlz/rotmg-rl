@@ -15,7 +15,7 @@ from dataclasses import asdict
 import numpy as np
 
 from rotmg_rl.config import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig
-from rotmg_rl.csim import binding
+from rotmg_rl.csim import binding  # ty: ignore[unresolved-import]  compiled C extension built at runtime, no static stubs
 
 OBS_SIZE = NUM_CH * GRID * GRID + NUM_MM_CH * MM * MM + NUM_SCALARS
 

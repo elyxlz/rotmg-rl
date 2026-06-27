@@ -19,11 +19,17 @@ import pathlib
 import sys
 import time
 
-import torch
-from pufferlib.pufferl import unroll_nested_dict
-from pufferlib.torch_pufferl import _OBS_DTYPE_MAP, PuffeRL, _cpu_tensor, _CudaPtr, load_policy  # vec-buffer binding internals
+import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
+from pufferlib.pufferl import unroll_nested_dict  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
+from pufferlib.torch_pufferl import (  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box; vec-buffer binding internals
+    _OBS_DTYPE_MAP,
+    PuffeRL,
+    _cpu_tensor,
+    _CudaPtr,
+    load_policy,
+)
 
-from pufferlib import _C, pufferl
+from pufferlib import _C, pufferl  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
 from rotmg_rl.eval import eval_clear_rate
 from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, apply_difficulty, difficulty_at, difficulty_config
 from rotmg_rl.sweep import apply_hparams, build_sweep_config, run_sweep

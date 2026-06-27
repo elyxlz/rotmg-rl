@@ -44,15 +44,15 @@ class RealObsBuilder:
         self.cfg = DungeonConfig()
         self.w = 0
         self.h = 0
-        self.walkable: np.ndarray | None = None  # (h, w) bool, True=walkable; unmapped defaults walkable (wall=0)
-        self.discovered: np.ndarray | None = None  # (h, w) bool fog-of-war
+        self.walkable = np.zeros((0, 0), bool)  # (h, w) bool, True=walkable; unmapped defaults walkable (wall=0)
+        self.discovered = np.zeros((0, 0), bool)  # (h, w) bool fog-of-war
         self.boss_seen = False
         self.fight_active = False
         self.bursts: list[dict] = []  # active EnemyShoot bursts
         self.last_eb = np.zeros((0, 4), np.float32)  # last reconstructed enemy bullets (x,y,ux,uy), for the recorder
 
     def set_map(self, w: int, h: int) -> None:
-        if self.w == w and self.h == h and self.walkable is not None:
+        if self.w == w and self.h == h and self.walkable.size:
             return
         self.w, self.h = int(w), int(h)
         self.walkable = np.ones((self.h, self.w), bool)

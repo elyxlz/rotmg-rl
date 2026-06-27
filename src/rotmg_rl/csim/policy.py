@@ -6,10 +6,10 @@ NUM_SCALARS are the scalars.
 
 from __future__ import annotations
 
-import pufferlib.pytorch
-import pufferlib.spaces
-import torch
-from torch import nn
+import pufferlib.pytorch  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
+import pufferlib.spaces  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
+import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
+from torch import nn  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
 
 from rotmg_rl.config import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS
 

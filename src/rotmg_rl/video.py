@@ -17,7 +17,7 @@ import pathlib
 import time
 
 import imageio.v2 as imageio
-import torch
+import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
 
 from rotmg_rl.config import DungeonConfig
 from rotmg_rl.csim.render import render_pov

@@ -8,12 +8,12 @@ mutated by forward_eval), reset per episode. Action = one sample per MultiDiscre
 from __future__ import annotations
 
 import numpy as np
-import torch
+import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
 
 
 class PolicyRunner:
     def __init__(self, checkpoint: str, hidden: int = 256, device: str | None = None) -> None:
-        from pufferlib.ocean import torch as ocean_torch
+        from pufferlib.ocean import torch as ocean_torch  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
         from rotmg_rl.csim.dungeon import CDungeon
         from rotmg_rl.csim.policy import CDungeonPolicy
 

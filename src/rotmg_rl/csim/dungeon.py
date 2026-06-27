@@ -14,13 +14,13 @@ import numpy as np
 
 import pufferlib
 from rotmg_rl.config import N_AIM, DungeonConfig
-from rotmg_rl.csim import binding
+from rotmg_rl.csim import binding  # ty: ignore[unresolved-import]  compiled C extension built at runtime, no static stubs
 from rotmg_rl.csim.single import OBS_SIZE
 
 __all__ = ["OBS_SIZE", "CDungeon"]
 
 
-class CDungeon(pufferlib.PufferEnv):
+class CDungeon(pufferlib.PufferEnv):  # ty: ignore[unresolved-attribute]  pufferlib is pip-installed only on the GPU box
     def __init__(
         self, config: DungeonConfig | None = None, num_envs: int = 1, render_mode=None, log_interval: int = 128, buf=None, seed: int = 0
     ):

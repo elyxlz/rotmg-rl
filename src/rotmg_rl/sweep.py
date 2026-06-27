@@ -16,9 +16,9 @@ import sys
 import time
 from copy import deepcopy
 
-import pufferlib.sweep
+import pufferlib.sweep  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
 
-from pufferlib import pufferl
+from pufferlib import pufferl  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
 from rotmg_rl.schedule import N_SNAKES_MAX
 
 # Swept hyperparameters, by the pufferl-config section they live in. ramp_frac is schedule-only

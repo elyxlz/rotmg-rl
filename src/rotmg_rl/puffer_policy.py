@@ -13,7 +13,7 @@ import pufferlib.spaces
 import torch
 from torch import nn
 
-from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS
+from rotmg_rl.config import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS
 
 _li = pufferlib.pytorch.layer_init
 

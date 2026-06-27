@@ -3,8 +3,8 @@ checkpoint to a POV mp4 and log it to wandb, like follow_along.py does for the 3
 
 4.0's torch backend saves checkpoints as `checkpoints4/dungeon/<run_id>/<global_step>.bin` — a plain
 torch state_dict of pufferlib.models.Policy(DungeonEncoder, DefaultDecoder, LSTM) (our CNN). We
-reconstruct that exact policy, load the weights, and drive the numpy DungeonEnv (its obs flattens to
-the same [grid, scalars] layout the C env feeds the encoder), rendering the debug POV.
+reconstruct that exact policy, load the weights, and drive the single-env C wrapper (the same flat
+[grid, minimap, scalars] obs the encoder trains on), painting the debug POV from its render-state.
 
 ONLY works for --slowly checkpoints (our CNN, torch state_dict). The native _C backend saves opaque
 flat-weight dumps with puffernet's flat encoder — not renderable here (see docs/pufferlib4-migration.md).
@@ -21,18 +21,15 @@ import pathlib
 import time
 
 import imageio.v2 as imageio
-import numpy as np
 import torch
 
 import pufferlib.models as models
-from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
+from rotmg_rl.config import DungeonConfig
+from rotmg_rl.csim.render import render_pov
+from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle
+from rotmg_rl.sim.snakepit_map import load_jm
 
-OBS_SIZE = NUM_CH * GRID * GRID + NUM_MM_CH * MM * MM + NUM_SCALARS
 ACT_SIZES = [9, 32, 2, 2]
-
-
-def flatten(obs) -> np.ndarray:  # C obs layout: [grid, minimap, scalars]
-    return np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
 
 
 def build_policy(hidden: int, num_layers: int, device) -> torch.nn.Module:
@@ -44,20 +41,24 @@ def build_policy(hidden: int, num_layers: int, device) -> torch.nn.Module:
 
 @torch.no_grad()
 def rollout(policy, cfg, device, seed, max_frames):
-    env = DungeonEnv(cfg, render_mode="rgb_array")
-    obs, _ = env.reset(seed=seed)
+    walkable = load_jm().walkable
+    env = CDungeonSingle(cfg, seed=seed)
+    obs = env.reset(seed=seed)
     state = policy.initial_state(1, device)
     frames, cleared = [], False
-    for _ in range(max_frames):
-        x = torch.tensor(flatten(obs), device=device).unsqueeze(0)
-        logits, _, state = policy.forward_eval(x, state)
-        action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
-        obs, _, term, trunc, info = env.step(action)
-        frames.append(env.render())
-        if term or trunc:
-            cleared = bool(info["cleared"])
-            break
-    return frames, cleared
+    try:
+        for _ in range(max_frames):
+            frames.append(render_pov(env.render_state(), walkable))  # render the state the policy acts on
+            x = torch.tensor(obs, device=device).unsqueeze(0)
+            logits, _, state = policy.forward_eval(x, state)
+            action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+            obs, _, term, trunc, info = env.step(action)
+            if term or trunc:
+                cleared = bool(info["cleared"])
+                break
+        return frames, cleared
+    finally:
+        env.close()
 
 
 def newest_ckpt(watch):

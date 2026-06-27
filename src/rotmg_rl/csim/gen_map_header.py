@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import sys
 
-from rotmg_rl.sim.dungeon import _nearest_walkable
-from rotmg_rl.sim.snakepit_map import find_objects, load_jm
+from rotmg_rl.sim.snakepit_map import _nearest_walkable, find_objects, load_jm
 
 
 def main() -> None:

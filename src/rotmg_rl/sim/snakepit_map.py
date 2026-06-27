@@ -49,6 +49,15 @@ def _walkable(entries: list, idx: np.ndarray) -> np.ndarray:
     return wlk
 
 
+def _nearest_walkable(walkable, x, y):
+    """The walkable tile nearest (x, y); returns (x, y) unchanged if it is already walkable."""
+    if walkable[y, x]:
+        return x, y
+    ys, xs = np.where(walkable)
+    i = int(np.argmin((xs - x) ** 2 + (ys - y) ** 2))
+    return int(xs[i]), int(ys[i])
+
+
 def find_objects(dmap: DungeonMap, id_substr: str) -> list[tuple[int, int]]:
     """All (x, y) tiles whose object id contains id_substr (case-insensitive)."""
     locs: list[tuple[int, int]] = []

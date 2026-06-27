@@ -2,8 +2,8 @@
 
 Mirrors scripts/eval_dungeon.py but for the 4.0 torch CNN: reconstructs
 Policy(DungeonEncoder, DefaultDecoder, LSTM) (like follow_along4.py), loads the torch state_dict
-checkpoint, and runs N stochastic episodes on the numpy DungeonEnv reporting the per-episode clear
-fraction (the >=80% deliverable metric) -- NOT the per-step `cleared` rate the dashboard shows.
+checkpoint, and runs N stochastic episodes on the single-env C wrapper reporting the per-episode
+clear fraction (the >=80% deliverable metric) -- NOT the per-step `cleared` rate the dashboard shows.
 
     .venv4/bin/python scripts/eval_dungeon4.py --checkpoint checkpoints4/dungeon/<run>/<step>.bin \
         --episodes 200 --boss-hp 300 --no-grenades --no-minions --no-boss-shoots --spawn-in-room-prob 1.0
@@ -17,14 +17,10 @@ import numpy as np
 import torch
 
 import pufferlib.models as models
-from rotmg_rl.sim.dungeon import GRID, MM, NUM_CH, NUM_MM_CH, NUM_SCALARS, DungeonConfig, DungeonEnv
+from rotmg_rl.config import DungeonConfig
+from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle
 
-OBS_SIZE = NUM_CH * GRID * GRID + NUM_MM_CH * MM * MM + NUM_SCALARS
 ACT_SIZES = [9, 32, 2, 2]
-
-
-def flatten(obs) -> np.ndarray:  # C obs layout: [grid, minimap, scalars]
-    return np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
 
 
 def build_policy(hidden: int, num_layers: int, device):
@@ -36,17 +32,20 @@ def build_policy(hidden: int, num_layers: int, device):
 
 @torch.no_grad()
 def run_episode(policy, cfg, device, seed, max_steps):
-    env = DungeonEnv(cfg)
-    obs, _ = env.reset(seed=seed)
+    env = CDungeonSingle(cfg, seed=seed)
+    obs = env.reset(seed=seed)
     state = policy.initial_state(1, device)
-    for t in range(max_steps):
-        x = torch.tensor(flatten(obs), device=device).unsqueeze(0)
-        logits, _, state = policy.forward_eval(x, state)
-        action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
-        obs, _, term, trunc, info = env.step(action)
-        if term or trunc:
-            return bool(info["cleared"]), t + 1, float(env.boss_hp / cfg.boss_hp_max)
-    return False, max_steps, float(env.boss_hp / cfg.boss_hp_max)
+    try:
+        for t in range(max_steps):
+            x = torch.tensor(obs, device=device).unsqueeze(0)
+            logits, _, state = policy.forward_eval(x, state)
+            action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+            obs, _, term, trunc, info = env.step(action)
+            if term or trunc:
+                return bool(info["cleared"]), t + 1, float(info["boss_hp_frac"])
+        return False, max_steps, float(info["boss_hp_frac"])
+    finally:
+        env.close()
 
 
 def main() -> None:

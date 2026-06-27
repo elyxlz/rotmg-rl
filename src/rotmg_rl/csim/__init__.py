@@ -1,6 +1,6 @@
-"""Fast C (PufferLib Ocean) port of the faithful Snake Pit dungeon sim.
+"""The Snake Pit dungeon env — fast C (PufferLib Ocean) implementation.
 
-The Python `rotmg_rl.sim.dungeon.DungeonEnv` is the oracle; this package is a bit-faithful C
-reimplementation for blazing-fast training. See `tests/test_csim_parity.py` for the acceptance
-parity test (same seed + actions -> matching obs and rewards).
+`dungeon.h` is the single source of truth for the env dynamics. `dungeon.py` wraps it as a vectorized
+PufferEnv (`CDungeon`) for training; `single.py` wraps one env (numpy-only) for eval + POV rendering;
+`render.py` paints the C render-state. Scenario tests live in `tests/test_dungeon_scenarios.py`.
 """

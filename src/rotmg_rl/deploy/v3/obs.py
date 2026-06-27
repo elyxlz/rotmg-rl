@@ -1,9 +1,9 @@
-"""Reconstruct the trained DungeonEnv observation from REAL betterSkillys game state.
+"""Reconstruct the trained env observation from REAL betterSkillys game state.
 
-Ground truth: rotmg_rl.sim.dungeon._obs / _minimap / _update_visibility / _scatter. We mirror them
+Ground truth: the C env's obs (csim/dungeon.h compute_obs / update_visibility). We mirror it
 bit-for-bit so the 95%-clear CDungeonPolicy sees the same 9807-float vector on the real server that
 it saw in sim: an egocentric 7x31x31 grid + a 3x32x32 fog-of-war minimap + 8 scalars, flattened
-[grid, minimap, scalars]. Constants + normalization are imported from the env, never re-hardcoded.
+[grid, minimap, scalars]. Constants + normalization come from rotmg_rl.config, never re-hardcoded.
 
 This is the v3 packet->obs bridge. The stale v1 (deploy/realm_state.py, grid+scalars only, 8-dir
 action) is reference, not reused.
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from rotmg_rl.sim.dungeon import (
+from rotmg_rl.config import (
     AIM_DIRS,
     CH_EBULLET,
     CH_EBVX,
@@ -191,7 +191,7 @@ class RealObsBuilder:
 
 
 def action_to_intent(action: dict, player_speed: float = 0.55) -> dict:
-    """Decode the 4-head MultiDiscrete action into a game intent (mirrors DungeonEnv.step):
+    """Decode the 4-head MultiDiscrete action into a game intent (mirrors the env step decode):
     move 0=stand / 1..8=MOVE_DIRS, aim=AIM_DIRS unit vector, shoot/cast bools."""
     mv = action["move"]
     if mv == 0:

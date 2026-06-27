@@ -93,35 +93,36 @@ def difficulty_config(d: float, n_snakes_max: int = N_SNAKES_MAX) -> dict:
 
 
 def _render_rollout(policy, max_frames=1200):
-    """In-process POV video of one full-difficulty episode (the training C env is headless, so this
-    runs the current policy on the numpy DungeonEnv). Logged to the SAME wandb run -- no follower."""
-    import numpy as np
-
-    from rotmg_rl.sim.dungeon import DungeonConfig, DungeonEnv
+    """In-process POV video of one full-difficulty episode on the single-env C wrapper (the same C
+    dynamics training uses), painted by the read-only render-state. Logged to the SAME wandb run."""
+    from rotmg_rl.config import DungeonConfig
+    from rotmg_rl.csim.render import render_pov
+    from rotmg_rl.csim.single import CDungeonSingle
+    from rotmg_rl.sim.snakepit_map import load_jm
 
     device = next(policy.parameters()).device
-    env = DungeonEnv(DungeonConfig(boss_hp_max=BOSS_HP, n_snakes=N_SNAKES_MAX, spawn_in_room_prob=0.0), render_mode="rgb_array")
-    obs, _ = env.reset(seed=777)
+    walkable = load_jm().walkable
+    env = CDungeonSingle(DungeonConfig(boss_hp_max=BOSS_HP, n_snakes=N_SNAKES_MAX, spawn_in_room_prob=0.0), seed=777)
+    obs = env.reset(seed=777)
     state = policy.initial_state(1, device)
     frames = []
     with torch.no_grad():
         for _ in range(max_frames):
-            flat = np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
-            logits, _, state = policy.forward_eval(torch.tensor(flat, device=device).unsqueeze(0), state)
+            frames.append(render_pov(env.render_state(), walkable))  # render the state the policy acts on
+            logits, _, state = policy.forward_eval(torch.tensor(obs, device=device).unsqueeze(0), state)
             action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
             obs, _, term, trunc, _ = env.step(action)
-            frames.append(env.render())
             if term or trunc:
                 break
+    env.close()
     return frames
 
 
 def eval_clear_rate(policy, episodes: int, d: float = 1.0, boss_hp: float = BOSS_HP, n_snakes_max: int = N_SNAKES_MAX, seed0: int = 50_000) -> float:
-    """TRUE per-episode clear rate at difficulty d (default full) on the numpy DungeonEnv -- the sweep
-    objective. Eval uses the deterministic full-difficulty spawn (always entrance) at d=1."""
-    import numpy as np
-
-    from rotmg_rl.sim.dungeon import DungeonConfig, DungeonEnv
+    """TRUE per-episode clear rate at difficulty d (default full) on the single-env C wrapper -- the
+    sweep objective. Eval uses the deterministic full-difficulty spawn (always entrance) at d=1."""
+    from rotmg_rl.config import DungeonConfig
+    from rotmg_rl.csim.single import CDungeonSingle
 
     device = next(policy.parameters()).device
     cfg_kw = difficulty_config(d, n_snakes_max)
@@ -131,17 +132,17 @@ def eval_clear_rate(policy, episodes: int, d: float = 1.0, boss_hp: float = BOSS
     clears = 0
     with torch.no_grad():
         for i in range(episodes):
-            env = DungeonEnv(cfg)
-            obs, _ = env.reset(seed=seed0 + i)
+            env = CDungeonSingle(cfg, seed=seed0 + i)
+            obs = env.reset(seed=seed0 + i)
             state = policy.initial_state(1, device)
             for _ in range(cfg.max_steps):
-                flat = np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
-                logits, _, state = policy.forward_eval(torch.tensor(flat, device=device).unsqueeze(0), state)
+                logits, _, state = policy.forward_eval(torch.tensor(obs, device=device).unsqueeze(0), state)
                 action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
                 obs, _, term, trunc, info = env.step(action)
                 if term or trunc:
                     clears += int(info["cleared"])
                     break
+            env.close()
     return clears / max(1, episodes)
 
 

@@ -14,17 +14,17 @@ import torch
 
 class PolicyRunner:
     def __init__(self, checkpoint: str, hidden: int = 256, device: str | None = None) -> None:
-        import pufferlib.emulation as emulation
-        import pufferlib.vector as pvector
         from pufferlib.ocean import torch as ocean_torch
 
+        from rotmg_rl.csim.dungeon import CDungeon
         from rotmg_rl.csim.policy import CDungeonPolicy
-        from rotmg_rl.sim.dungeon import DungeonEnv
 
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        venv = pvector.make(emulation.GymnasiumPufferEnv, env_kwargs={"env_creator": DungeonEnv}, num_envs=1, backend=pvector.Serial)
-        policy = CDungeonPolicy(venv.driver_env, hidden_size=hidden)
-        policy = ocean_torch.Recurrent(venv.driver_env, policy, input_size=hidden, hidden_size=hidden).to(self.device)
+        # The C env is the policy's native env (flat [grid, minimap, scalars] Box obs + the
+        # MultiDiscrete action); use it directly as the driver env rather than emulating a numpy env.
+        driver = CDungeon(num_envs=1)
+        policy = CDungeonPolicy(driver, hidden_size=hidden)
+        policy = ocean_torch.Recurrent(driver, policy, input_size=hidden, hidden_size=hidden).to(self.device)
         policy.load_state_dict(torch.load(checkpoint, map_location=self.device))
         policy.eval()
         self.policy = policy

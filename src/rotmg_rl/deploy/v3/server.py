@@ -11,13 +11,15 @@ Protocol (one JSON object per line):
                "enemies":[{x,y,hp,hp_max,is_boss,invuln}], "player_bullets":[{x,y}], "now_ms"}
   out: {"action": {"move","aim","shoot","cast"}, "intent": {"dx","dy","aim_x","aim_y","shoot","cast"}}
 
-The stale v1 (deploy/policy_server.py, grid+scalars only, 8-dir action) is reference, not reused.
+--record <path.mp4> renders a POV frame per tick (the milestone-5 fallback recording) and writes the
+mp4 on stdin EOF / SIGTERM. The stale v1 (deploy/policy_server.py) is reference, not reused.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 
 from rotmg_rl.deploy.v3.obs import RealObsBuilder, action_to_intent
@@ -28,10 +30,27 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", default="checkpoints/full_dungeon_95.pt")
     ap.add_argument("--greedy", action="store_true")
+    ap.add_argument("--record", default=None, help="render a POV mp4 of the real-server rollout to this path")
+    ap.add_argument("--fps", type=int, default=15)
     args = ap.parse_args()
 
     runner = PolicyRunner(args.checkpoint)
     obs = RealObsBuilder()
+    frames: list = []
+
+    def save_and_exit(*_):
+        if args.record and frames:
+            import imageio.v2 as imageio
+
+            imageio.mimsave(args.record, frames, fps=args.fps)
+            print(json.dumps({"saved": args.record, "frames": len(frames)}), flush=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, save_and_exit)
+
+    if args.record:
+        from rotmg_rl.deploy.v3.render import render_frame
+
     print(json.dumps({"ready": True}), flush=True)
 
     for line in sys.stdin:
@@ -59,7 +78,11 @@ def main() -> None:
 
         flat = obs.build(msg)
         action = runner.act(flat, greedy=args.greedy)
+        if args.record:
+            frames.append(render_frame(obs, msg))
         print(json.dumps({"action": action, "intent": action_to_intent(action)}), flush=True)
+
+    save_and_exit()
 
 
 if __name__ == "__main__":

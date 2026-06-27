@@ -52,6 +52,7 @@ class RealObsBuilder:
         self.boss_seen = False
         self.fight_active = False
         self.bursts: list[dict] = []  # active EnemyShoot bursts
+        self.last_eb = np.zeros((0, 4), np.float32)  # last reconstructed enemy bullets (x,y,ux,uy), for the recorder
 
     def set_map(self, w: int, h: int) -> None:
         if self.w == w and self.h == h and self.walkable is not None:
@@ -155,6 +156,7 @@ class RealObsBuilder:
             self._scatter(grid, CH_ENEMY, (np.array(boss_pos, np.float32) - ppos).reshape(1, 2), 1.0)
 
         eb = self._active_bullets(float(state["now_ms"]))
+        self.last_eb = eb
         if eb.shape[0]:
             rel = eb[:, :2] - ppos
             self._scatter(grid, CH_EBULLET, rel, 1.0)

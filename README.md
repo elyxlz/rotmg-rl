@@ -22,7 +22,7 @@ torch path; see `docs/pufferlib4-migration.md`). **One command** does everything
 winning config, as one process and one continuous wandb run, to the full-dungeon policy:
 
 ```bash
-python3 train.py --wandb        # sweep (16 trials, reduced boss HP) -> train the winner (~460M steps)
+python3 train.py --wandb        # sweep (16 trials) -> train the winner (~460M steps)
                                 # -> checkpoints/curriculum4/finish.pt
 python3 train.py --wandb --no-sweep   # skip the sweep; train the full schedule directly with the good defaults
 ```

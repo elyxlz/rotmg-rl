@@ -34,7 +34,7 @@ def main() -> None:
     p.add_argument("--sweep-trials", type=int, default=16)
     p.add_argument("--trial-steps", type=int, default=35_000_000)
     p.add_argument("--num-envs", type=int, default=1024)
-    p.add_argument("--sweep-boss-hp", type=float, default=4000.0)
+    p.add_argument("--sweep-boss-hp", type=float, default=7500.0)
     p.add_argument("--eval-episodes", type=int, default=24)
     p.add_argument("--n-snakes-max", type=int, default=T.N_SNAKES_MAX)
     p.add_argument("--out-dir", default="checkpoints/sweep4")

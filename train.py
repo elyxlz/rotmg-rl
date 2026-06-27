@@ -358,7 +358,7 @@ def main() -> None:
     # sweep knobs
     p.add_argument("--sweep-trials", type=int, default=16)
     p.add_argument("--trial-steps", type=int, default=35_000_000, help="steps per sweep trial")
-    p.add_argument("--sweep-boss-hp", type=float, default=4000.0, help="reduced boss HP for trials so the metric has gradient in-budget")
+    p.add_argument("--sweep-boss-hp", type=float, default=7500.0, help="boss HP for sweep trials (default = the real 7500 target; the schedule's easy early-d gives gradient. Lower it only if a task genuinely has none)")
     p.add_argument("--eval-episodes", type=int, default=24, help="d=1 clear-rate eval episodes (per sweep eval + the final eval)")
     # full-run hyperparameters (defaults for --no-sweep / the fallback if the sweep finds nothing)
     p.add_argument("--ramp-frac", type=float, default=0.6, help="fraction of training spent ramping d 0->1 (rest at d=1)")

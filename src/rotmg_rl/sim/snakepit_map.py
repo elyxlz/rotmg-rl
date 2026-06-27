@@ -65,5 +65,5 @@ def find_objects(dmap: DungeonMap, id_substr: str) -> list[tuple[int, int]]:
     for i, e in enumerate(dmap.entries):
         if any(sub in (o.get("id") or "").lower() for o in (e.get("objs") or [])):
             ys, xs = np.where(dmap.tile_index == i)
-            locs.extend(zip(xs.tolist(), ys.tolist()))
+            locs.extend(zip(xs.tolist(), ys.tolist(), strict=True))
     return locs

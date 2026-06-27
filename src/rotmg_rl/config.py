@@ -63,7 +63,9 @@ class DungeonConfig:
     max_steps: int = 4000
     activation_range: float = 20.0
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)
-    spawn_in_room_radius: float = 6.0  # ring distance (tiles) from the boss for the in-room spawn; ramp it up to teach navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
+    # ring distance (tiles) from the boss for the in-room spawn; ramp it up to teach
+    # navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
+    spawn_in_room_radius: float = 6.0
     random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
     # Wizard, realistic maxed T7 Snake-Pit loadout (gear stats are StatDataType bonuses resolved via
     # GetStatIndex, NOT raw core-stat ids): 670 base HP + 100 ring (stat0) + 40 spell (stat0) = 810;

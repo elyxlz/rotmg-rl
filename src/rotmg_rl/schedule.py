@@ -29,16 +29,16 @@ def difficulty_config(d: float, n_snakes_max: int = N_SNAKES_MAX) -> dict:
     d = _clamp01(d)
     n = round(n_snakes_max * d)
     lerp = lambda a, b: a + (b - a) * d  # noqa: E731
-    return dict(
-        spawn_in_room_prob=lerp(1.0, 0.05),
-        spawn_in_room_radius=lerp(6.0, 14.0),
-        n_snakes=n,
-        n_snakes_jitter=round(0.35 * n),
-        enable_grenades=1 if d > 0.15 else 0,
-        enable_minions=1 if d > 0.45 else 0,
-        boss_shoots=1 if d > 0.05 else 0,
-        blade_cd=round(15 + (40 - 15) * (1.0 - _clamp01(d / 0.4))),  # 40 (gentle) -> 15 (real) by d=0.4
-    )
+    return {
+        "spawn_in_room_prob": lerp(1.0, 0.05),
+        "spawn_in_room_radius": lerp(6.0, 14.0),
+        "n_snakes": n,
+        "n_snakes_jitter": round(0.35 * n),
+        "enable_grenades": 1 if d > 0.15 else 0,
+        "enable_minions": 1 if d > 0.45 else 0,
+        "boss_shoots": 1 if d > 0.05 else 0,
+        "blade_cd": round(15 + (40 - 15) * (1.0 - _clamp01(d / 0.4))),  # 40 (gentle) -> 15 (real) by d=0.4
+    }
 
 
 def apply_difficulty(args: dict, d: float, rew_approach: float, n_snakes_max: int) -> None:

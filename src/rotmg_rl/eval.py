@@ -14,9 +14,9 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
+import pufferlib.models as models
 import torch
 
-import pufferlib.models as models
 from rotmg_rl.config import DungeonConfig
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle
 from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, difficulty_config

@@ -14,7 +14,6 @@ import torch
 class PolicyRunner:
     def __init__(self, checkpoint: str, hidden: int = 256, device: str | None = None) -> None:
         from pufferlib.ocean import torch as ocean_torch
-
         from rotmg_rl.csim.dungeon import CDungeon
         from rotmg_rl.csim.policy import CDungeonPolicy
 
@@ -36,8 +35,5 @@ class PolicyRunner:
     def act(self, flat: np.ndarray, greedy: bool = False) -> dict:
         x = torch.tensor(np.asarray(flat, np.float32), device=self.device).unsqueeze(0)
         logits, _ = self.policy.forward_eval(x, self.state)
-        if greedy:
-            a = [int(lg.argmax(dim=1)) for lg in logits]
-        else:
-            a = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+        a = [int(lg.argmax(dim=1)) if greedy else int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
         return {"move": a[0], "aim": a[1], "shoot": a[2], "cast": a[3]}

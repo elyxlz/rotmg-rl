@@ -11,8 +11,8 @@ from dataclasses import asdict
 
 import gymnasium
 import numpy as np
-import pufferlib
 
+import pufferlib
 from rotmg_rl.config import N_AIM, DungeonConfig
 from rotmg_rl.csim import binding
 from rotmg_rl.csim.single import OBS_SIZE

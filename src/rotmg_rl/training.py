@@ -20,11 +20,10 @@ import sys
 import time
 
 import torch
+from pufferlib.pufferl import unroll_nested_dict
+from pufferlib.torch_pufferl import _OBS_DTYPE_MAP, PuffeRL, _cpu_tensor, _CudaPtr, load_policy  # vec-buffer binding internals
 
 from pufferlib import _C, pufferl
-from pufferlib.pufferl import unroll_nested_dict
-from pufferlib.torch_pufferl import _OBS_DTYPE_MAP, _CudaPtr, _cpu_tensor, PuffeRL, load_policy  # vec-buffer binding internals
-
 from rotmg_rl.eval import eval_clear_rate
 from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, apply_difficulty, difficulty_at, difficulty_config
 from rotmg_rl.sweep import apply_hparams, build_sweep_config, run_sweep
@@ -122,8 +121,8 @@ def train_continuous(
             last_save = trainer.global_step
             trainer.save_weights(str(out / "latest.pt"))
             if use_wandb:
-                import wandb
                 import imageio.v2 as imageio
+                import wandb
 
                 try:
                     vid = str(out / "rollout.mp4")
@@ -167,7 +166,10 @@ def main() -> None:
         "--sweep-boss-hp",
         type=float,
         default=7500.0,
-        help="boss HP for sweep trials (default = the real 7500 target; the schedule's easy early-d gives gradient. Lower it only if a task genuinely has none)",
+        help=(
+            "boss HP for sweep trials (default = the real 7500 target; the schedule's easy early-d gives "
+            "gradient. Lower it only if a task genuinely has none)"
+        ),
     )
     p.add_argument("--eval-episodes", type=int, default=24, help="d=1 clear-rate eval episodes (per sweep eval + the final eval)")
     # full-run hyperparameters (defaults for --no-sweep / the fallback if the sweep finds nothing)
@@ -206,16 +208,16 @@ def main() -> None:
 
     # the CLI-default hyperparameters (the --no-sweep config + the sweep-empty fallback). Only the
     # original good-default knobs; the rest stay at the ini defaults (apply_hparams sets only what's present).
-    cli_hp = dict(
-        learning_rate=a.lr,
-        gamma=a.gamma,
-        gae_lambda=a.gae_lambda,
-        ent_coef=a.ent_coef,
-        ramp_frac=a.ramp_frac,
-        hidden_size=a.hidden_size,
-        rew_approach=a.rew_approach,
-        rew_boss_dmg=a.rew_boss_dmg,
-    )
+    cli_hp = {
+        "learning_rate": a.lr,
+        "gamma": a.gamma,
+        "gae_lambda": a.gae_lambda,
+        "ent_coef": a.ent_coef,
+        "ramp_frac": a.ramp_frac,
+        "hidden_size": a.hidden_size,
+        "rew_approach": a.rew_approach,
+        "rew_boss_dmg": a.rew_boss_dmg,
+    }
 
     # pick the hyperparameters: sweep for the winner, or the CLI defaults on --no-sweep.
     if a.no_sweep:

@@ -41,6 +41,8 @@
 #define CH_PBULLET 5
 #define CH_GRENADE 6
 
+#define BOSS_RETURN_RADIUS 1.0f /* ReturnToSpawn(0.7, 1): the boss anchors within 1 tile of spawn */
+
 #define MAX_PBULLETS 4096
 #define MAX_EBULLETS 4096
 #define MAX_SNAKES 512
@@ -115,7 +117,7 @@ typedef struct {
     float player_speed, player_radius;
     int max_steps;
     float activation_range, spawn_in_room_prob, random_spawn_prob, spawn_in_room_radius;
-    float player_hp_max, player_mp_max, player_defense, damage_floor, mp_regen;
+    float player_hp_max, player_mp_max, player_defense, damage_floor, mp_regen, hp_regen;
     int staff_cooldown, staff_num;
     float staff_dmg_lo, staff_dmg_hi, staff_speed;
     int staff_life;
@@ -123,9 +125,9 @@ typedef struct {
     int spell_cooldown, spell_num;
     float spell_dmg_lo, spell_dmg_hi, spell_speed;
     int spell_life;
-    int n_snakes;
+    int n_snakes, n_snakes_jitter;
     float snake_speed, snake_radius;
-    float boss_hp_max, boss_radius, boss_defense, boss_wander_speed;
+    float boss_hp_max, boss_radius, boss_defense, boss_wander_speed, boss_return_speed;
     int boss_shoots, opening_invuln_ticks, invuln_ticks;
     int blade_cd;
     float blade_radius_p1, blade_radius_p3;
@@ -169,6 +171,7 @@ typedef struct {
     float player_hp, player_mp;
     int staff_timer, spell_timer;
     double boss_x, boss_y; /* boss_pos becomes float64 in oracle after first move */
+    double boss_spawn_x, boss_spawn_y; /* ReturnToSpawn anchor: the boss is pulled back toward here in P1 */
     double boss_hp; /* float64 like the numpy oracle (Python float), for phase/collision fidelity */
     int phase, fight_active, invuln_timer;
     int confused_timer, petrify_timer, minion_timer;
@@ -524,6 +527,20 @@ static void boss_tick(Dungeon* env) {
             env->boss_y = cy;
         }
     }
+    /* ReturnToSpawn(0.7, 1): gentle pull back toward spawn while wandering in P1, so the boss
+     * can't random-walk out of the room. Only fires once drift exceeds the anchor radius. */
+    if (env->phase == 1 && c->boss_return_speed > 0.0f) {
+        double dx = env->boss_spawn_x - env->boss_x, dy = env->boss_spawn_y - env->boss_y;
+        double d = sqrt(dx * dx + dy * dy);
+        if (d > BOSS_RETURN_RADIUS) {
+            double step = c->boss_return_speed < d ? c->boss_return_speed : d;
+            double nx = env->boss_x + dx / d * step, ny = env->boss_y + dy / d * step;
+            if (walkable_at((float)nx, (float)ny)) {
+                env->boss_x = nx;
+                env->boss_y = ny;
+            }
+        }
+    }
     if (env->invuln_timer > 0) return;
 
     static const float CARDINALS[4] = {0.0f, 90.0f, 180.0f, 270.0f};
@@ -619,6 +636,13 @@ static void spawn_snakes(Dungeon* env) {
     Config* c = &env->cfg;
     env->n_snake = 0;
     int want = c->n_snakes;
+    /* per-episode density jitter: spread the snake count in a band around the scheduled target so a
+     * single difficulty d spans easier/harder episodes within a batch (no draw when jitter == 0). */
+    if (c->n_snakes_jitter > 0) {
+        int span = 2 * c->n_snakes_jitter + 1;
+        want += (int)(rng_next(env) % (unsigned)span) - c->n_snakes_jitter;
+        if (want < 0) want = 0;
+    }
     if (want > g_n_walk) want = g_n_walk;
     /* sample distinct walkable tiles + a weighted archetype (training randomness; not parity-matched) */
     for (int s = 0; s < want; s++) {
@@ -789,6 +813,8 @@ static void c_reset(Dungeon* env) {
     env->spell_timer = 0;
     env->boss_x = bx + 0.5;
     env->boss_y = by + 0.5;
+    env->boss_spawn_x = bx + 0.5;
+    env->boss_spawn_y = by + 0.5;
     env->prev_boss_dist = dist_df(env->boss_x, env->boss_y, env->px, env->py);
     env->boss_hp = c->boss_hp_max;
     env->phase = 0;
@@ -838,6 +864,11 @@ static void c_step(Dungeon* env) {
     if (env->spell_timer > 0) env->spell_timer--;
     env->player_mp = env->player_mp + c->mp_regen;
     if (env->player_mp > c->player_mp_max) env->player_mp = c->player_mp_max;
+    /* HealthRegen (Player.cs HandleRegen): (1 + 0.36*VIT)/s, here a flat per-tick rate, capped at max */
+    if (env->player_hp < c->player_hp_max) {
+        env->player_hp = env->player_hp + c->hp_regen;
+        if (env->player_hp > c->player_hp_max) env->player_hp = c->player_hp_max;
+    }
 
     float aimx = g_aim_dx[aim_idx], aimy = g_aim_dy[aim_idx];
     if (shoot == 1 && env->staff_timer == 0) {

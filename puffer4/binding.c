@@ -37,6 +37,7 @@ void my_init(Env* env, Dict* kwargs) {
     c->player_defense = dict_get(kwargs, "player_defense")->value;
     c->damage_floor = dict_get(kwargs, "damage_floor")->value;
     c->mp_regen = dict_get(kwargs, "mp_regen")->value;
+    c->hp_regen = dict_get(kwargs, "hp_regen")->value;
     c->staff_cooldown = (int)dict_get(kwargs, "staff_cooldown")->value;
     c->staff_num = (int)dict_get(kwargs, "staff_num")->value;
     c->staff_dmg_lo = dict_get(kwargs, "staff_dmg_lo")->value;
@@ -53,12 +54,14 @@ void my_init(Env* env, Dict* kwargs) {
     c->spell_speed = dict_get(kwargs, "spell_speed")->value;
     c->spell_life = (int)dict_get(kwargs, "spell_life")->value;
     c->n_snakes = (int)dict_get(kwargs, "n_snakes")->value;
+    c->n_snakes_jitter = (int)dict_get(kwargs, "n_snakes_jitter")->value;
     c->snake_speed = dict_get(kwargs, "snake_speed")->value;
     c->snake_radius = dict_get(kwargs, "snake_radius")->value;
     c->boss_hp_max = dict_get(kwargs, "boss_hp_max")->value;
     c->boss_radius = dict_get(kwargs, "boss_radius")->value;
     c->boss_defense = dict_get(kwargs, "boss_defense")->value;
     c->boss_wander_speed = dict_get(kwargs, "boss_wander_speed")->value;
+    c->boss_return_speed = dict_get(kwargs, "boss_return_speed")->value;
     c->boss_shoots = (int)dict_get(kwargs, "boss_shoots")->value;
     c->opening_invuln_ticks = (int)dict_get(kwargs, "opening_invuln_ticks")->value;
     c->invuln_ticks = (int)dict_get(kwargs, "invuln_ticks")->value;

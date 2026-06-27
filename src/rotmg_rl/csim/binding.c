@@ -23,6 +23,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     c->player_defense = unpack(kwargs, "player_defense");
     c->damage_floor = unpack(kwargs, "damage_floor");
     c->mp_regen = unpack(kwargs, "mp_regen");
+    c->hp_regen = unpack(kwargs, "hp_regen");
     c->staff_cooldown = (int)unpack(kwargs, "staff_cooldown");
     c->staff_num = (int)unpack(kwargs, "staff_num");
     c->staff_dmg_lo = unpack(kwargs, "staff_dmg_lo");
@@ -39,12 +40,14 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     c->spell_speed = unpack(kwargs, "spell_speed");
     c->spell_life = (int)unpack(kwargs, "spell_life");
     c->n_snakes = (int)unpack(kwargs, "n_snakes");
+    c->n_snakes_jitter = (int)unpack(kwargs, "n_snakes_jitter");
     c->snake_speed = unpack(kwargs, "snake_speed");
     c->snake_radius = unpack(kwargs, "snake_radius");
     c->boss_hp_max = unpack(kwargs, "boss_hp_max");
     c->boss_radius = unpack(kwargs, "boss_radius");
     c->boss_defense = unpack(kwargs, "boss_defense");
     c->boss_wander_speed = unpack(kwargs, "boss_wander_speed");
+    c->boss_return_speed = unpack(kwargs, "boss_return_speed");
     c->boss_shoots = (int)unpack(kwargs, "boss_shoots");
     c->opening_invuln_ticks = (int)unpack(kwargs, "opening_invuln_ticks");
     c->invuln_ticks = (int)unpack(kwargs, "invuln_ticks");

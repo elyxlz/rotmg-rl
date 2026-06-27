@@ -6,20 +6,24 @@ path-to-boss breadcrumb), the dungeon populated with the real snakes you fight/d
 the Wizard's real loadout (Staff of the Fundamental Core + Spell of Galactic Creation). Calibrated:
 dt=100ms, tiles/tick = projectile Speed/100, cooldown ticks = ms/100.
 
-Real-game fidelity (source: vendor/betterSkillys/source):
-- Spell = "Spell of Galactic Creation": a 360-degree BulletNova, 20 bullets evenly over a full
-  circle from the player position (point-blank detonation), [110,205] dmg each, MP 100, no cooldown.
+Real-game fidelity (source: vendor/betterSkillys/source). Loadout is a realistic TIER-7 Wizard (the
+Snake Pit is a low-level dungeon; T7 is what a normal player brings), not the old T14 gear:
+- Spell = "Burning Retribution Spell" (T7): a 360-degree BulletNova, 20 bullets evenly over a full
+  circle from the player position (point-blank detonation), [95,185] dmg each, MP 90, no cooldown.
   No focused arc nuke exists in the real game; point-blank only the few bullets whose headings cross
   a target connect, so vs a single boss it is chip/support DPS, not a nuke.
-- Staff = "Staff of the Fundamental Core": 2 parallel shots (ArcGap 0), [75,115] dmg each, range
+- Staff = "Staff of Destruction" (T7): 2 parallel shots (ArcGap 0), [45,85] dmg each, range
   ~8.55 tiles (Speed 180, Life 475ms). Long range -> the realistic strategy is to KITE at ~8 tiles
   and sustain staff DPS, since the boss's P1 Blades are point-blank only.
-- Damage uses the real defense clamp: dealt = max(raw*0.1, raw - defense). Boss DEF 19; the geared
-  Wizard has DEF 17 (robe) and 780 max HP (670 base + 110 ring).
+- Damage uses the real defense clamp: dealt = max(raw*0.1, raw - defense). Boss DEF 19; the T7
+  Wizard has DEF 30 (Robe of the Invoker) and 770 max HP (670 base + 100 ring).
+- HP/MP regen (Player.cs HandleRegen): the real player recovers ~15.4 HP/s and ~15.4 MP/s between
+  hits (VIT 40 / WIS 60). WITHOUT this the faithful fight is far deadlier than the real one; it is
+  why the player survives long enough to sustain the kill.
 - Boss Stheno: P1 fires 3-blade 15deg shots ONLY point-blank (acquire radius 2) + a Confused grenade
-  + Wander(0.3); P2 fires NOTHING but the Confused grenade (its 4-shot references a nonexistent
-  projectile); P3 fires aimed 3-blade shots + 8 fixed-angle Petrify grenades in a radial fan. Boss
-  is stationary in P2/P3. Grenade fuse is 1500ms.
+  + Wander(0.3) with a ReturnToSpawn(0.7, 1) anchor so it stays in the room; P2 fires NOTHING but the
+  Confused grenade (its 4-shot references a nonexistent projectile); P3 fires aimed 3-blade shots + 8
+  fixed-angle Petrify grenades in a radial fan. Boss is stationary in P2/P3. Grenade fuse is 1500ms.
 - Snakes: the real variety (Pit Vipers, Pythons, Greater Pit Snakes/Vipers) with real HP, defense,
   damage, range, arcs and chase -- the main attrition threat across the ~150-tile traversal.
 
@@ -38,6 +42,7 @@ import numpy as np
 from rotmg_rl.sim.snakepit_map import DungeonMap, find_objects, load_jm
 
 VIS_RADIUS = 15  # source VISIBILITY_RADIUS
+BOSS_RETURN_RADIUS = 1.0  # ReturnToSpawn(0.7, 1): the boss anchors within 1 tile of spawn
 GRID = 2 * VIS_RADIUS + 1  # 31x31 egocentric window
 MOVE_DIRS = np.stack([np.cos(np.arange(8) * np.pi / 4), np.sin(np.arange(8) * np.pi / 4)], 1).astype(np.float32)
 N_AIM = 32
@@ -85,32 +90,36 @@ class DungeonConfig:
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)
     spawn_in_room_radius: float = 6.0  # ring distance (tiles) from the boss for the in-room spawn; ramp it up to teach navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
     random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
-    # Wizard (geared loadout: 670 base HP + 110 ring, robe DEF +17)
-    player_hp_max: float = 780.0
+    # Wizard (realistic T7 Snake-Pit loadout: 670 base HP + 100 ring (Ring of Superior Health), Robe
+    # of the Invoker DEF +30). Health/Mana regen from Player.cs HandleRegen at the base maxed Wizard
+    # VIT 40 / WIS 60: hp/s = 1 + 0.36*VIT = 15.4, mp/s = 1 + 0.24*WIS = 15.4 -> 1.54 per 100ms tick.
+    player_hp_max: float = 770.0
     player_mp_max: float = 385.0
-    player_defense: float = 17.0  # robe; incoming damage reduced by the real clamp
+    player_defense: float = 30.0  # robe; incoming damage reduced by the real clamp
     damage_floor: float = 0.1  # DamageWithDefense floor: dealt = max(raw*floor, raw - defense)
-    mp_regen: float = 0.5
-    # Staff of the Fundamental Core: 2 parallel shots (ArcGap 0), [75,115] dmg, Speed 180 (1.8 t/tick),
+    mp_regen: float = 1.54  # (1 + 0.24*WIS)/s at WIS 60, per 100ms tick
+    hp_regen: float = 1.54  # (1 + 0.36*VIT)/s at VIT 40, per 100ms tick; the real fight is survivable because the player recovers between hits
+    # Staff of Destruction (T7): 2 parallel shots (ArcGap 0), [45,85] dmg, Speed 180 (1.8 t/tick),
     # Life 475ms -> range ~8.55 tiles (life 6 ticks * 1.8 reaches ~9 tiles, just past the kite distance).
     staff_cooldown: int = 2
     staff_num: int = 2
-    staff_dmg: tuple[float, float] = (75.0, 115.0)
+    staff_dmg: tuple[float, float] = (45.0, 85.0)
     staff_speed: float = 1.8
     staff_life: int = 6
     staff_radius: float = 0.5
     staff_offset: float = 0.5
-    # Spell of Galactic Creation: 360-degree BulletNova from the player, 20 bullets, [110,205] dmg,
-    # Speed 160 (1.6 t/tick), Life 1000ms (10 ticks, ~16-tile range), MP 100, no cooldown.
-    spell_cost: float = 100.0
+    # Burning Retribution Spell (T7): 360-degree BulletNova from the player, 20 bullets, [95,185] dmg,
+    # Speed 160 (1.6 t/tick), Life 1000ms (10 ticks, ~16-tile range), MP 90, no cooldown.
+    spell_cost: float = 90.0
     spell_cooldown: int = 0
     spell_num: int = 20
-    spell_dmg: tuple[float, float] = (110.0, 205.0)
+    spell_dmg: tuple[float, float] = (95.0, 185.0)
     spell_speed: float = 1.6
     spell_life: int = 10
     # snakes: real variety in SNAKE_TYPES (HP 5-500, dmg 20-50). snake_speed = wander drift std,
     # snake_radius = collision size; per-type combat stats live in SNAKE_TYPES, not config.
     n_snakes: int = 40
+    n_snakes_jitter: int = 0  # per-episode +/- band around n_snakes (difficulty schedule spreads a batch around d)
     snake_speed: float = 0.15
     snake_radius: float = 0.5
     # boss (Stheno the Snake Queen): 7500 HP, DEF 19, phases at 66%/33%.
@@ -118,6 +127,7 @@ class DungeonConfig:
     boss_radius: float = 2.0
     boss_defense: float = 19.0
     boss_wander_speed: float = 0.15  # Wander(0.3) in P1 (random drift); stationary in P2/P3
+    boss_return_speed: float = 0.35  # ReturnToSpawn(0.7, 1): gentle pull toward spawn in P1 so it can't drift out of the room
     boss_shoots: bool = True  # curriculum stage 0 sets False: passive target, learn aim+kill first
     opening_invuln_ticks: int = 10  # Start state: 1.0s invuln taunt before P1
     invuln_ticks: int = 15  # P2/P3 transition invuln (1.5s)
@@ -226,6 +236,7 @@ class DungeonEnv(gym.Env):
         # boss_pos is float64 (matches the C env's double boss coords) so boss/player distances and
         # blade origins stay bit-faithful whether or not the boss moves.
         self.boss_pos = np.array([self.boss_xy[0] + 0.5, self.boss_xy[1] + 0.5], np.float64)
+        self.boss_spawn = self.boss_pos.copy()  # ReturnToSpawn anchor
         self._prev_boss_dist = float(np.linalg.norm(self.player_pos - self.boss_pos))  # distance-shaping baseline
         self.boss_hp = c.boss_hp_max
         self.phase = 0
@@ -248,8 +259,13 @@ class DungeonEnv(gym.Env):
 
     def _spawn_snakes(self):
         c = self.cfg
+        # per-episode density jitter: spread the snake count in a band around the scheduled target so a
+        # single difficulty d spans easier/harder episodes within a batch (no draw when jitter == 0).
+        want = c.n_snakes
+        if c.n_snakes_jitter > 0:
+            want = max(0, want + int(self._rng.integers(-c.n_snakes_jitter, c.n_snakes_jitter + 1)))
         # snakes on random walkable tiles not too close to the entrance
-        idx = self._rng.choice(len(self._walk_xs), size=min(c.n_snakes, len(self._walk_xs)), replace=False)
+        idx = self._rng.choice(len(self._walk_xs), size=min(want, len(self._walk_xs)), replace=False)
         xs, ys = self._walk_xs[idx], self._walk_ys[idx]
         keep = (np.abs(xs - self.entrance_xy[0]) + np.abs(ys - self.entrance_xy[1])) > 6
         xs, ys = xs[keep], ys[keep]
@@ -287,6 +303,9 @@ class DungeonEnv(gym.Env):
         self.staff_timer = max(0, self.staff_timer - 1)
         self.spell_timer = max(0, self.spell_timer - 1)
         self.player_mp = min(c.player_mp_max, self.player_mp + c.mp_regen)
+        # HealthRegen (Player.cs HandleRegen): (1 + 0.36*VIT)/s, here a flat per-tick rate, capped at max
+        if self.player_hp < c.player_hp_max:
+            self.player_hp = min(c.player_hp_max, self.player_hp + c.hp_regen)
         aim = AIM_DIRS[aim_idx]
         if shoot == 1 and self.staff_timer == 0:
             self._fire_staff(aim)
@@ -439,6 +458,15 @@ class DungeonEnv(gym.Env):
             cand = self.boss_pos + self._rng.normal(0, c.boss_wander_speed, size=2)
             if self._walkable_at(cand):
                 self.boss_pos = cand
+        # ReturnToSpawn(0.7, 1): gentle pull back toward spawn while wandering in P1, so the boss
+        # can't random-walk out of the room. Only fires once drift exceeds the anchor radius.
+        if self.phase == 1 and c.boss_return_speed > 0:
+            to_spawn = self.boss_spawn - self.boss_pos
+            d = float(np.linalg.norm(to_spawn))
+            if d > BOSS_RETURN_RADIUS:
+                cand = self.boss_pos + (to_spawn / d) * min(c.boss_return_speed, d)
+                if self._walkable_at(cand):
+                    self.boss_pos = cand
         if self.invuln_timer > 0:
             return
         if self.phase == 1:

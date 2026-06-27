@@ -97,6 +97,9 @@ def main() -> None:
     args = pufferl.load_config("dungeon")
     args["vec"]["total_agents"] = a.num_envs
     args["vec"]["num_buffers"] = 1
+    # ramp_frac is a schedule-only knob (not an ini key); seed it so trial 1 (defaults, no suggest)
+    # still carries every swept hyperparameter when we observe() it.
+    args["train"]["ramp_frac"] = 0.6
 
     sweep_config = build_sweep_config(a.metric)
     method = sweep_config.pop("method")

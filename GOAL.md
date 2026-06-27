@@ -14,8 +14,9 @@ GROUND TRUTH (box: ssh ripbox [multiplexed]; 2x3090, 16 cores)
 - Repo: ~/Repos/rotmg-rl (read PROGRESS.md first). betterSkillys source + client vendored at
   vendor/betterSkillys (faithful-sim ground truth + the real client for M5). Real Snake Pit is a
   FIXED map (EmbeddedData_SnakePitCXML.xml), not procedural -> train on the real layout.
-- Faithful sim: sim/dungeon.py. Local 31x31 vision (VIS 15), mouse-aim (32 dir), Wizard
-  (staff+Spell+MP), snakes, 3-phase Stheno (grenades/minions/status). PuffeRL 3.x + CNN-LSTM.
+- Faithful sim: the C env csim/dungeon.h (single source of dynamics; config + layout in config.py).
+  Local 31x31 vision (VIS 15), mouse-aim (32 dir), Wizard (staff+Spell+MP), snakes, 3-phase Stheno
+  (grenades/minions/status). PuffeRL 4.0 + CNN-LSTM; single-env wrapper (csim/single.py) for eval/render.
 
 TOOLING (use these, don't reinvent or hand-ssh):
 - scripts/box.sh {kill|train <args>|follow|status|metrics} -- all box management, one clean run.

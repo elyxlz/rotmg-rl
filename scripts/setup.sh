@@ -75,8 +75,11 @@ uv pip install --python "$VENV_PY" gymnasium imageio imageio-ffmpeg
 # clean install must compile it or train/eval fail at import.
 "$VENV_PY" -m rotmg_rl.csim.build
 
-# 5. Smoke: the native backend AND the full import chain (training -> eval -> csim binding) load clean.
-( cd "$PUFFER_DIR" && "$VENV_PY" -c "from pufferlib import _C; import rotmg_rl.training; print('_C OK, env =', getattr(_C, 'env_name', '?'), '| rotmg_rl.training imports clean')" )
+# 5. Smoke: the full import chain (training -> eval -> csim binding + _C) loads clean. Import order
+# matters: rotmg_rl.training imports torch FIRST, so torch's CUDA-12.8 cudart loads before pufferlib's
+# _C (built against 12.4) — the reverse order pins the older cudart and breaks torch. This mirrors the
+# real `python3 train.py` order; do NOT front-load `from pufferlib import _C`.
+"$VENV_PY" -c "import rotmg_rl.training; from pufferlib import _C; print('_C OK, env =', getattr(_C, 'env_name', '?'), '| rotmg_rl.training imports clean')"
 echo
 echo "Done. Train the Snake Pit (use --slowly for our CNN + renderable videos):"
 echo "  python3 train.py --wandb                                   # the one-command sweep -> full run"

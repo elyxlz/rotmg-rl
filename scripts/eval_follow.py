@@ -26,24 +26,42 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from eval_dungeon4 import build_policy, flatten, run_episode  # noqa: E402
+from eval_dungeon4 import build_policy, flatten  # noqa: E402
 
 from rotmg_rl.sim.dungeon import DungeonConfig, DungeonEnv  # noqa: E402
 
 
+@torch.no_grad()
+def _rollout(policy, cfg, device, seed):  # like eval_dungeon4.run_episode but also returns end player HP
+    env = DungeonEnv(cfg)
+    obs, _ = env.reset(seed=seed)
+    state = policy.initial_state(1, device)
+    for t in range(cfg.max_steps):
+        x = torch.tensor(flatten(obs), device=device).unsqueeze(0)
+        logits, _, state = policy.forward_eval(x, state)
+        action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+        obs, _, term, trunc, info = env.step(action)
+        if term or trunc:
+            return bool(info["cleared"]), t + 1, float(env.boss_hp / cfg.boss_hp_max), float(env.player_hp / cfg.player_hp_max)
+    return False, cfg.max_steps, float(env.boss_hp / cfg.boss_hp_max), float(env.player_hp / cfg.player_hp_max)
+
+
 def eval_config(policy, device, spawn_in_room: float, episodes: int) -> dict:
     cfg = DungeonConfig(boss_hp_max=7500.0, n_snakes=40, spawn_in_room_prob=spawn_in_room)
-    clears, lengths, hp_end = [], [], []
+    clears, lengths, boss_end, player_end = [], [], [], []
     for i in range(episodes):
-        cleared, steps, boss_hp = run_episode(policy, cfg, device, seed=20_000 + i, max_steps=cfg.max_steps)
+        cleared, steps, boss_hp, player_hp = _rollout(policy, cfg, device, seed=20_000 + i)
         clears.append(cleared)
         lengths.append(steps)
-        hp_end.append(boss_hp)
-    clears, lengths, hp_end = np.array(clears), np.array(lengths), np.array(hp_end)
+        boss_end.append(boss_hp)
+        player_end.append(player_hp)
+    clears, lengths = np.array(clears), np.array(lengths)
+    boss_end, player_end = np.array(boss_end), np.array(player_end)
     died = (~clears) & (lengths < cfg.max_steps)  # terminated short of max_steps = player death
     return {
         "clear_rate": float(clears.mean()),
-        "boss_hp_remaining": float(hp_end.mean()),
+        "boss_hp_remaining": float(boss_end.mean()),
+        "player_hp_remaining": float(player_end.mean()),
         "episode_length": float(lengths.mean()),
         "death_rate": float(died.mean()),
     }

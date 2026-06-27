@@ -79,18 +79,21 @@ def run_phase(args, phase_idx, name, gamma, gae, steps, policy, cum_step, use_wa
         if time.time() - last_log > 1.0 or trainer.global_step >= steps:
             last_log = time.time()
             flat = dict(unroll_nested_dict(trainer.log()))
-            # Legible per-episode metrics, derived from raw env fields the trainer already forwards
-            # (no PufferLib fork): per-step `cleared` summed = #cleared episodes, so cleared/episodes
-            # is the true clear rate; boss HP at episode end = 1 - the per-episode `score`.
+            # Replace the per-step env/* means (boss_hp_frac, cleared, player_hp_frac...) with
+            # legible END-OF-EPISODE metrics, derived from the raw fields the trainer already
+            # forwards (no PufferLib fork): per-step `cleared` summed = #cleared episodes so
+            # cleared/episodes = the true clear rate; boss HP at episode end = 1 - per-episode `score`.
             ep = flat.get("env/episodes", 0.0)
-            if ep > 0:
-                flat["eval/clear_rate"] = flat.get("env/cleared", 0.0) / ep
-            flat["eval/boss_hp_remaining"] = 1.0 - flat.get("env/score", 0.0)
+            clear_rate = flat.get("env/cleared", 0.0) / ep if ep > 0 else 0.0
+            boss_hp_remaining = 1.0 - flat.get("env/score", 0.0)
+            flat = {k: v for k, v in flat.items() if not k.startswith("env/")}  # drop the per-step means
+            flat["env/clear_rate"] = clear_rate  # under env/ to replace the per-step means on the dashboard
+            flat["env/boss_hp_remaining"] = boss_hp_remaining
             step = cum_step + trainer.global_step
             flat["phase"] = phase_idx
             flat["global_step"] = step
             print(f"[{name}] step={step/1e6:.1f}M SPS={flat.get('SPS', 0)/1e3:.0f}K "
-                  f"clear_rate={flat.get('eval/clear_rate', 0):.2f} boss_left={flat.get('eval/boss_hp_remaining', 0):.2f}", flush=True)
+                  f"clear_rate={clear_rate:.2f} boss_left={boss_hp_remaining:.2f}", flush=True)
             if use_wandb:
                 import wandb
 

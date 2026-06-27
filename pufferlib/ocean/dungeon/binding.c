@@ -8,8 +8,8 @@
  * Counterpart: the standalone eval binding (src/rotmg_rl/csim/binding.c + the vendored
  * env_binding.h) compiles the SAME dungeon.h into a numpy-only single-env wrapper for eval/render.
  */
-#define PUFFER4  /* dungeon.h: float action/terminal buffers + num_agents/rng fields (4.0 vecenv.h owns the buffers) */
-#include "dungeon.h"  /* defines OBS_SIZE, NUM_CH, GRID, NUM_SCALARS, the Dungeon Env, c_step/c_reset/c_close, init_globals */
+#define PUFFER4 /* dungeon.h: float action/terminal buffers + num_agents/rng fields (4.0 vecenv.h owns the buffers) */
+#include "dungeon.h" /* defines OBS_SIZE, NUM_CH, GRID, NUM_SCALARS, the Dungeon Env, c_step/c_reset/c_close, init_globals */
 
 /* OBS_SIZE is already defined by dungeon.h (NUM_CH*GRID*GRID + NUM_SCALARS = 6733). */
 #define NUM_ATNS 4
@@ -21,9 +21,9 @@
 
 /* vecenv.h's default my_vec_init sets env->rng = env_index, then calls my_init (before the obs/
  * action buffers are wired and before c_reset). We only set config + seed the per-env RNG here. */
-void my_init(Env* env, Dict* kwargs) {
+void my_init(Env *env, Dict *kwargs) {
     env->num_agents = 1;
-    Config* c = &env->cfg;
+    Config *c = &env->cfg;
     c->player_speed = dict_get(kwargs, "player_speed")->value;
     c->player_radius = dict_get(kwargs, "player_radius")->value;
     c->max_steps = (int)dict_get(kwargs, "max_steps")->value;
@@ -101,20 +101,21 @@ void my_init(Env* env, Dict* kwargs) {
     c->rew_approach = dict_get(kwargs, "rew_approach")->value;
 
     env->rng_state = (uint64_t)env->rng * 2654435761ULL + 0x9E3779B97F4A7C15ULL;
-    if (env->rng_state == 0) env->rng_state = 1;
-    init_globals();  /* idempotent: build the shared map/direction tables once */
+    if (env->rng_state == 0)
+        env->rng_state = 1;
+    init_globals(); /* idempotent: build the shared map/direction tables once */
 }
 
 /* Legible END-OF-EPISODE metrics (NOT per-step means). Every field below is a per-episode sum;
  * vecenv.h divides all Log fields by n, so each sum and `episodes` arrive here both /n -> their
  * ratio recovers the true per-episode value (the n divisor cancels). This is the first-class place
  * to log: computed from the training rollouts the env already runs, surfaced under env/ for free. */
-void my_log(Log* log, Dict* out) {
+void my_log(Log *log, Dict *out) {
     float ep = log->episodes;
-    dict_set(out, "clear_rate", ep > 0.0f ? log->clear_count / ep : 0.0f);          // fraction of episodes the boss dies
-    dict_set(out, "boss_hp_remaining", ep > 0.0f ? 1.0f - log->score / ep : 0.0f);   // mean boss HP frac at episode end
-    dict_set(out, "player_hp_remaining", ep > 0.0f ? log->player_hp_end_sum / ep : 0.0f);  // mean player HP frac at end
-    dict_set(out, "death_rate", ep > 0.0f ? log->death_count / ep : 0.0f);           // fraction of episodes the player dies
+    dict_set(out, "clear_rate", ep > 0.0f ? log->clear_count / ep : 0.0f);         // fraction of episodes the boss dies
+    dict_set(out, "boss_hp_remaining", ep > 0.0f ? 1.0f - log->score / ep : 0.0f); // mean boss HP frac at episode end
+    dict_set(out, "player_hp_remaining", ep > 0.0f ? log->player_hp_end_sum / ep : 0.0f); // mean player HP frac at end
+    dict_set(out, "death_rate", ep > 0.0f ? log->death_count / ep : 0.0f); // fraction of episodes the player dies
     dict_set(out, "reward", log->reward);
     dict_set(out, "episodes", ep);
 }

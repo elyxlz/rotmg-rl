@@ -8,9 +8,9 @@
 
 #include "env_binding.h"
 
-static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
+static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     (void)args;
-    Config* c = &env->cfg;
+    Config *c = &env->cfg;
     c->player_speed = unpack(kwargs, "player_speed");
     c->player_radius = unpack(kwargs, "player_radius");
     c->max_steps = (int)unpack(kwargs, "max_steps");
@@ -87,11 +87,12 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     c->rew_step = unpack(kwargs, "rew_step");
     c->rew_approach = unpack(kwargs, "rew_approach");
     env->rng_state = (uint64_t)(long)unpack(kwargs, "seed") * 2654435761ULL + 0x9E3779B97F4A7C15ULL;
-    if (env->rng_state == 0) env->rng_state = 1;
+    if (env->rng_state == 0)
+        env->rng_state = 1;
     return 0;
 }
 
-static int my_log(PyObject* dict, Log* log) {
+static int my_log(PyObject *dict, Log *log) {
     /* vec_log already divided each field by n (total steps) -> per-step means matching numpy. */
     assign_to_dict(dict, "boss_hp_frac", log->boss_hp_frac);
     assign_to_dict(dict, "in_room", log->in_room);
@@ -111,32 +112,38 @@ static int my_log(PyObject* dict, Log* log) {
 }
 
 /* Scenario-test hook: inject deterministic player position + fight state, then refresh obs. */
-static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
+static int my_put(Env *env, PyObject *args, PyObject *kwargs) {
     (void)args;
-    PyObject* v;
+    PyObject *v;
     v = PyDict_GetItemString(kwargs, "player_x");
-    if (v) env->px = (float)PyFloat_AsDouble(v);
+    if (v)
+        env->px = (float)PyFloat_AsDouble(v);
     v = PyDict_GetItemString(kwargs, "player_y");
-    if (v) env->py = (float)PyFloat_AsDouble(v);
+    if (v)
+        env->py = (float)PyFloat_AsDouble(v);
     v = PyDict_GetItemString(kwargs, "fight_active");
-    if (v) env->fight_active = (int)PyLong_AsLong(v);
+    if (v)
+        env->fight_active = (int)PyLong_AsLong(v);
     v = PyDict_GetItemString(kwargs, "phase");
-    if (v) env->phase = (int)PyLong_AsLong(v);
+    if (v)
+        env->phase = (int)PyLong_AsLong(v);
     v = PyDict_GetItemString(kwargs, "boss_hp");
-    if (v) env->boss_hp = PyFloat_AsDouble(v);
+    if (v)
+        env->boss_hp = PyFloat_AsDouble(v);
     compute_obs(env);
     return 0;
 }
 
 /* Allocate a contiguous (rows, cols) float32 numpy array, handing back its data pointer to fill. */
-static PyObject* new_f32(npy_intp rows, npy_intp cols, float** data) {
+static PyObject *new_f32(npy_intp rows, npy_intp cols, float **data) {
     npy_intp dims[2] = {rows, cols};
-    PyObject* arr = PyArray_SimpleNew(2, dims, NPY_FLOAT32);
-    if (arr) *data = (float*)PyArray_DATA((PyArrayObject*)arr);
+    PyObject *arr = PyArray_SimpleNew(2, dims, NPY_FLOAT32);
+    if (arr)
+        *data = (float *)PyArray_DATA((PyArrayObject *)arr);
     return arr;
 }
 
-static void set_array(PyObject* dict, const char* key, PyObject* arr) {
+static void set_array(PyObject *dict, const char *key, PyObject *arr) {
     if (arr) {
         PyDict_SetItemString(dict, key, arr);
         Py_DECREF(arr);
@@ -146,7 +153,7 @@ static void set_array(PyObject* dict, const char* key, PyObject* arr) {
 /* Expose internal state for the single-env eval/render wrapper + the info checks (env_get). The C env
  * is the only dynamics source: this is a read-only snapshot of its live entity buffers, never a
  * re-simulation. ep_* latch the just-ended episode's outcome (set before the in-place auto-reset). */
-static PyObject* my_get(PyObject* dict, Env* env) {
+static PyObject *my_get(PyObject *dict, Env *env) {
     assign_to_dict(dict, "boss_hp", env->boss_hp);
     assign_to_dict(dict, "boss_hp_max", env->cfg.boss_hp_max);
     assign_to_dict(dict, "fight_active", (float)env->fight_active);
@@ -168,11 +175,12 @@ static PyObject* my_get(PyObject* dict, Env* env) {
     assign_to_dict(dict, "ep_cleared", (float)env->ep_cleared);
     assign_to_dict(dict, "ep_boss_hp_frac", (float)env->ep_boss_hp_frac);
 
-    float* d;
+    float *d;
     int ns = 0;
     for (int i = 0; i < env->n_snake; i++)
-        if (env->snakes[i].hp > 0.0f) ns++;
-    PyObject* snakes = new_f32(ns, 2, &d);
+        if (env->snakes[i].hp > 0.0f)
+            ns++;
+    PyObject *snakes = new_f32(ns, 2, &d);
     if (snakes) {
         int k = 0;
         for (int i = 0; i < env->n_snake; i++)
@@ -184,7 +192,7 @@ static PyObject* my_get(PyObject* dict, Env* env) {
     }
     set_array(dict, "snakes", snakes);
 
-    PyObject* ebul = new_f32(env->n_ebul, 2, &d);
+    PyObject *ebul = new_f32(env->n_ebul, 2, &d);
     if (ebul)
         for (int i = 0; i < env->n_ebul; i++) {
             d[2 * i] = env->ebul[i].x;
@@ -192,7 +200,7 @@ static PyObject* my_get(PyObject* dict, Env* env) {
         }
     set_array(dict, "enemy_bullets", ebul);
 
-    PyObject* pbul = new_f32(env->n_pbul, 2, &d);
+    PyObject *pbul = new_f32(env->n_pbul, 2, &d);
     if (pbul)
         for (int i = 0; i < env->n_pbul; i++) {
             d[2 * i] = env->pbul[i].x;
@@ -200,7 +208,7 @@ static PyObject* my_get(PyObject* dict, Env* env) {
         }
     set_array(dict, "player_bullets", pbul);
 
-    PyObject* gren = new_f32(env->n_gren, 3, &d);  /* x, y, radius */
+    PyObject *gren = new_f32(env->n_gren, 3, &d); /* x, y, radius */
     if (gren)
         for (int i = 0; i < env->n_gren; i++) {
             d[3 * i] = env->grenades[i].x;
@@ -210,8 +218,9 @@ static PyObject* my_get(PyObject* dict, Env* env) {
     set_array(dict, "grenades", gren);
 
     npy_intp ddims[1] = {MAP_H * MAP_W};
-    PyObject* disc = PyArray_SimpleNew(1, ddims, NPY_UINT8);
-    if (disc) memcpy(PyArray_DATA((PyArrayObject*)disc), env->discovered, sizeof(env->discovered));
+    PyObject *disc = PyArray_SimpleNew(1, ddims, NPY_UINT8);
+    if (disc)
+        memcpy(PyArray_DATA((PyArrayObject *)disc), env->discovered, sizeof(env->discovered));
     set_array(dict, "discovered", disc);
     return dict;
 }

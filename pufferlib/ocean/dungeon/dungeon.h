@@ -65,12 +65,12 @@ typedef struct {
      * "log a score, not raw reward"). score = 1.0 if cleared else (1 - boss_hp_frac_at_end). Both
      * fields are summed then divided by n (step count) in vec_log, so my_log recovers the
      * per-episode mean as score/episodes (the n divisor cancels in the ratio). */
-    float score;              /* sum of per-episode end-state scores */
-    float clear_count;        /* sum of per-episode cleared flags -> clear_rate = clear_count/episodes */
-    float player_hp_end_sum;  /* sum of player_hp_frac at episode end -> player_hp_remaining */
-    float death_count;        /* sum of player-death episodes -> death_rate */
-    float episodes;           /* count of episodes ended (terminated or truncated) */
-    float n;                  /* step count (required as the last field) */
+    float score;             /* sum of per-episode end-state scores */
+    float clear_count;       /* sum of per-episode cleared flags -> clear_rate = clear_count/episodes */
+    float player_hp_end_sum; /* sum of player_hp_frac at episode end -> player_hp_remaining */
+    float death_count;       /* sum of player-death episodes -> death_rate */
+    float episodes;          /* count of episodes ended (terminated or truncated) */
+    float n;                 /* step count (required as the last field) */
 } Log;
 
 typedef struct {
@@ -98,11 +98,13 @@ typedef struct {
 #define ST_ACQ 10
 #define ST_SRANGE 11
 static const float SNAKE_TYPES[N_SNAKE_TYPES][12] = {
-    {5.0f, 0.0f, 20.0f, 0.6f, 20.0f, 1.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 20.0f},                      /* Pit Viper */
-    {200.0f, 5.0f, 25.0f, 0.8f, 20.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f, 15.0f},  /* Fire Python */
-    {200.0f, 5.0f, 25.0f, 0.8f, 30.0f, 1.0f, 0.0f, 10.0f, 1.0f, 0.5f, 10.0f, 20.0f},                   /* Yellow Python */
-    {500.0f, 10.0f, 50.0f, 0.8f, 30.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f, 15.0f}, /* Greater Pit Snake */
-    {500.0f, 10.0f, 50.0f, 0.6f, 30.0f, 1.0f, 0.0f, 3.0f, 1.0f, 0.5f, 10.0f, 15.0f},                   /* Greater Pit Viper */
+    {5.0f, 0.0f, 20.0f, 0.6f, 20.0f, 1.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 20.0f}, /* Pit Viper */
+    {200.0f, 5.0f, 25.0f, 0.8f, 20.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f,
+     15.0f},                                                                         /* Fire Python */
+    {200.0f, 5.0f, 25.0f, 0.8f, 30.0f, 1.0f, 0.0f, 10.0f, 1.0f, 0.5f, 10.0f, 20.0f}, /* Yellow Python */
+    {500.0f, 10.0f, 50.0f, 0.8f, 30.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f,
+     15.0f},                                                                         /* Greater Pit Snake */
+    {500.0f, 10.0f, 50.0f, 0.6f, 30.0f, 1.0f, 0.0f, 3.0f, 1.0f, 0.5f, 10.0f, 15.0f}, /* Greater Pit Viper */
 };
 static const float SNAKE_WEIGHTS[N_SNAKE_TYPES] = {0.40f, 0.22f, 0.15f, 0.15f, 0.08f};
 #define SNAKE_TIMER_JITTER 10
@@ -148,31 +150,31 @@ typedef struct {
 
 typedef struct {
     Log log;
-    float* observations;  /* OBS_SIZE float32 */
+    float *observations; /* OBS_SIZE float32 */
 #ifdef PUFFER4
     /* PufferLib 4.0 vecenv.h wires float* action/reward/terminal buffers and reads num_agents + rng
      * (the env index, used to seed rng_state in my_init). The env dynamics are identical with or
      * without PUFFER4; only the buffer dtypes differ (actions are cast to int per-dim in c_step). */
-    float* actions;       /* 4 dims: move, aim, shoot, cast (delivered as float, cast to int) */
-    float* rewards;       /* 1 float */
-    float* terminals;     /* 1 float */
-    int num_agents;       /* 1 game per env */
-    unsigned int rng;     /* env index, set by vecenv.h before my_init */
+    float *actions;   /* 4 dims: move, aim, shoot, cast (delivered as float, cast to int) */
+    float *rewards;   /* 1 float */
+    float *terminals; /* 1 float */
+    int num_agents;   /* 1 game per env */
+    unsigned int rng; /* env index, set by vecenv.h before my_init */
 #else
-    int* actions;         /* 4 ints: move, aim, shoot, cast */
-    float* rewards;       /* 1 float */
-    unsigned char* terminals;
+    int *actions;   /* 4 ints: move, aim, shoot, cast */
+    float *rewards; /* 1 float */
+    unsigned char *terminals;
 #endif
 
     Config cfg;
 
-    float px, py;          /* player pos (float32) */
+    float px, py; /* player pos (float32) */
     float player_hp, player_mp;
     double staff_timer; /* fractional staff cooldown accumulator (double, for cooldown fidelity) */
     int spell_timer;
-    double boss_x, boss_y; /* boss pos is float64 for movement/collision fidelity */
+    double boss_x, boss_y;             /* boss pos is float64 for movement/collision fidelity */
     double boss_spawn_x, boss_spawn_y; /* ReturnToSpawn anchor: the boss is pulled back toward here in P1 */
-    double boss_hp; /* float64 for phase/collision fidelity */
+    double boss_hp;                    /* float64 for phase/collision fidelity */
     int phase, fight_active, invuln_timer;
     int confused_timer, petrify_timer, minion_timer;
     int t_p1, t_p3a, t_g1, t_g2, t_g3card, t_g3diag;
@@ -188,11 +190,11 @@ typedef struct {
 
     unsigned char visited[MAP_H * MAP_W];
     unsigned char discovered[MAP_H * MAP_W]; /* fog-of-war: tiles ever within VIS_RADIUS of the player */
-    float mm_terr[MM * MM]; /* minimap terrain pool, accumulated as tiles are discovered (+1/-1/0) */
-    int boss_seen;          /* boss has been within vision at least once */
-    double prev_boss_dist;  /* distance-shaping baseline: player->boss distance last step */
+    float mm_terr[MM * MM];                  /* minimap terrain pool, accumulated as tiles are discovered (+1/-1/0) */
+    int boss_seen;                           /* boss has been within vision at least once */
+    double prev_boss_dist;                   /* distance-shaping baseline: player->boss distance last step */
     int steps;
-    uint64_t rng_state; /* per-env RNG: thread-safe under OpenMP, independent per env */
+    uint64_t rng_state;     /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
     /* Episode-outcome latch for the single-env eval wrapper: set on the step an episode ends (before
      * the in-place auto-reset wipes boss_hp/phase), so a single-env caller can read the result via
@@ -211,7 +213,8 @@ static float g_move_dx[N_MOVE], g_move_dy[N_MOVE];
 static float g_aim_dx[N_AIM], g_aim_dy[N_AIM];
 
 static void init_globals(void) {
-    if (g_init) return;
+    if (g_init)
+        return;
     for (int i = 0; i < N_MOVE; i++) {
         g_move_dx[i] = (float)cos(i * M_PI / 4.0);
         g_move_dy[i] = (float)sin(i * M_PI / 4.0);
@@ -234,33 +237,39 @@ static void init_globals(void) {
 
 /* --- helpers --- */
 
-static inline uint32_t rng_next(Dungeon* env) {
+static inline uint32_t rng_next(Dungeon *env) {
     env->rng_state = env->rng_state * 6364136223846793005ULL + 1442695040888963407ULL;
     return (uint32_t)(env->rng_state >> 32);
 }
-static inline float frand(Dungeon* env) { return (float)(rng_next(env) >> 8) / (float)(1 << 24); }
-static inline float uniform_f(Dungeon* env, float lo, float hi) { return lo + (hi - lo) * frand(env); }
+static inline float frand(Dungeon *env) {
+    return (float)(rng_next(env) >> 8) / (float)(1 << 24);
+}
+static inline float uniform_f(Dungeon *env, float lo, float hi) {
+    return lo + (hi - lo) * frand(env);
+}
 
-static float randn(Dungeon* env) {
+static float randn(Dungeon *env) {
     /* Box-Muller; training-only randomness (boss wander + snake drift), not seed-deterministic */
     float u1 = frand(env), u2 = frand(env);
-    if (u1 < 1e-7f) u1 = 1e-7f;
+    if (u1 < 1e-7f)
+        u1 = 1e-7f;
     return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
 }
 
 static inline int walkable_at(float fx, float fy) {
     int x = (int)fx, y = (int)fy;
-    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return 0;
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H)
+        return 0;
     return MAP_WALKABLE[y * MAP_W + x] != 0;
 }
 
 static double dist_ff(float ax, float ay, float bx, float by) {
-    float dx = ax - bx, dy = ay - by;  /* float32 subtraction, then float64 distance below */
+    float dx = ax - bx, dy = ay - by; /* float32 subtraction, then float64 distance below */
     return sqrt((double)dx * dx + (double)dy * dy);
 }
 
 static double dist_df(double ax, double ay, float bx, float by) {
-    double dx = ax - bx, dy = ay - by;  /* boss_pos is float64 (double) */
+    double dx = ax - bx, dy = ay - by; /* boss_pos is float64 (double) */
     return sqrt(dx * dx + dy * dy);
 }
 
@@ -271,7 +280,7 @@ static inline double defended(float raw, float defense, float floor) {
 }
 
 /* nearest walkable tile to (x,y), matching _nearest_walkable */
-static void nearest_walkable(int x, int y, int* ox, int* oy) {
+static void nearest_walkable(int x, int y, int *ox, int *oy) {
     if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H && MAP_WALKABLE[y * MAP_W + x]) {
         *ox = x;
         *oy = y;
@@ -291,7 +300,7 @@ static void nearest_walkable(int x, int y, int* ox, int* oy) {
     *oy = g_walk_y[bi];
 }
 
-static void append_bullet(Bullet* arr, int* n, int cap, int max_keep, Bullet b) {
+static void append_bullet(Bullet *arr, int *n, int cap, int max_keep, Bullet b) {
     if (*n < cap) {
         arr[*n] = b;
         (*n)++;
@@ -309,7 +318,7 @@ static void append_bullet(Bullet* arr, int* n, int cap, int max_keep, Bullet b) 
 
 /* --- bullet physics --- */
 
-static void advance_bullets(Bullet* arr, int* n) {
+static void advance_bullets(Bullet *arr, int *n) {
     int w = 0;
     for (int i = 0; i < *n; i++) {
         Bullet b = arr[i];
@@ -317,26 +326,33 @@ static void advance_bullets(Bullet* arr, int* n) {
         b.y += b.vy;
         b.life -= 1.0f;
         int ix = (int)b.x;
-        if (ix < 0) ix = 0;
-        if (ix > MAP_W - 1) ix = MAP_W - 1;
+        if (ix < 0)
+            ix = 0;
+        if (ix > MAP_W - 1)
+            ix = MAP_W - 1;
         int iy = (int)b.y;
-        if (iy < 0) iy = 0;
-        if (iy > MAP_H - 1) iy = MAP_H - 1;
-        if (b.life > 0.0f && MAP_WALKABLE[iy * MAP_W + ix]) arr[w++] = b;
+        if (iy < 0)
+            iy = 0;
+        if (iy > MAP_H - 1)
+            iy = MAP_H - 1;
+        if (b.life > 0.0f && MAP_WALKABLE[iy * MAP_W + ix])
+            arr[w++] = b;
     }
     *n = w;
 }
 
 /* --- combat --- */
 
-static double resolve_collisions(Dungeon* env) {
-    Config* c = &env->cfg;
+static double resolve_collisions(Dungeon *env) {
+    Config *c = &env->cfg;
     double reward = 0.0;
 
     /* player bullets vs snakes (per-bullet defense clamp by snake type) */
     for (int s = 0; s < env->n_snake; s++) {
-        if (env->snakes[s].hp <= 0.0f) continue;
-        if (env->n_pbul == 0) break;
+        if (env->snakes[s].hp <= 0.0f)
+            continue;
+        if (env->n_pbul == 0)
+            break;
         float thr = c->snake_radius + c->staff_radius;
         float sdef = SNAKE_TYPES[(int)env->snakes[s].type][ST_DEF];
         double dmg = 0.0;
@@ -352,7 +368,8 @@ static double resolve_collisions(Dungeon* env) {
         if (any) {
             env->n_pbul = w;
             env->snakes[s].hp -= (float)dmg;
-            if (env->snakes[s].hp <= 0.0f) reward += c->rew_kill;
+            if (env->snakes[s].hp <= 0.0f)
+                reward += c->rew_kill;
         }
     }
 
@@ -400,13 +417,17 @@ static double resolve_collisions(Dungeon* env) {
 
 /* --- wizard --- */
 
-static void fire_staff(Dungeon* env, float dx, float dy) {
-    Config* c = &env->cfg;
+static void fire_staff(Dungeon *env, float dx, float dy) {
+    Config *c = &env->cfg;
     float perpx = -dy * c->staff_offset, perpy = dx * c->staff_offset;
     float vx = dx * c->staff_speed, vy = dy * c->staff_speed;
     for (int i = 0; i < c->staff_num; i++) {
         float k = (float)i - (c->staff_num - 1) / 2.0f;
-        Bullet b = {env->px + perpx * k, env->py + perpy * k, vx, vy, (float)c->staff_life,
+        Bullet b = {env->px + perpx * k,
+                    env->py + perpy * k,
+                    vx,
+                    vy,
+                    (float)c->staff_life,
                     uniform_f(env, c->staff_dmg_lo, c->staff_dmg_hi)};
         append_bullet(env->pbul, &env->n_pbul, MAX_PBULLETS, c->max_bullets, b);
     }
@@ -414,37 +435,46 @@ static void fire_staff(Dungeon* env, float dx, float dy) {
 
 /* Spell of Galactic Creation: a 360-degree BulletNova of spell_num bullets evenly over a full
  * circle, emitted from the player position (point-blank). Aim is irrelevant for a full circle. */
-static void cast_spell(Dungeon* env) {
-    Config* c = &env->cfg;
+static void cast_spell(Dungeon *env) {
+    Config *c = &env->cfg;
     int n = c->spell_num;
     for (int i = 0; i < n; i++) {
         double a = i * (2.0 * M_PI / n);
-        Bullet b = {env->px, env->py, (float)cos(a) * c->spell_speed, (float)sin(a) * c->spell_speed,
-                    (float)c->spell_life, uniform_f(env, c->spell_dmg_lo, c->spell_dmg_hi)};
+        Bullet b = {env->px,
+                    env->py,
+                    (float)cos(a) * c->spell_speed,
+                    (float)sin(a) * c->spell_speed,
+                    (float)c->spell_life,
+                    uniform_f(env, c->spell_dmg_lo, c->spell_dmg_hi)};
         append_bullet(env->pbul, &env->n_pbul, MAX_PBULLETS, c->max_bullets, b);
     }
 }
 
 /* --- boss --- */
 
-static void spawn_burst(Dungeon* env, double base_angle, int count, double gap) {
-    Config* c = &env->cfg;
+static void spawn_burst(Dungeon *env, double base_angle, int count, double gap) {
+    Config *c = &env->cfg;
     for (int i = 0; i < count; i++) {
         double a = base_angle + (i - (count - 1) / 2.0) * gap;
-        Bullet b = {(float)env->boss_x, (float)env->boss_y, (float)cos(a) * c->ebullet_speed,
-                    (float)sin(a) * c->ebullet_speed, (float)c->ebullet_life, c->ebullet_dmg};
+        Bullet b = {(float)env->boss_x,
+                    (float)env->boss_y,
+                    (float)cos(a) * c->ebullet_speed,
+                    (float)sin(a) * c->ebullet_speed,
+                    (float)c->ebullet_life,
+                    c->ebullet_dmg};
         append_bullet(env->ebul, &env->n_ebul, MAX_EBULLETS, c->max_bullets, b);
     }
 }
 
 /* Blade shot: once the cooldown elapses, fire only if the player is within acquire_radius (P1 is
  * point-blank radius 2; P3 aims at range). The cooldown holds at 0 until the player is in range. */
-static void aimed_shoot(Dungeon* env, int* timer, int count, float spread_deg, int cooldown, float acquire_radius) {
+static void aimed_shoot(Dungeon *env, int *timer, int count, float spread_deg, int cooldown, float acquire_radius) {
     if (*timer > 0) {
         (*timer)--;
         return;
     }
-    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) > acquire_radius) return;
+    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) > acquire_radius)
+        return;
     *timer = cooldown;
     double base = atan2((double)(env->py - env->boss_y), (double)(env->px - env->boss_x));
     spawn_burst(env, base, count, spread_deg * M_PI / 180.0);
@@ -452,13 +482,16 @@ static void aimed_shoot(Dungeon* env, int* timer, int count, float spread_deg, i
 
 /* Confused grenade: thrown at the player once the cooldown elapses AND the player is within the
  * boss's acquire range (matches the real Grenade gating on GetNearestEntity). */
-static void throw_grenade_targeted(Dungeon* env, int* timer, int cooldown, float throw_range, float radius, float dmg, int status) {
-    if (!env->cfg.enable_grenades) return;
+static void throw_grenade_targeted(Dungeon *env, int *timer, int cooldown, float throw_range, float radius, float dmg,
+                                   int status) {
+    if (!env->cfg.enable_grenades)
+        return;
     if (*timer > 0) {
         (*timer)--;
         return;
     }
-    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) > throw_range) return;
+    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) > throw_range)
+        return;
     *timer = cooldown;
     if (env->n_gren < MAX_GRENADES) {
         Grenade g = {env->px, env->py, (float)env->cfg.grenade_fuse, radius, dmg, (float)status};
@@ -467,16 +500,18 @@ static void throw_grenade_targeted(Dungeon* env, int* timer, int cooldown, float
 }
 
 /* P3 Petrify fan: 4 fixed-angle grenades thrown to a fixed distance from the boss. */
-static void throw_fixed_grenades(Dungeon* env, int* timer, int cooldown, const float* angles_deg, int n_angles) {
-    Config* c = &env->cfg;
-    if (!c->enable_grenades) return;
+static void throw_fixed_grenades(Dungeon *env, int *timer, int cooldown, const float *angles_deg, int n_angles) {
+    Config *c = &env->cfg;
+    if (!c->enable_grenades)
+        return;
     if (*timer > 0) {
         (*timer)--;
         return;
     }
     *timer = cooldown;
     for (int i = 0; i < n_angles; i++) {
-        if (env->n_gren >= MAX_GRENADES) break;
+        if (env->n_gren >= MAX_GRENADES)
+            break;
         double a = angles_deg[i] * M_PI / 180.0;
         float tx = (float)(env->boss_x + c->grenade_petrify_dist * cos(a));
         float ty = (float)(env->boss_y + c->grenade_petrify_dist * sin(a));
@@ -485,32 +520,37 @@ static void throw_fixed_grenades(Dungeon* env, int* timer, int cooldown, const f
     }
 }
 
-static int count_alive_snakes(Dungeon* env) {
+static int count_alive_snakes(Dungeon *env) {
     int n = 0;
     for (int i = 0; i < env->n_snake; i++)
-        if (env->snakes[i].hp > 0.0f) n++;
+        if (env->snakes[i].hp > 0.0f)
+            n++;
     return n;
 }
 
-static void spawn_minions(Dungeon* env) {
-    Config* c = &env->cfg;
-    if (!c->enable_minions) return;
+static void spawn_minions(Dungeon *env) {
+    Config *c = &env->cfg;
+    if (!c->enable_minions)
+        return;
     if (env->minion_timer > 0) {
         env->minion_timer--;
         return;
     }
     env->minion_timer = c->minion_cd;
-    if (count_alive_snakes(env) >= c->n_snakes + c->minion_max) return;
+    if (count_alive_snakes(env) >= c->n_snakes + c->minion_max)
+        return;
     for (int i = 0; i < c->minion_max; i++) {
-        if (env->n_snake >= MAX_SNAKES) break;
+        if (env->n_snake >= MAX_SNAKES)
+            break;
         double ang = uniform_f(env, 0.0f, (float)(2.0 * M_PI));
-        Snake s = {(float)(env->boss_x + cos(ang) * 3.0), (float)(env->boss_y + sin(ang) * 3.0), c->minion_hp, 0.0f, 0.0f};
-        env->snakes[env->n_snake++] = s;  /* weak swarm: type 0 */
+        Snake s = {(float)(env->boss_x + cos(ang) * 3.0), (float)(env->boss_y + sin(ang) * 3.0), c->minion_hp, 0.0f,
+                   0.0f};
+        env->snakes[env->n_snake++] = s; /* weak swarm: type 0 */
     }
 }
 
-static void boss_tick(Dungeon* env) {
-    Config* c = &env->cfg;
+static void boss_tick(Dungeon *env) {
+    Config *c = &env->cfg;
     if (env->invuln_timer > 0) {
         env->invuln_timer--;
     } else {
@@ -546,27 +586,33 @@ static void boss_tick(Dungeon* env) {
             }
         }
     }
-    if (env->invuln_timer > 0) return;
+    if (env->invuln_timer > 0)
+        return;
 
     static const float CARDINALS[4] = {0.0f, 90.0f, 180.0f, 270.0f};
     static const float DIAGONALS[4] = {45.0f, 135.0f, 225.0f, 315.0f};
     if (env->phase == 1) {
-        if (c->boss_shoots) aimed_shoot(env, &env->t_p1, 3, 15.0f, c->blade_cd, c->blade_radius_p1);
+        if (c->boss_shoots)
+            aimed_shoot(env, &env->t_p1, 3, 15.0f, c->blade_cd, c->blade_radius_p1);
         spawn_minions(env);
-        throw_grenade_targeted(env, &env->t_g1, c->grenade_cd_p1, c->grenade_range_confuse, c->grenade_radius_confuse, c->grenade_dmg_confuse, 0);
+        throw_grenade_targeted(env, &env->t_g1, c->grenade_cd_p1, c->grenade_range_confuse, c->grenade_radius_confuse,
+                               c->grenade_dmg_confuse, 0);
     } else if (env->phase == 2) {
         /* P2's 4-shot references a nonexistent projectile -> fires nothing; only the grenade threatens */
-        throw_grenade_targeted(env, &env->t_g2, c->grenade_cd_p2, c->grenade_range_confuse, c->grenade_radius_confuse, c->grenade_dmg_confuse, 0);
+        throw_grenade_targeted(env, &env->t_g2, c->grenade_cd_p2, c->grenade_range_confuse, c->grenade_radius_confuse,
+                               c->grenade_dmg_confuse, 0);
     } else if (env->phase == 3) {
-        if (c->boss_shoots) aimed_shoot(env, &env->t_p3a, 3, 15.0f, c->blade_cd, c->blade_radius_p3);
+        if (c->boss_shoots)
+            aimed_shoot(env, &env->t_p3a, 3, 15.0f, c->blade_cd, c->blade_radius_p3);
         throw_fixed_grenades(env, &env->t_g3card, c->grenade_cd_p1, CARDINALS, 4);
         throw_fixed_grenades(env, &env->t_g3diag, c->grenade_cd_p3_diag, DIAGONALS, 4);
     }
 }
 
-static double grenades_tick(Dungeon* env) {
-    Config* c = &env->cfg;
-    if (env->n_gren == 0) return 0.0;
+static double grenades_tick(Dungeon *env) {
+    Config *c = &env->cfg;
+    if (env->n_gren == 0)
+        return 0.0;
     double reward = 0.0;
     int w = 0;
     for (int i = 0; i < env->n_gren; i++) {
@@ -592,20 +638,22 @@ static double grenades_tick(Dungeon* env) {
 
 /* --- snakes --- */
 
-static int sample_snake_type(Dungeon* env) {
+static int sample_snake_type(Dungeon *env) {
     float r = frand(env), cum = 0.0f;
     for (int t = 0; t < N_SNAKE_TYPES; t++) {
         cum += SNAKE_WEIGHTS[t];
-        if (r < cum) return t;
+        if (r < cum)
+            return t;
     }
     return N_SNAKE_TYPES - 1;
 }
 
-static void snakes_tick(Dungeon* env) {
-    Config* c = &env->cfg;
+static void snakes_tick(Dungeon *env) {
+    Config *c = &env->cfg;
     for (int i = 0; i < env->n_snake; i++) {
-        if (env->snakes[i].hp <= 0.0f) continue;
-        const float* st = SNAKE_TYPES[(int)env->snakes[i].type];
+        if (env->snakes[i].hp <= 0.0f)
+            continue;
+        const float *st = SNAKE_TYPES[(int)env->snakes[i].type];
         double d = dist_ff(env->snakes[i].x, env->snakes[i].y, env->px, env->py);
         /* movement: Follow chase toward the player within acquire range, else Wander drift */
         float mvx, mvy;
@@ -629,16 +677,16 @@ static void snakes_tick(Dungeon* env) {
             int cnt = (int)st[ST_CNT];
             for (int j = 0; j < cnt; j++) {
                 double a = base + (j - (cnt - 1) / 2.0) * st[ST_ARC];
-                Bullet b = {env->snakes[i].x, env->snakes[i].y, (float)cos(a) * st[ST_BVS],
-                            (float)sin(a) * st[ST_BVS], st[ST_BLIFE], st[ST_DMG]};
+                Bullet b = {env->snakes[i].x,           env->snakes[i].y, (float)cos(a) * st[ST_BVS],
+                            (float)sin(a) * st[ST_BVS], st[ST_BLIFE],     st[ST_DMG]};
                 append_bullet(env->ebul, &env->n_ebul, MAX_EBULLETS, c->max_bullets, b);
             }
         }
     }
 }
 
-static void spawn_snakes(Dungeon* env) {
-    Config* c = &env->cfg;
+static void spawn_snakes(Dungeon *env) {
+    Config *c = &env->cfg;
     env->n_snake = 0;
     int want = c->n_snakes;
     /* per-episode density jitter: spread the snake count in a band around the scheduled target so a
@@ -646,54 +694,66 @@ static void spawn_snakes(Dungeon* env) {
     if (c->n_snakes_jitter > 0) {
         int span = 2 * c->n_snakes_jitter + 1;
         want += (int)(rng_next(env) % (unsigned)span) - c->n_snakes_jitter;
-        if (want < 0) want = 0;
+        if (want < 0)
+            want = 0;
     }
-    if (want > g_n_walk) want = g_n_walk;
+    if (want > g_n_walk)
+        want = g_n_walk;
     /* sample distinct walkable tiles + a weighted archetype (training randomness; not seed-deterministic) */
     for (int s = 0; s < want; s++) {
-        if (env->n_snake >= MAX_SNAKES) break;
+        if (env->n_snake >= MAX_SNAKES)
+            break;
         int idx = rng_next(env) % g_n_walk;
         int x = g_walk_x[idx], y = g_walk_y[idx];
-        if (abs(x - ENTRANCE_X) + abs(y - ENTRANCE_Y) <= 6) continue;
+        if (abs(x - ENTRANCE_X) + abs(y - ENTRANCE_Y) <= 6)
+            continue;
         int type = sample_snake_type(env);
-        Snake sn = {x + 0.5f, y + 0.5f, SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
+        Snake sn = {x + 0.5f, y + 0.5f, SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER),
+                    (float)type};
         env->snakes[env->n_snake++] = sn;
     }
 }
 
 /* --- player movement --- */
 
-static void try_move(Dungeon* env, float sx, float sy) {
-    if (walkable_at(env->px + sx, env->py)) env->px = env->px + sx;
-    if (walkable_at(env->px, env->py + sy)) env->py = env->py + sy;
+static void try_move(Dungeon *env, float sx, float sy) {
+    if (walkable_at(env->px + sx, env->py))
+        env->px = env->px + sx;
+    if (walkable_at(env->px, env->py + sy))
+        env->py = env->py + sy;
 }
 
 /* --- observation --- */
 
-static inline void set_cell(float* obs, int ch, int row, int col, float v) {
+static inline void set_cell(float *obs, int ch, int row, int col, float v) {
     obs[ch * GRID * GRID + row * GRID + col] = v;
 }
 
-static void scatter_f(float* obs, int ch, float relx, float rely, float v) {
+static void scatter_f(float *obs, int ch, float relx, float rely, float v) {
     int col = (int)floorf(relx) + HALF;
     int row = (int)floorf(rely) + HALF;
-    if (col >= 0 && col < GRID && row >= 0 && row < GRID) set_cell(obs, ch, row, col, v);
+    if (col >= 0 && col < GRID && row >= 0 && row < GRID)
+        set_cell(obs, ch, row, col, v);
 }
 
 /* Fog of war: mark the disk of tiles within VIS_RADIUS of the player as discovered (integer tile
  * arithmetic), accumulate the minimap terrain pool for newly-seen tiles,
  * and flag whether the boss has been seen. The boss only enters the minimap once seen (no cheat). */
-static void update_visibility(Dungeon* env) {
+static void update_visibility(Dungeon *env) {
     int ipx = (int)env->px, ipy = (int)env->py;
     for (int dy = -VIS_RADIUS; dy <= VIS_RADIUS; dy++) {
         int y = ipy + dy;
-        if (y < 0 || y >= MAP_H) continue;
+        if (y < 0 || y >= MAP_H)
+            continue;
         for (int dx = -VIS_RADIUS; dx <= VIS_RADIUS; dx++) {
-            if (dx * dx + dy * dy > VIS_RADIUS * VIS_RADIUS) continue;
+            if (dx * dx + dy * dy > VIS_RADIUS * VIS_RADIUS)
+                continue;
             int x = ipx + dx;
-            if (x < 0 || x >= MAP_W) continue;
+            if (x < 0 || x >= MAP_W)
+                continue;
             int idx = y * MAP_W + x;
-            if (env->discovered[idx]) continue;
+            if (env->discovered[idx])
+                continue;
             env->discovered[idx] = 1;
             int cell = (y * MM / MAP_H) * MM + (x * MM / MAP_W);
             /* priority: discovered walkable (+1) over discovered wall (-1) over fog (0) */
@@ -703,22 +763,24 @@ static void update_visibility(Dungeon* env) {
                 env->mm_terr[cell] = -1.0f;
         }
     }
-    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) <= VIS_RADIUS) env->boss_seen = 1;
+    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) <= VIS_RADIUS)
+        env->boss_seen = 1;
 }
 
-static void compute_obs(Dungeon* env) {
-    Config* c = &env->cfg;
-    float* obs = env->observations;
+static void compute_obs(Dungeon *env) {
+    Config *c = &env->cfg;
+    float *obs = env->observations;
     int ipx = (int)env->px, ipy = (int)env->py;
     update_visibility(env);
 
     /* Wall channel (0) depends only on the player's tile; the dynamic channels (1..6) + scalars
      * change every step. Clear/refill walls only when the tile changes; always clear the rest. */
     if (ipx != env->last_ipx || ipy != env->last_ipy) {
-        memset(obs, 0, sizeof(float) * (GRID * GRID));  /* clear wall channel */
+        memset(obs, 0, sizeof(float) * (GRID * GRID)); /* clear wall channel */
         for (int row = 0; row < GRID; row++) {
             int wy = ipy + row - HALF;
-            if (wy < 0 || wy >= MAP_H) continue;
+            if (wy < 0 || wy >= MAP_H)
+                continue;
             for (int col = 0; col < GRID; col++) {
                 int wx = ipx + col - HALF;
                 if (wx >= 0 && wx < MAP_W && !MAP_WALKABLE[wy * MAP_W + wx])
@@ -728,7 +790,7 @@ static void compute_obs(Dungeon* env) {
         env->last_ipx = ipx;
         env->last_ipy = ipy;
     }
-    memset(obs + GRID * GRID, 0, sizeof(float) * (OBS_SIZE - GRID * GRID));  /* channels 1..6 + scalars */
+    memset(obs + GRID * GRID, 0, sizeof(float) * (OBS_SIZE - GRID * GRID)); /* channels 1..6 + scalars */
 
     for (int i = 0; i < env->n_snake; i++)
         if (env->snakes[i].hp > 0.0f)
@@ -738,7 +800,8 @@ static void compute_obs(Dungeon* env) {
     if (boss_visible) {
         int col = (int)floor(env->boss_x - env->px) + HALF;
         int row = (int)floor(env->boss_y - env->py) + HALF;
-        if (col >= 0 && col < GRID && row >= 0 && row < GRID) set_cell(obs, CH_ENEMY, row, col, 1.0f);
+        if (col >= 0 && col < GRID && row >= 0 && row < GRID)
+            set_cell(obs, CH_ENEMY, row, col, 1.0f);
     }
 
     for (int i = 0; i < env->n_ebul; i++) {
@@ -754,15 +817,18 @@ static void compute_obs(Dungeon* env) {
 
     for (int i = 0; i < env->n_gren; i++) {
         float urgency = 1.0f - env->grenades[i].fuse / (float)(c->grenade_fuse > 1 ? c->grenade_fuse : 1);
-        if (urgency < 0.2f) urgency = 0.2f;
-        if (urgency > 1.0f) urgency = 1.0f;
+        if (urgency < 0.2f)
+            urgency = 0.2f;
+        if (urgency > 1.0f)
+            urgency = 1.0f;
         scatter_f(obs, CH_GRENADE, env->grenades[i].x - env->px, env->grenades[i].y - env->py, urgency);
     }
 
     /* minimap (offset GRID_SIZE): terrain pool fresh from mm_terr, plus single player/boss cells. The
      * GRID_SIZE..OBS_SIZE region was already zeroed above, so player/boss channels start clean. */
-    float* mmobs = obs + GRID_SIZE;
-    for (int i = 0; i < MM * MM; i++) mmobs[i] = env->mm_terr[i];
+    float *mmobs = obs + GRID_SIZE;
+    for (int i = 0; i < MM * MM; i++)
+        mmobs[i] = env->mm_terr[i];
     int pmx = (int)env->px * MM / MAP_W, pmy = (int)env->py * MM / MAP_H;
     mmobs[MM * MM + pmy * MM + pmx] = 1.0f;
     if (env->boss_seen) {
@@ -777,14 +843,15 @@ static void compute_obs(Dungeon* env) {
     obs[SCALAR_OFF + 3] = boss_visible ? 1.0f : 0.0f;
     obs[SCALAR_OFF + 4] = env->confused_timer > 0 ? 1.0f : 0.0f;
     obs[SCALAR_OFF + 5] = env->petrify_timer > 0 ? 1.0f : 0.0f;
-    obs[SCALAR_OFF + 6] = env->fight_active ? (float)((env->boss_hp > 0.0 ? env->boss_hp : 0.0) / c->boss_hp_max) : 0.0f;
+    obs[SCALAR_OFF + 6] =
+        env->fight_active ? (float)((env->boss_hp > 0.0 ? env->boss_hp : 0.0) / c->boss_hp_max) : 0.0f;
     obs[SCALAR_OFF + 7] = env->invuln_timer > 0 ? 1.0f : 0.0f;
 }
 
 /* --- required Ocean API --- */
 
-static void c_reset(Dungeon* env) {
-    Config* c = &env->cfg;
+static void c_reset(Dungeon *env) {
+    Config *c = &env->cfg;
     init_globals();
     env->steps = 0;
     env->last_ipx = env->last_ipy = -1000000; /* force a wall-channel rebuild on next obs */
@@ -800,10 +867,14 @@ static void c_reset(Dungeon* env) {
     } else if (roll < c->random_spawn_prob + c->spawn_in_room_prob) {
         double ang = uniform_f(env, 0.0f, (float)(2.0 * M_PI));
         int cx = (int)(bx + c->spawn_in_room_radius * cos(ang)), cy = (int)(by + c->spawn_in_room_radius * sin(ang));
-        if (cx < 1) cx = 1;
-        if (cx > MAP_W - 2) cx = MAP_W - 2;
-        if (cy < 1) cy = 1;
-        if (cy > MAP_H - 2) cy = MAP_H - 2;
+        if (cx < 1)
+            cx = 1;
+        if (cx > MAP_W - 2)
+            cx = MAP_W - 2;
+        if (cy < 1)
+            cy = 1;
+        if (cy > MAP_H - 2)
+            cy = MAP_H - 2;
         int sx, sy;
         nearest_walkable(cx, cy, &sx, &sy);
         env->px = sx + 0.5f;
@@ -836,8 +907,8 @@ static void c_reset(Dungeon* env) {
     compute_obs(env);
 }
 
-static void c_step(Dungeon* env) {
-    Config* c = &env->cfg;
+static void c_step(Dungeon *env) {
+    Config *c = &env->cfg;
 #ifdef PUFFER4
     int move_idx = (int)env->actions[0], aim_idx = (int)env->actions[1];
     int shoot = (int)env->actions[2], cast = (int)env->actions[3];
@@ -845,7 +916,7 @@ static void c_step(Dungeon* env) {
     int move_idx = env->actions[0], aim_idx = env->actions[1];
     int shoot = env->actions[2], cast = env->actions[3];
 #endif
-    env->ep_done = 0;  /* set below only on the step the episode ends */
+    env->ep_done = 0; /* set below only on the step the episode ends */
     double reward = c->rew_step;
 
     if (move_idx > 0 && env->petrify_timer == 0) {
@@ -857,8 +928,10 @@ static void c_step(Dungeon* env) {
         }
         try_move(env, mvx, mvy);
     }
-    if (env->confused_timer > 0) env->confused_timer--;
-    if (env->petrify_timer > 0) env->petrify_timer--;
+    if (env->confused_timer > 0)
+        env->confused_timer--;
+    if (env->petrify_timer > 0)
+        env->petrify_timer--;
 
     int tx = (int)env->px, ty = (int)env->py;
     if (ty >= 0 && ty < MAP_H && tx >= 0 && tx < MAP_W && !env->visited[ty * MAP_W + tx]) {
@@ -866,14 +939,17 @@ static void c_step(Dungeon* env) {
         reward += c->rew_explore;
     }
 
-    env->staff_timer -= 1.0;  /* fractional cooldown: carried on fire, snapped up to 0 when idle below */
-    if (env->spell_timer > 0) env->spell_timer--;
+    env->staff_timer -= 1.0; /* fractional cooldown: carried on fire, snapped up to 0 when idle below */
+    if (env->spell_timer > 0)
+        env->spell_timer--;
     env->player_mp = env->player_mp + c->mp_regen;
-    if (env->player_mp > c->player_mp_max) env->player_mp = c->player_mp_max;
+    if (env->player_mp > c->player_mp_max)
+        env->player_mp = c->player_mp_max;
     /* HealthRegen (Player.cs HandleRegen): (1 + 0.36*VIT)/s, here a flat per-tick rate, capped at max */
     if (env->player_hp < c->player_hp_max) {
         env->player_hp = env->player_hp + c->hp_regen;
-        if (env->player_hp > c->player_hp_max) env->player_hp = c->player_hp_max;
+        if (env->player_hp > c->player_hp_max)
+            env->player_hp = c->player_hp_max;
     }
 
     float aimx = g_aim_dx[aim_idx], aimy = g_aim_dy[aim_idx];
@@ -889,7 +965,7 @@ static void c_step(Dungeon* env) {
         env->spell_timer = c->spell_cooldown;
     }
 
-    if (!env->fight_active && c->rew_approach != 0.0f) {  /* dense gradient toward the boss while navigating */
+    if (!env->fight_active && c->rew_approach != 0.0f) { /* dense gradient toward the boss while navigating */
         double cur_boss_dist = dist_df(env->boss_x, env->boss_y, env->px, env->py);
         reward += c->rew_approach * (env->prev_boss_dist - cur_boss_dist);
         env->prev_boss_dist = cur_boss_dist;
@@ -898,12 +974,13 @@ static void c_step(Dungeon* env) {
     if (!env->fight_active && dist_df(env->boss_x, env->boss_y, env->px, env->py) <= c->activation_range) {
         env->fight_active = 1;
         env->phase = 1;
-        env->invuln_timer = c->opening_invuln_ticks;  /* 1.0s invuln taunt before P1 acts */
+        env->invuln_timer = c->opening_invuln_ticks; /* 1.0s invuln taunt before P1 acts */
         reward += c->rew_reach;
     }
 
     snakes_tick(env);
-    if (env->fight_active) boss_tick(env);
+    if (env->fight_active)
+        boss_tick(env);
     reward += grenades_tick(env);
 
     advance_bullets(env->pbul, &env->n_pbul);
@@ -945,20 +1022,25 @@ static void c_step(Dungeon* env) {
         env->log.score += cleared ? 1.0f : (1.0f - bhf_end);
         env->log.clear_count += cleared ? 1.0f : 0.0f;
         env->log.player_hp_end_sum += (env->player_hp > 0.0f ? env->player_hp : 0.0f) / c->player_hp_max;
-        env->log.death_count += (terminated && !cleared) ? 1.0f : 0.0f;  // terminated but boss alive = died
+        env->log.death_count += (terminated && !cleared) ? 1.0f : 0.0f; // terminated but boss alive = died
         env->log.episodes += 1.0f;
-        env->ep_done = 1;  /* single-env eval latch (survives the auto-reset below) */
+        env->ep_done = 1; /* single-env eval latch (survives the auto-reset below) */
         env->ep_cleared = cleared;
         env->ep_boss_hp_frac = bhf_end;
     }
 
     compute_obs(env);
 
-    if (terminated || truncated) c_reset(env);
+    if (terminated || truncated)
+        c_reset(env);
 }
 
-static void c_render(Dungeon* env) { (void)env; }
+static void c_render(Dungeon *env) {
+    (void)env;
+}
 
-static void c_close(Dungeon* env) { (void)env; }
+static void c_close(Dungeon *env) {
+    (void)env;
+}
 
 #endif

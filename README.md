@@ -17,17 +17,23 @@ for the full design, [`GOAL.md`](GOAL.md) for the autonomous build loop, and
 ## Usage
 
 Training runs on a GPU box and is a single stack: **PufferLib 4.0** (our CNN via the `--slowly`
-torch path; see `docs/pufferlib4-migration.md`). **One command** cold-starts and runs the whole
-proven curriculum (passive -> shooting -> combat -> spawn-distance ramp -> gamma-0.97 finish) as one
-process and **one continuous wandb run**, to the ~95% full-dungeon policy:
+torch path; see `docs/pufferlib4-migration.md`). **One command** does everything: a Protein
+(cost-aware Bayesian) hyperparameter sweep, then the full continuous-difficulty schedule with the
+winning config, as one process and one continuous wandb run, to the full-dungeon policy:
 
 ```bash
-python3 train.py --wandb        # ~460M steps, ~2.5h on one 3090 -> checkpoints/curriculum4/finish.pt
+python3 train.py --wandb        # sweep (16 trials, reduced boss HP) -> train the winner (~460M steps)
+                                # -> checkpoints/curriculum4/finish.pt
+python3 train.py --wandb --no-sweep   # skip the sweep; train the full schedule directly with the good defaults
 ```
 
-`train.py` self-provisions on first run (builds `.venv4` + the 4.0 native backend via
-`scripts/setup_box_puffer4.sh`), then trains. `--dry-run` prints the plan + ETA; `--smoke N` caps each
-phase to N steps to test the machinery.
+The schedule is a single difficulty `d(t)` in `[0,1]` that cosine-ramps over `--ramp-frac` of training
+then holds at 1.0, driving spawn distance, threat density (snakes/grenades/minions), and boss intensity
+jointly so the policy always faces slightly-harder-than-mastered (no phase cliffs). `train.py`
+self-provisions on first run (builds `.venv4` + the 4.0 native backend via
+`scripts/setup_box_puffer4.sh`). `--dry-run` prints the plan; sweep knobs: `--sweep-trials`,
+`--trial-steps`, `--sweep-boss-hp`, `--full-steps`, `--eval-episodes`. For the sweep alone (find +
+print the best config, no full run) use `scripts/sweep_dungeon4.py`.
 
 ```bash
 # TRUE per-episode clear rate (the >=80% deliverable) of the final policy

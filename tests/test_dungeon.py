@@ -64,7 +64,7 @@ def test_exploration_grows_and_is_rewarded():
 
 def test_snakes_take_damage():
     """Standing on a snake and unloading staff + nova kills nearby snakes (the alive count drops)."""
-    env = CDungeonSingle(DungeonConfig(n_snakes=40, spell_dmg=(185.0, 185.0)), seed=3)
+    env = CDungeonSingle(DungeonConfig(n_snakes=40, spell_dmg_lo=185.0, spell_dmg_hi=185.0), seed=3)
     env.reset(seed=3)
     snakes = env.get()["snakes"]
     n0 = snakes.shape[0]

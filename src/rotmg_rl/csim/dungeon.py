@@ -7,15 +7,17 @@ Native Ocean env: flat float32 Box observation laid out as [grid (NUM_CH*GRID*GR
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import gymnasium
 import numpy as np
 import pufferlib
 
 from rotmg_rl.config import N_AIM, DungeonConfig
 from rotmg_rl.csim import binding
-from rotmg_rl.csim.single import OBS_SIZE, config_to_kwargs
+from rotmg_rl.csim.single import OBS_SIZE
 
-__all__ = ["OBS_SIZE", "config_to_kwargs", "CDungeon"]
+__all__ = ["OBS_SIZE", "CDungeon"]
 
 
 class CDungeon(pufferlib.PufferEnv):
@@ -27,7 +29,7 @@ class CDungeon(pufferlib.PufferEnv):
         self.num_agents = num_envs
         self.log_interval = log_interval
         super().__init__(buf)
-        self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs, seed, **config_to_kwargs(self.cfg))
+        self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs, seed, **asdict(self.cfg))
 
     @property
     def agents_per_batch(self) -> int:

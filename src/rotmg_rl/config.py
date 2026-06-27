@@ -83,7 +83,8 @@ class DungeonConfig:
     # real GetAttackFreq at DEX 75 = 0.008 = 125ms/shot = 1.25 ticks, carried fractionally (see step).
     staff_cooldown: float = 1.25  # ticks/shot, fractional accumulator -> ~8 shots/s
     staff_num: int = 2
-    staff_dmg: tuple[float, float] = (90.0, 170.0)
+    staff_dmg_lo: float = 90.0
+    staff_dmg_hi: float = 170.0
     staff_speed: float = 1.8
     staff_life: float = 4.75  # Life 475ms = 4.75 ticks (range ~8.55 tiles)
     staff_radius: float = 0.5
@@ -93,7 +94,8 @@ class DungeonConfig:
     spell_cost: float = 90.0
     spell_cooldown: int = 0
     spell_num: int = 20
-    spell_dmg: tuple[float, float] = (95.0, 185.0)
+    spell_dmg_lo: float = 95.0
+    spell_dmg_hi: float = 185.0
     spell_speed: float = 1.6
     spell_life: int = 10
     # snakes: real variety in SNAKE_TYPES (HP 5-500, dmg 20-50). snake_speed = wander drift std,

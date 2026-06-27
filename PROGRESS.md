@@ -3,6 +3,39 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## Principled redo: continuous schedule + Protein sweep + faithful T7 fight (2026-06-27)
+
+The brittle 6-phase warm-start curriculum **cliffed** (shooting clear 0.96 -> combine 0.00 the moment
+navigation + all threats arrived at once) and its hparams were hand-tuned for the old trivial sim.
+Replaced the whole thing:
+
+- **Faithful T7 loadout + offense/defense fidelity** (`sim/dungeon.py` + C port + both bindings +
+  `dungeon.ini`, all synced; parity + config_sync green). Snake Pit is a low-level dungeon, so gear
+  it like a maxed T7 Wizard: Staff of Destruction (raw 45-85 dmg) and Burning Retribution Spell (95-185,
+  MP 90). Corrected the damage model from the betterSkillys source: staff dmg takes the maxed-ATT
+  **attack multiplier x2.0** (-> 90-170; the BulletNova spell does NOT scale); staff fire rate is the
+  real **~8 shots/s** (GetAttackFreq DEX 75 = 125ms/shot, a fractional cooldown accumulator, not 2
+  ticks); gear "stat" ids are **StatDataType** bonuses resolved via GetStatIndex (stat 3 = MaxMana,
+  stat 21 = Defense) -> **DEF 8** (not 30), **HP 810**, **MP 455**; player speed **0.773 t/tick**
+  (SPD 50); **HP regen 1.54/tick** + MP regen 1.78/tick (Player.cs HandleRegen, VIT 40 / WIS 70) --
+  the regen is the dominant survivability fix (the real player recovers between hits).
+- **Boss ReturnToSpawn(0.7, 1)**: a gentle spawn-anchoring pull in P1 so Stheno can't random-walk out
+  of the room (`boss_return_speed`).
+- **Continuous difficulty schedule** (`train.py`): one difficulty d(t) in [0,1], cosine-ramped over
+  `--ramp-frac` of training then held at 1. d drives spawn distance (in-room -> entrance), threat
+  density (n_snakes 0->40 with per-episode `n_snakes_jitter`, grenades/minions toggling on once the
+  early fight is mastered), and boss intensity (passive -> shooting, blade_cd 40->15) JOINTLY -- the
+  policy always faces slightly-harder-than-mastered, no cliff. The vecenv is re-created from the
+  d-derived config every `--refresh` steps while the policy + optimizer + global LR anneal persist
+  (`_bind_vec`). **Validated** (box, 12M smoke): d ramps 0 -> 0.66 -> 1.0 across vec swaps with no
+  break, and the **d=1 (full difficulty, 7500 boss) clear rate hit 75% over 100 episodes** -- where
+  the old chain hit 0.00. The faithful fight is genuinely winnable.
+- **Protein sweep** (`scripts/sweep_dungeon4.py`): cost-aware Bayesian search over learning_rate,
+  gamma, gae_lambda, ent_coef, hidden_size (cost-aware), ramp_frac, rew_approach, rew_boss_dmg,
+  maximizing the TRUE d=1 clear rate (eval'd every eval_every steps -> the observed uptime trajectory).
+  Trials use a reduced `--sweep-boss-hp` for in-budget gradient; `--launch-best` then runs the full
+  7500-HP schedule with the winner.
+
 ## Consolidated onto ONE 4.0 stack: `train.py` single command + archived 3.0 (2026-06-27)
 
 - **One command**: `python3 train.py --wandb` cold-starts and runs the whole proven curriculum

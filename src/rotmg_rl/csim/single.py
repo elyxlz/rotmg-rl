@@ -4,8 +4,8 @@ The C env (_pufferlib/ocean/dungeon/dungeon.h) is the single source of the Snake
 instance for evaluation + POV rendering using only numpy (no pufferlib / torch), so it runs in any
 venv that has the compiled binding. `step` returns the flat [grid, minimap, scalars] obs plus the
 gym-style (reward, terminated, truncated, info); `render_state` is a read-only snapshot of the live C
-entity buffers for the POV renderer (never a re-simulation). `OBS_SIZE` lives here (not in
-csim.dungeon) so this path stays free of the heavy pufferlib import.
+entity buffers for the POV renderer (never a re-simulation). `OBS_SIZE` is defined here so this
+numpy-only path stays free of the heavy pufferlib import.
 """
 
 from __future__ import annotations

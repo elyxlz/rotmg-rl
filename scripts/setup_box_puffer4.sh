@@ -71,28 +71,8 @@ if ! grep -q "class DungeonEncoder" "$PUFFER_DIR/pufferlib/models.py"; then
     cat "$REPO_ROOT/puffer4/dungeon_encoder.py" >> "$PUFFER_DIR/pufferlib/models.py"
 fi
 
-# OPT-IN native CUDA CNN encoder. Off by default: it is at the PRE-minimap architecture (single
-# grid branch, no pooling/minimap), so on the current [grid, minimap, scalars] obs it would mis-slice
-# -> native defaults to the flat DefaultEncoder (correct for any obs; fast but not our arch). The
-# --slowly torch path (puffer4/dungeon_encoder.py) is the CNN daily driver. To use the native CNN,
-# set PUFFER_NATIVE_CNN=1 (and first update puffer4/dungeon_encoder.cu for the new obs; see docs §7).
-if [ "${PUFFER_NATIVE_CNN:-0}" = "1" ]; then
-    cp "$REPO_ROOT/puffer4/dungeon_encoder.cu" "$PUFFER_DIR/src/dungeon_encoder.cu"
-    "$VENV_PY" - "$PUFFER_DIR/src/ocean.cu" <<'PYEOF'
-import sys
-p = sys.argv[1]
-src = open(p).read()
-anchor = "static void create_custom_encoder(const std::string& env_name, Encoder* enc) {"
-assert anchor in src, "create_custom_encoder anchor not found in ocean.cu"
-if '#include "dungeon_encoder.cu"' not in src:
-    src = src.replace(anchor, '#include "dungeon_encoder.cu"\n\n' + anchor, 1)
-if "create_dungeon_encoder(enc)" not in src:
-    src = src.replace(anchor + "\n",
-        anchor + '\n    if (env_name == "dungeon") { create_dungeon_encoder(enc); return; }\n', 1)
-open(p, "w").write(src)
-print("ocean.cu: native dungeon CNN encoder wired (PUFFER_NATIVE_CNN=1)")
-PYEOF
-fi
+# The CNN runs via the --slowly torch path (puffer4/dungeon_encoder.py -> pufferlib/models.py). A
+# native-CUDA encoder was explored and abandoned (no net speedup over --slowly; see docs) and removed.
 
 # 3.5 Link prerequisites: build.sh links `-lcudnn -lnccl -lnvidia-ml`, but the pip nvidia wheels ship
 # only versioned .so files (no libcudnn.so / libnccl.so for `-l`) and NVML lives in the CUDA stubs

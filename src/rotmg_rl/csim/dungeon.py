@@ -1,8 +1,10 @@
-"""PufferEnv wrapper around the C dungeon env (rotmg_rl.csim.binding).
+"""DEFERRED (part-B real-server deploy): a 3.0-style Python vec wrapper around the C dungeon env.
 
-Native Ocean env: flat float32 Box observation laid out as [grid (NUM_CH*GRID*GRID), scalars
-(NUM_SCALARS)] then a MultiDiscrete([9, N_AIM, 2, 2]) action, matching the Python oracle. Use
-`CDungeonPolicy` (csim.policy) which slices the flat obs back into grid + scalars.
+Subclasses `pufferlib.PufferEnv`, which 4.0 REMOVED — so this and `deploy/policy.py`'s PolicyRunner
+(which imports `pufferlib.ocean.torch.Recurrent`, also gone) need a 4.0 rewrite before the real-server
+deploy runs. TRAINING does NOT use this: it drives `_C.create_vec` directly (see rotmg_rl.training).
+Flat float32 Box obs [grid (NUM_CH*GRID*GRID), scalars (NUM_SCALARS)] + MultiDiscrete([9, N_AIM, 2, 2]);
+`CDungeonPolicy` (csim.policy) slices the flat obs back into grid + scalars.
 """
 
 from __future__ import annotations

@@ -61,6 +61,9 @@ export LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$CUDNN_LIB:$NCCL_LIB${LIBRARY_PATH:+
 # backend still runs on it. Drop --float (set PUFFER_BUILD_FLAGS='') for max native throughput (bf16),
 # but then --slowly won't work.
 ( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV/bin:$CUDA_HOME/bin:$PATH" LIBRARY_PATH="$LIBRARY_PATH" ./build.sh dungeon ${PUFFER_BUILD_FLAGS:---float} )
+# LIBRARY_PATH (CUDA-12.4 stubs) is a LINK-time aid for build.sh only; leaving it set makes torch load
+# the stub cudart at runtime ("undefined symbol cudaGetDriverEntryPointByVersion"). Drop it now.
+unset LIBRARY_PATH
 
 # 4. Install the vendored package (the _C*.so is already built in place; no rebuild) + our package.
 uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"

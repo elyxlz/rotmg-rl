@@ -57,7 +57,10 @@ STAGES = [
 ]
 
 
-def run_phase(args, phase_idx, name, gamma, gae, steps, policy, cum_step, use_wandb):
+SAVE_EVERY = 8_000_000  # rolling latest.pt cadence -> frequent eval/video updates within a phase
+
+
+def run_phase(args, phase_idx, name, gamma, gae, steps, policy, cum_step, use_wandb, out):
     args["train"]["gamma"] = gamma
     args["train"]["gae_lambda"] = gae
     args["train"]["total_timesteps"] = steps
@@ -66,18 +69,28 @@ def run_phase(args, phase_idx, name, gamma, gae, steps, policy, cum_step, use_wa
     if policy is None:
         policy = load_policy(args, vec)  # cold start (phase 1)
     trainer = PuffeRL(args, vec, policy, verbose=False)
-    last_log = 0.0
+    last_log, last_save = 0.0, 0
     while trainer.global_step < steps:
         trainer.rollouts()
         trainer.train()
+        if trainer.global_step - last_save >= SAVE_EVERY:  # rolling checkpoint for the followers
+            last_save = trainer.global_step
+            trainer.save_weights(str(out / "latest.pt"))
         if time.time() - last_log > 1.0 or trainer.global_step >= steps:
             last_log = time.time()
             flat = dict(unroll_nested_dict(trainer.log()))
+            # Legible per-episode metrics, derived from raw env fields the trainer already forwards
+            # (no PufferLib fork): per-step `cleared` summed = #cleared episodes, so cleared/episodes
+            # is the true clear rate; boss HP at episode end = 1 - the per-episode `score`.
+            ep = flat.get("env/episodes", 0.0)
+            if ep > 0:
+                flat["eval/clear_rate"] = flat.get("env/cleared", 0.0) / ep
+            flat["eval/boss_hp_remaining"] = 1.0 - flat.get("env/score", 0.0)
             step = cum_step + trainer.global_step
             flat["phase"] = phase_idx
             flat["global_step"] = step
             print(f"[{name}] step={step/1e6:.1f}M SPS={flat.get('SPS', 0)/1e3:.0f}K "
-                  f"boss_hp={flat.get('env/boss_hp_frac', 0):.3f} score={flat.get('env/score', 0):.3f}", flush=True)
+                  f"clear_rate={flat.get('eval/clear_rate', 0):.2f} boss_left={flat.get('eval/boss_hp_remaining', 0):.2f}", flush=True)
             if use_wandb:
                 import wandb
 
@@ -123,7 +136,7 @@ def main() -> None:
         args["env"]["boss_hp_max"] = 7500.0
         print(f"\n== PHASE {i}: {name} ({steps/1e6:.0f}M, gamma {gamma}) "
               f"{'COLD START' if policy is None else 'warm-start'} ==", flush=True)
-        trainer, policy, cum = run_phase(args, i, name, gamma, gae, steps, policy, cum, args_cli.wandb)
+        trainer, policy, cum = run_phase(args, i, name, gamma, gae, steps, policy, cum, args_cli.wandb, out)
         trainer.save_weights(str(out / f"{name}.pt"))
         trainer.close()
 

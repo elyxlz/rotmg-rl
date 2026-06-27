@@ -58,19 +58,29 @@ def test_staff_damages_a_snake():
     assert env.snakes[i, 2] < hp0  # the snake took staff damage
 
 
-def test_boss_grenades_minions_and_status():
-    env = DungeonEnv(DungeonConfig(n_snakes=0, invuln_ticks=1))
+def test_p1_blades_are_point_blank_only():
+    """Fidelity: in P1 the boss fires its 3-blade shot ONLY when the player is within the point-blank
+    acquire radius (2); at range it fires no blades (but still throws the Confused grenade)."""
+    cfg = DungeonConfig(n_snakes=0, invuln_ticks=1, boss_wander_speed=0.0)
+    env = DungeonEnv(cfg)
     env.reset(seed=5)
-    env.player_pos = (env.boss_pos + np.array([3.0, 0.0], np.float32)).astype(np.float32)
     env.fight_active, env.phase = True, 1
-    saw_grenade = saw_minion = False
+    # at range (8 tiles): no blades fire, but the grenade (range 11) lands on the standing player
+    env.player_pos = (env.boss_pos + np.array([8.0, 0.0])).astype(np.float32)
+    saw_grenade = False
     for _ in range(80):
-        env.step([0, 0, 0, 0])  # stand still so a grenade lands on us
+        env.step([0, 0, 0, 0])
         saw_grenade = saw_grenade or env.grenades.shape[0] > 0
-        saw_minion = saw_minion or (env.snakes[:, 2] > 0).sum() > 0
-    assert saw_grenade  # boss throws telegraphed grenades
-    assert saw_minion  # boss spawns Stheno Swarm minions
-    assert env.confused_timer > 0 or env.petrify_timer > 0 or env.player_hp < env.cfg.player_hp_max
+        assert env.enemy_bullets.shape[0] == 0  # no blades at range in P1
+    assert saw_grenade  # the Confused grenade is the P1 ranged threat
+    assert env.confused_timer > 0 or env.player_hp < cfg.player_hp_max  # grenade landed -> confused/damage
+    # point-blank (within radius 2): the boss now acquires and fires blades
+    env.player_pos = (env.boss_pos + np.array([1.5, 0.0])).astype(np.float32)
+    fired = False
+    for _ in range(40):
+        env.step([0, 0, 0, 0])
+        fired = fired or env.enemy_bullets.shape[0] > 0
+    assert fired  # point-blank blades acquire and fire
 
 
 def test_boss_dies_to_spell():

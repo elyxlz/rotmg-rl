@@ -1,10 +1,11 @@
 /* Faithful C port of rotmg_rl.sim.dungeon.DungeonEnv (the Snake Pit dungeon sim).
  *
  * The Python sim is the oracle; this matches its obs layout, action space, and dynamics so a
- * policy trained here transfers. Determinism notes for the parity test: with n_snakes=0 and
- * enable_minions=0 and point-mass damage ranges (lo==hi), the whole sim is RNG-free and matches
- * the Python oracle bit-for-faithfully (positions float32, distances float64, as in numpy<2.0).
- * Snake spawn/wander and minion placement use rand() and are not bit-matched (stochastic by design).
+ * policy trained here transfers. Determinism notes for the parity test: with n_snakes=0,
+ * enable_minions=0, boss_wander_speed=0 (stationary boss) and point-mass damage ranges (lo==hi),
+ * the whole sim is RNG-free and matches the Python oracle bit-faithfully (positions float32,
+ * distances float64, as in numpy<2.0). Snake spawn/drift, boss Wander and minion placement use
+ * rand() and are not bit-matched (stochastic by design).
  */
 #ifndef ROTMG_DUNGEON_H
 #define ROTMG_DUNGEON_H
@@ -74,8 +75,34 @@ typedef struct {
 } Bullet;
 
 typedef struct {
-    float x, y, hp, timer;
+    float x, y, hp, timer, type;
 } Snake;
+
+/* Real Snake Pit enemies (EmbeddedData_SnakePitCXML.xml + BehaviorDb.SnakePit.cs), mirroring the
+ * numpy oracle's SNAKE_TYPES. Columns: hp, defense, dmg, bvspeed, blife(ticks), count, arc(rad),
+ * cooldown(ticks), follow, follow_speed, acquire_range, shoot_range. */
+#define N_SNAKE_TYPES 5
+#define ST_HP 0
+#define ST_DEF 1
+#define ST_DMG 2
+#define ST_BVS 3
+#define ST_BLIFE 4
+#define ST_CNT 5
+#define ST_ARC 6
+#define ST_CD 7
+#define ST_FOLLOW 8
+#define ST_FSPD 9
+#define ST_ACQ 10
+#define ST_SRANGE 11
+static const float SNAKE_TYPES[N_SNAKE_TYPES][12] = {
+    {5.0f, 0.0f, 20.0f, 0.6f, 20.0f, 1.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 20.0f},                      /* Pit Viper */
+    {200.0f, 5.0f, 25.0f, 0.8f, 20.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f, 15.0f},  /* Fire Python */
+    {200.0f, 5.0f, 25.0f, 0.8f, 30.0f, 1.0f, 0.0f, 10.0f, 1.0f, 0.5f, 10.0f, 20.0f},                   /* Yellow Python */
+    {500.0f, 10.0f, 50.0f, 0.8f, 30.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f, 15.0f}, /* Greater Pit Snake */
+    {500.0f, 10.0f, 50.0f, 0.6f, 30.0f, 1.0f, 0.0f, 3.0f, 1.0f, 0.5f, 10.0f, 15.0f},                   /* Greater Pit Viper */
+};
+static const float SNAKE_WEIGHTS[N_SNAKE_TYPES] = {0.40f, 0.22f, 0.15f, 0.15f, 0.08f};
+#define SNAKE_TIMER_JITTER 10
 
 typedef struct {
     float x, y, fuse, rad, dmg, status;
@@ -86,27 +113,26 @@ typedef struct {
     float player_speed, player_radius;
     int max_steps;
     float activation_range, spawn_in_room_prob, random_spawn_prob, spawn_in_room_radius;
-    float player_hp_max, player_mp_max, mp_regen;
+    float player_hp_max, player_mp_max, player_defense, damage_floor, mp_regen;
     int staff_cooldown, staff_num;
     float staff_dmg_lo, staff_dmg_hi, staff_speed;
     int staff_life;
     float staff_radius, staff_offset, spell_cost;
     int spell_cooldown, spell_num;
-    float spell_arc_deg, spell_dmg_lo, spell_dmg_hi, spell_speed;
+    float spell_dmg_lo, spell_dmg_hi, spell_speed;
     int spell_life;
     int n_snakes;
-    float snake_hp, snake_speed, snake_shoot_range;
-    int snake_cooldown;
-    float snake_bullet_speed;
-    int snake_bullet_life;
-    float snake_bullet_dmg, snake_radius;
-    float boss_hp_max, boss_radius, boss_speed;
-    int boss_shoots, invuln_ticks;
+    float snake_speed, snake_radius;
+    float boss_hp_max, boss_radius, boss_defense, boss_wander_speed;
+    int boss_shoots, opening_invuln_ticks, invuln_ticks;
+    int blade_cd;
+    float blade_radius_p1, blade_radius_p3;
     float ebullet_speed;
     int ebullet_life;
     float ebullet_dmg, ebullet_radius;
     int max_bullets;
-    int grenade_fuse, grenade_cd_p1, grenade_cd_p2;
+    int grenade_fuse, grenade_cd_p1, grenade_cd_p2, grenade_cd_p3_diag;
+    float grenade_range_confuse, grenade_petrify_dist;
     float grenade_radius_confuse, grenade_dmg_confuse, grenade_radius_petrify, grenade_dmg_petrify;
     int confused_ticks, petrify_ticks;
     int minion_max, minion_cd;
@@ -144,8 +170,7 @@ typedef struct {
     double boss_hp; /* float64 like the numpy oracle (Python float), for phase/collision fidelity */
     int phase, fight_active, invuln_timer;
     int confused_timer, petrify_timer, minion_timer;
-    double rotate_angle;
-    int t_p1, t_p2, t_p3a, t_p3b, t_g1, t_g2, t_g3;
+    int t_p1, t_p3a, t_g1, t_g2, t_g3card, t_g3diag;
 
     Bullet pbul[MAX_PBULLETS];
     int n_pbul;
@@ -206,6 +231,13 @@ static inline uint32_t rng_next(Dungeon* env) {
 static inline float frand(Dungeon* env) { return (float)(rng_next(env) >> 8) / (float)(1 << 24); }
 static inline float uniform_f(Dungeon* env, float lo, float hi) { return lo + (hi - lo) * frand(env); }
 
+static float randn(Dungeon* env) {
+    /* Box-Muller; training-only randomness (boss wander + snake drift), not parity-matched */
+    float u1 = frand(env), u2 = frand(env);
+    if (u1 < 1e-7f) u1 = 1e-7f;
+    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
+}
+
 static inline int walkable_at(float fx, float fy) {
     int x = (int)fx, y = (int)fy;
     if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return 0;
@@ -218,8 +250,14 @@ static double dist_ff(float ax, float ay, float bx, float by) {
 }
 
 static double dist_df(double ax, double ay, float bx, float by) {
-    double dx = ax - bx, dy = ay - by;  /* boss_pos is float64 once moved */
+    double dx = ax - bx, dy = ay - by;  /* boss_pos is float64 (double) */
     return sqrt(dx * dx + dy * dy);
+}
+
+/* Real DamageWithDefense clamp for a single hit: max(raw*floor, raw - defense). */
+static inline double defended(float raw, float defense, float floor) {
+    double a = (double)raw * floor, b = (double)raw - defense;
+    return a > b ? a : b;
 }
 
 /* nearest walkable tile to (x,y), matching _nearest_walkable */
@@ -285,16 +323,17 @@ static double resolve_collisions(Dungeon* env) {
     Config* c = &env->cfg;
     double reward = 0.0;
 
-    /* player bullets vs snakes (index order; removing hits affects later snakes) */
+    /* player bullets vs snakes (per-bullet defense clamp by snake type) */
     for (int s = 0; s < env->n_snake; s++) {
         if (env->snakes[s].hp <= 0.0f) continue;
         if (env->n_pbul == 0) break;
         float thr = c->snake_radius + c->staff_radius;
+        float sdef = SNAKE_TYPES[(int)env->snakes[s].type][ST_DEF];
         double dmg = 0.0;
         int any = 0, w = 0;
         for (int i = 0; i < env->n_pbul; i++) {
             if (dist_ff(env->pbul[i].x, env->pbul[i].y, env->snakes[s].x, env->snakes[s].y) < thr) {
-                dmg += env->pbul[i].dmg;
+                dmg += defended(env->pbul[i].dmg, sdef, c->damage_floor);
                 any = 1;
             } else {
                 env->pbul[w++] = env->pbul[i];
@@ -307,14 +346,14 @@ static double resolve_collisions(Dungeon* env) {
         }
     }
 
-    /* player bullets vs boss */
+    /* player bullets vs boss (DEF 19) */
     if (env->n_pbul > 0 && env->invuln_timer == 0 && env->phase > 0) {
         float thr = c->boss_radius + c->staff_radius;
         double dmg = 0.0;
         int any = 0, w = 0;
         for (int i = 0; i < env->n_pbul; i++) {
             if (dist_df(env->boss_x, env->boss_y, env->pbul[i].x, env->pbul[i].y) < thr) {
-                dmg += env->pbul[i].dmg;
+                dmg += defended(env->pbul[i].dmg, c->boss_defense, c->damage_floor);
                 any = 1;
             } else {
                 env->pbul[w++] = env->pbul[i];
@@ -327,14 +366,14 @@ static double resolve_collisions(Dungeon* env) {
         }
     }
 
-    /* enemy bullets vs player */
+    /* enemy bullets vs player (robe DEF 17) */
     if (env->n_ebul > 0) {
         float thr = c->player_radius + c->ebullet_radius;
         double dmg = 0.0;
         int any = 0, w = 0;
         for (int i = 0; i < env->n_ebul; i++) {
             if (dist_ff(env->ebul[i].x, env->ebul[i].y, env->px, env->py) < thr) {
-                dmg += env->ebul[i].dmg;
+                dmg += defended(env->ebul[i].dmg, c->player_defense, c->damage_floor);
                 any = 1;
             } else {
                 env->ebul[w++] = env->ebul[i];
@@ -363,14 +402,13 @@ static void fire_staff(Dungeon* env, float dx, float dy) {
     }
 }
 
-static void cast_spell(Dungeon* env, float dx, float dy) {
+/* Spell of Galactic Creation: a 360-degree BulletNova of spell_num bullets evenly over a full
+ * circle, emitted from the player position (point-blank). Aim is irrelevant for a full circle. */
+static void cast_spell(Dungeon* env) {
     Config* c = &env->cfg;
-    double base = atan2((double)dy, (double)dx);
-    double half_arc = c->spell_arc_deg * M_PI / 180.0 / 2.0;
     int n = c->spell_num;
     for (int i = 0; i < n; i++) {
-        double t = (n == 1) ? 0.0 : (-half_arc + (2.0 * half_arc) * i / (n - 1));
-        double a = base + t;
+        double a = i * (2.0 * M_PI / n);
         Bullet b = {env->px, env->py, (float)cos(a) * c->spell_speed, (float)sin(a) * c->spell_speed,
                     (float)c->spell_life, uniform_f(env, c->spell_dmg_lo, c->spell_dmg_hi)};
         append_bullet(env->pbul, &env->n_pbul, MAX_PBULLETS, c->max_bullets, b);
@@ -389,35 +427,50 @@ static void spawn_burst(Dungeon* env, double base_angle, int count, double gap) 
     }
 }
 
-static void aimed_shoot(Dungeon* env, int* timer, int count, float spread_deg, int cooldown) {
+/* Blade shot: once the cooldown elapses, fire only if the player is within acquire_radius (P1 is
+ * point-blank radius 2; P3 aims at range). The cooldown holds at 0 until the player is in range. */
+static void aimed_shoot(Dungeon* env, int* timer, int count, float spread_deg, int cooldown, float acquire_radius) {
     if (*timer > 0) {
         (*timer)--;
         return;
     }
+    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) > acquire_radius) return;
     *timer = cooldown;
     double base = atan2((double)(env->py - env->boss_y), (double)(env->px - env->boss_x));
     spawn_burst(env, base, count, spread_deg * M_PI / 180.0);
 }
 
-static void rotating_shoot(Dungeon* env, int* timer, int count, float step_deg, int cooldown) {
-    if (*timer > 0) {
-        (*timer)--;
-        return;
-    }
-    *timer = cooldown;
-    env->rotate_angle += step_deg * M_PI / 180.0;
-    spawn_burst(env, env->rotate_angle, count, 2.0 * M_PI / count);
-}
-
-static void throw_grenade(Dungeon* env, int* timer, int cooldown, float radius, float dmg, int status) {
+/* Confused grenade: thrown at the player once the cooldown elapses AND the player is within the
+ * boss's acquire range (matches the real Grenade gating on GetNearestEntity). */
+static void throw_grenade_targeted(Dungeon* env, int* timer, int cooldown, float throw_range, float radius, float dmg, int status) {
     if (!env->cfg.enable_grenades) return;
     if (*timer > 0) {
         (*timer)--;
         return;
     }
+    if (dist_df(env->boss_x, env->boss_y, env->px, env->py) > throw_range) return;
     *timer = cooldown;
     if (env->n_gren < MAX_GRENADES) {
         Grenade g = {env->px, env->py, (float)env->cfg.grenade_fuse, radius, dmg, (float)status};
+        env->grenades[env->n_gren++] = g;
+    }
+}
+
+/* P3 Petrify fan: 4 fixed-angle grenades thrown to a fixed distance from the boss. */
+static void throw_fixed_grenades(Dungeon* env, int* timer, int cooldown, const float* angles_deg, int n_angles) {
+    Config* c = &env->cfg;
+    if (!c->enable_grenades) return;
+    if (*timer > 0) {
+        (*timer)--;
+        return;
+    }
+    *timer = cooldown;
+    for (int i = 0; i < n_angles; i++) {
+        if (env->n_gren >= MAX_GRENADES) break;
+        double a = angles_deg[i] * M_PI / 180.0;
+        float tx = (float)(env->boss_x + c->grenade_petrify_dist * cos(a));
+        float ty = (float)(env->boss_y + c->grenade_petrify_dist * sin(a));
+        Grenade g = {tx, ty, (float)c->grenade_fuse, c->grenade_radius_petrify, c->grenade_dmg_petrify, 1.0f};
         env->grenades[env->n_gren++] = g;
     }
 }
@@ -441,8 +494,8 @@ static void spawn_minions(Dungeon* env) {
     for (int i = 0; i < c->minion_max; i++) {
         if (env->n_snake >= MAX_SNAKES) break;
         double ang = uniform_f(env, 0.0f, (float)(2.0 * M_PI));
-        Snake s = {(float)(env->boss_x + cos(ang) * 3.0), (float)(env->boss_y + sin(ang) * 3.0), c->minion_hp, 0.0f};
-        env->snakes[env->n_snake++] = s;
+        Snake s = {(float)(env->boss_x + cos(ang) * 3.0), (float)(env->boss_y + sin(ang) * 3.0), c->minion_hp, 0.0f, 0.0f};
+        env->snakes[env->n_snake++] = s;  /* weak swarm: type 0 */
     }
 }
 
@@ -460,27 +513,30 @@ static void boss_tick(Dungeon* env) {
             env->invuln_timer = c->invuln_ticks;
         }
     }
-    /* boss_pos = boss_pos + unit(player - boss) * boss_speed; numpy keeps boss_pos float64, so the
-     * direction vector is computed in double (player float32 promoted), not float32. */
-    double vx = (double)env->px - env->boss_x, vy = (double)env->py - env->boss_y;
-    double nrm = sqrt(vx * vx + vy * vy) + 1e-6;
-    env->boss_x = env->boss_x + (vx / nrm) * c->boss_speed;
-    env->boss_y = env->boss_y + (vy / nrm) * c->boss_speed;
+    /* movement: Wander(0.3) random drift in P1, stationary in P2/P3. boss_pos stays double. */
+    if (env->phase == 1 && c->boss_wander_speed > 0.0f) {
+        double dx = randn(env) * c->boss_wander_speed, dy = randn(env) * c->boss_wander_speed;
+        double cx = env->boss_x + dx, cy = env->boss_y + dy;
+        if (walkable_at((float)cx, (float)cy)) {
+            env->boss_x = cx;
+            env->boss_y = cy;
+        }
+    }
     if (env->invuln_timer > 0) return;
 
+    static const float CARDINALS[4] = {0.0f, 90.0f, 180.0f, 270.0f};
+    static const float DIAGONALS[4] = {45.0f, 135.0f, 225.0f, 315.0f};
     if (env->phase == 1) {
-        if (c->boss_shoots) aimed_shoot(env, &env->t_p1, 3, 15.0f, 15);
+        if (c->boss_shoots) aimed_shoot(env, &env->t_p1, 3, 15.0f, c->blade_cd, c->blade_radius_p1);
         spawn_minions(env);
-        throw_grenade(env, &env->t_g1, c->grenade_cd_p1, c->grenade_radius_confuse, c->grenade_dmg_confuse, 0);
+        throw_grenade_targeted(env, &env->t_g1, c->grenade_cd_p1, c->grenade_range_confuse, c->grenade_radius_confuse, c->grenade_dmg_confuse, 0);
     } else if (env->phase == 2) {
-        if (c->boss_shoots) rotating_shoot(env, &env->t_p2, 4, 15.0f, 3);
-        throw_grenade(env, &env->t_g2, c->grenade_cd_p2, c->grenade_radius_confuse, c->grenade_dmg_confuse, 0);
+        /* P2's 4-shot references a nonexistent projectile -> fires nothing; only the grenade threatens */
+        throw_grenade_targeted(env, &env->t_g2, c->grenade_cd_p2, c->grenade_range_confuse, c->grenade_radius_confuse, c->grenade_dmg_confuse, 0);
     } else if (env->phase == 3) {
-        if (c->boss_shoots) {
-            aimed_shoot(env, &env->t_p3a, 3, 15.0f, 15);
-            rotating_shoot(env, &env->t_p3b, 4, 15.0f, 5);
-        }
-        throw_grenade(env, &env->t_g3, c->grenade_cd_p1, c->grenade_radius_petrify, c->grenade_dmg_petrify, 1);
+        if (c->boss_shoots) aimed_shoot(env, &env->t_p3a, 3, 15.0f, c->blade_cd, c->blade_radius_p3);
+        throw_fixed_grenades(env, &env->t_g3card, c->grenade_cd_p1, CARDINALS, 4);
+        throw_fixed_grenades(env, &env->t_g3diag, c->grenade_cd_p3_diag, DIAGONALS, 4);
     }
 }
 
@@ -494,8 +550,9 @@ static double grenades_tick(Dungeon* env) {
         g.fuse -= 1.0f;
         if (g.fuse <= 0.0f) {
             if (dist_ff(env->px, env->py, g.x, g.y) <= g.rad) {
-                env->player_hp -= g.dmg;
-                reward -= (g.dmg / c->player_hp_max) * c->rew_damage_taken;
+                float dmg = (float)defended(g.dmg, c->player_defense, c->damage_floor);
+                env->player_hp -= dmg;
+                reward -= (dmg / c->player_hp_max) * c->rew_damage_taken;
                 if ((int)g.status == 0)
                     env->confused_timer = c->confused_ticks;
                 else
@@ -511,31 +568,47 @@ static double grenades_tick(Dungeon* env) {
 
 /* --- snakes --- */
 
-static float randn(Dungeon* env) {
-    /* Box-Muller; training-only randomness, not parity-matched */
-    float u1 = frand(env), u2 = frand(env);
-    if (u1 < 1e-7f) u1 = 1e-7f;
-    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
+static int sample_snake_type(Dungeon* env) {
+    float r = frand(env), cum = 0.0f;
+    for (int t = 0; t < N_SNAKE_TYPES; t++) {
+        cum += SNAKE_WEIGHTS[t];
+        if (r < cum) return t;
+    }
+    return N_SNAKE_TYPES - 1;
 }
 
 static void snakes_tick(Dungeon* env) {
     Config* c = &env->cfg;
     for (int i = 0; i < env->n_snake; i++) {
         if (env->snakes[i].hp <= 0.0f) continue;
-        float ddx = randn(env) * c->snake_speed, ddy = randn(env) * c->snake_speed;
-        float cx = env->snakes[i].x + ddx, cy = env->snakes[i].y + ddy;
+        const float* st = SNAKE_TYPES[(int)env->snakes[i].type];
+        double d = dist_ff(env->snakes[i].x, env->snakes[i].y, env->px, env->py);
+        /* movement: Follow chase toward the player within acquire range, else Wander drift */
+        float mvx, mvy;
+        if (st[ST_FOLLOW] > 0.0f && d <= st[ST_ACQ]) {
+            double inv = 1.0 / (d + 1e-6);
+            mvx = (float)((env->px - env->snakes[i].x) * inv) * st[ST_FSPD];
+            mvy = (float)((env->py - env->snakes[i].y) * inv) * st[ST_FSPD];
+        } else {
+            mvx = randn(env) * c->snake_speed;
+            mvy = randn(env) * c->snake_speed;
+        }
+        float cx = env->snakes[i].x + mvx, cy = env->snakes[i].y + mvy;
         if (walkable_at(cx, cy)) {
             env->snakes[i].x = cx;
             env->snakes[i].y = cy;
         }
         env->snakes[i].timer -= 1.0f;
-        double d = dist_ff(env->snakes[i].x, env->snakes[i].y, env->px, env->py);
-        if (env->snakes[i].timer <= 0.0f && d <= c->snake_shoot_range) {
-            env->snakes[i].timer = (float)c->snake_cooldown;
-            double ang = atan2((double)(env->py - env->snakes[i].y), (double)(env->px - env->snakes[i].x));
-            Bullet b = {env->snakes[i].x, env->snakes[i].y, (float)cos(ang) * c->snake_bullet_speed,
-                        (float)sin(ang) * c->snake_bullet_speed, (float)c->snake_bullet_life, c->snake_bullet_dmg};
-            append_bullet(env->ebul, &env->n_ebul, MAX_EBULLETS, c->max_bullets, b);
+        if (env->snakes[i].timer <= 0.0f && d <= st[ST_SRANGE]) {
+            env->snakes[i].timer = st[ST_CD];
+            double base = atan2((double)(env->py - env->snakes[i].y), (double)(env->px - env->snakes[i].x));
+            int cnt = (int)st[ST_CNT];
+            for (int j = 0; j < cnt; j++) {
+                double a = base + (j - (cnt - 1) / 2.0) * st[ST_ARC];
+                Bullet b = {env->snakes[i].x, env->snakes[i].y, (float)cos(a) * st[ST_BVS],
+                            (float)sin(a) * st[ST_BVS], st[ST_BLIFE], st[ST_DMG]};
+                append_bullet(env->ebul, &env->n_ebul, MAX_EBULLETS, c->max_bullets, b);
+            }
         }
     }
 }
@@ -545,13 +618,14 @@ static void spawn_snakes(Dungeon* env) {
     env->n_snake = 0;
     int want = c->n_snakes;
     if (want > g_n_walk) want = g_n_walk;
-    /* sample distinct walkable tiles (training randomness; not parity-matched) */
+    /* sample distinct walkable tiles + a weighted archetype (training randomness; not parity-matched) */
     for (int s = 0; s < want; s++) {
         if (env->n_snake >= MAX_SNAKES) break;
         int idx = rng_next(env) % g_n_walk;
         int x = g_walk_x[idx], y = g_walk_y[idx];
         if (abs(x - ENTRANCE_X) + abs(y - ENTRANCE_Y) <= 6) continue;
-        Snake sn = {x + 0.5f, y + 0.5f, c->snake_hp, (float)(rng_next(env) % c->snake_cooldown)};
+        int type = sample_snake_type(env);
+        Snake sn = {x + 0.5f, y + 0.5f, SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
         env->snakes[env->n_snake++] = sn;
     }
 }
@@ -718,8 +792,7 @@ static void c_reset(Dungeon* env) {
     env->phase = 0;
     env->fight_active = 0;
     env->invuln_timer = 0;
-    env->rotate_angle = 0.0;
-    env->t_p1 = env->t_p2 = env->t_p3a = env->t_p3b = env->t_g1 = env->t_g2 = env->t_g3 = 0;
+    env->t_p1 = env->t_p3a = env->t_g1 = env->t_g2 = env->t_g3card = env->t_g3diag = 0;
     env->confused_timer = env->petrify_timer = env->minion_timer = 0;
     env->n_pbul = env->n_ebul = env->n_gren = 0;
     memset(env->visited, 0, sizeof(env->visited));
@@ -770,7 +843,7 @@ static void c_step(Dungeon* env) {
         env->staff_timer = c->staff_cooldown;
     }
     if (cast == 1 && env->spell_timer == 0 && env->player_mp >= c->spell_cost) {
-        cast_spell(env, aimx, aimy);
+        cast_spell(env);
         env->player_mp -= c->spell_cost;
         env->spell_timer = c->spell_cooldown;
     }
@@ -784,6 +857,7 @@ static void c_step(Dungeon* env) {
     if (!env->fight_active && dist_df(env->boss_x, env->boss_y, env->px, env->py) <= c->activation_range) {
         env->fight_active = 1;
         env->phase = 1;
+        env->invuln_timer = c->opening_invuln_ticks;  /* 1.0s invuln taunt before P1 acts */
         reward += c->rew_reach;
     }
 

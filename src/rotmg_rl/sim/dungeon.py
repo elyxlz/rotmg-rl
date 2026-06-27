@@ -1,12 +1,31 @@
-"""Faithful Snake Pit env (v3) over the real map, per docs/real-game-analysis.md.
+"""Faithful Snake Pit env (v3) over the real map, cross-checked against the betterSkillys source.
 
 Faithful to the real game: LOCAL vision only (VISIBILITY_RADIUS 15 -> 31x31 window, no global map
 knowledge), continuous-ish mouse-aim (32 fine directions), exploration-based progression (no
 path-to-boss breadcrumb), the dungeon populated with the real snakes you fight/dodge through, and
-the Wizard (staff + Spell). Calibrated: dt=100ms, tiles/tick = Speed/100, cooldown ticks = ms/100.
+the Wizard's real loadout (Staff of the Fundamental Core + Spell of Galactic Creation). Calibrated:
+dt=100ms, tiles/tick = projectile Speed/100, cooldown ticks = ms/100.
 
-Boss grenades + Confused/Petrify status + Stheno Swarm minions are the next fidelity layer.
-Completion = Stheno dead = dungeon cleared.
+Real-game fidelity (source: vendor/betterSkillys/source):
+- Spell = "Spell of Galactic Creation": a 360-degree BulletNova, 20 bullets evenly over a full
+  circle from the player position (point-blank detonation), [110,205] dmg each, MP 100, no cooldown.
+  No focused arc nuke exists in the real game; point-blank only the few bullets whose headings cross
+  a target connect, so vs a single boss it is chip/support DPS, not a nuke.
+- Staff = "Staff of the Fundamental Core": 2 parallel shots (ArcGap 0), [75,115] dmg each, range
+  ~8.55 tiles (Speed 180, Life 475ms). Long range -> the realistic strategy is to KITE at ~8 tiles
+  and sustain staff DPS, since the boss's P1 Blades are point-blank only.
+- Damage uses the real defense clamp: dealt = max(raw*0.1, raw - defense). Boss DEF 19; the geared
+  Wizard has DEF 17 (robe) and 780 max HP (670 base + 110 ring).
+- Boss Stheno: P1 fires 3-blade 15deg shots ONLY point-blank (acquire radius 2) + a Confused grenade
+  + Wander(0.3); P2 fires NOTHING but the Confused grenade (its 4-shot references a nonexistent
+  projectile); P3 fires aimed 3-blade shots + 8 fixed-angle Petrify grenades in a radial fan. Boss
+  is stationary in P2/P3. Grenade fuse is 1500ms.
+- Snakes: the real variety (Pit Vipers, Pythons, Greater Pit Snakes/Vipers) with real HP, defense,
+  damage, range, arcs and chase -- the main attrition threat across the ~150-tile traversal.
+
+KNOWN SIMPLIFICATIONS (faithful where it gates the boss kill): the Snakepit Guard/button
+sub-encounter and the Stheno Swarm "Reproduce" minions are omitted (optional, no-player-gated, do
+not gate Stheno's death). Completion = Stheno dead = dungeon cleared.
 """
 
 from __future__ import annotations
@@ -34,8 +53,27 @@ MM = 32
 NUM_MM_CH = 3
 MM_CH_TERRAIN, MM_CH_PLAYER, MM_CH_BOSS = range(3)
 BX, BY, BVX, BVY, BLIFE, BDMG = range(6)  # bullet columns
-EX, EY, EHP, ETIMER = range(4)  # enemy columns
+EX, EY, EHP, ETIMER, ETYPE = range(5)  # enemy columns (type indexes SNAKE_TYPES)
 GX, GY, GFUSE, GRAD, GDMG, GSTATUS = range(6)  # grenade columns (status: 0 confused, 1 petrify)
+
+# Real Snake Pit enemies (EmbeddedData_SnakePitCXML.xml + BehaviorDb.SnakePit.cs). Calibrated:
+# bullet t/tick = Speed/100, life ticks = LifetimeMS/100, follow t/tick = followSpeed*0.5 (Wander/
+# Follow advance speed*BehaviourTickTime per 200ms tick). Columns:
+# hp, defense, dmg, bvspeed, blife(ticks), count, arc(rad), cooldown(ticks), follow, follow_speed,
+# acquire_range, shoot_range.
+ST_HP, ST_DEF, ST_DMG, ST_BVS, ST_BLIFE, ST_CNT, ST_ARC, ST_CD, ST_FOLLOW, ST_FSPD, ST_ACQ, ST_SRANGE = range(12)
+SNAKE_TYPES = np.array(
+    [
+        [5.0, 0.0, 20.0, 0.6, 20.0, 1.0, 0.0, 10.0, 0.0, 0.0, 0.0, 20.0],  # Pit Viper (HP5)
+        [200.0, 5.0, 25.0, 0.8, 20.0, 3.0, np.radians(5.0), 10.0, 1.0, 0.5, 10.0, 15.0],  # Fire Python (3-shot, Follow)
+        [200.0, 5.0, 25.0, 0.8, 30.0, 1.0, 0.0, 10.0, 1.0, 0.5, 10.0, 20.0],  # Yellow Python (Follow)
+        [500.0, 10.0, 50.0, 0.8, 30.0, 3.0, np.radians(5.0), 10.0, 1.0, 0.5, 10.0, 15.0],  # Greater Pit Snake (3-shot)
+        [500.0, 10.0, 50.0, 0.6, 30.0, 1.0, 0.0, 3.0, 1.0, 0.5, 10.0, 15.0],  # Greater Pit Viper (cd 300ms)
+    ],
+    np.float32,
+)
+SNAKE_WEIGHTS = np.array([0.40, 0.22, 0.15, 0.15, 0.08], np.float32)  # spawn mix: many fillers, few greaters
+SNAKE_TIMER_JITTER = 10  # initial shoot-timer desync (ticks)
 
 
 @dataclass
@@ -47,61 +85,72 @@ class DungeonConfig:
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)
     spawn_in_room_radius: float = 6.0  # ring distance (tiles) from the boss for the in-room spawn; ramp it up to teach navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
     random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
-    # Wizard
-    player_hp_max: float = 670.0
+    # Wizard (geared loadout: 670 base HP + 110 ring, robe DEF +17)
+    player_hp_max: float = 780.0
     player_mp_max: float = 385.0
+    player_defense: float = 17.0  # robe; incoming damage reduced by the real clamp
+    damage_floor: float = 0.1  # DamageWithDefense floor: dealt = max(raw*floor, raw - defense)
     mp_regen: float = 0.5
+    # Staff of the Fundamental Core: 2 parallel shots (ArcGap 0), [75,115] dmg, Speed 180 (1.8 t/tick),
+    # Life 475ms -> range ~8.55 tiles (life 6 ticks * 1.8 reaches ~9 tiles, just past the kite distance).
     staff_cooldown: int = 2
     staff_num: int = 2
-    staff_dmg: tuple[float, float] = (45.0, 85.0)
+    staff_dmg: tuple[float, float] = (75.0, 115.0)
     staff_speed: float = 1.8
-    staff_life: int = 8
+    staff_life: int = 6
     staff_radius: float = 0.5
     staff_offset: float = 0.5
+    # Spell of Galactic Creation: 360-degree BulletNova from the player, 20 bullets, [110,205] dmg,
+    # Speed 160 (1.6 t/tick), Life 1000ms (10 ticks, ~16-tile range), MP 100, no cooldown.
     spell_cost: float = 100.0
-    spell_cooldown: int = 5
+    spell_cooldown: int = 0
     spell_num: int = 20
-    spell_arc_deg: float = 70.0
     spell_dmg: tuple[float, float] = (110.0, 205.0)
     spell_speed: float = 1.6
     spell_life: int = 10
-    # snakes (Pit Snake/Viper HP 5, Speed 60->0.6 t/tick, Wander+Shoot ~1s)
+    # snakes: real variety in SNAKE_TYPES (HP 5-500, dmg 20-50). snake_speed = wander drift std,
+    # snake_radius = collision size; per-type combat stats live in SNAKE_TYPES, not config.
     n_snakes: int = 40
-    snake_hp: float = 5.0
-    snake_speed: float = 0.2
-    snake_shoot_range: float = 8.0
-    snake_cooldown: int = 10
-    snake_bullet_speed: float = 0.6
-    snake_bullet_life: int = 12
-    snake_bullet_dmg: float = 20.0
+    snake_speed: float = 0.15
     snake_radius: float = 0.5
-    # boss
+    # boss (Stheno the Snake Queen): 7500 HP, DEF 19, phases at 66%/33%.
     boss_hp_max: float = 7500.0
     boss_radius: float = 2.0
-    boss_speed: float = 0.12
+    boss_defense: float = 19.0
+    boss_wander_speed: float = 0.15  # Wander(0.3) in P1 (random drift); stationary in P2/P3
     boss_shoots: bool = True  # curriculum stage 0 sets False: passive target, learn aim+kill first
-    invuln_ticks: int = 15
+    opening_invuln_ticks: int = 10  # Start state: 1.0s invuln taunt before P1
+    invuln_ticks: int = 15  # P2/P3 transition invuln (1.5s)
+    # Blade (boss projectile 0): Speed 70 (0.7 t/tick), Life 1500ms (15 ticks, ~10.5-tile range),
+    # dmg 100. P1 acquires only point-blank (radius 2); P3 aims at range (radius 30).
+    blade_cd: int = 15
+    blade_radius_p1: float = 2.0
+    blade_radius_p3: float = 30.0
     ebullet_speed: float = 0.7
     ebullet_life: int = 15
-    ebullet_dmg: float = 40.0
+    ebullet_dmg: float = 100.0
     ebullet_radius: float = 0.4
     max_bullets: int = 8192
-    # grenades (telegraphed AoE -> status): source r3.5 dmg150 Confused (P1/P2), r1.5 dmg75 Petrify (P3)
-    grenade_fuse: int = 10  # ticks telegraphed before detonation (~1s)
+    # grenades (telegraphed AoE -> status, 1500ms fuse). Confused r3.5 dmg150 (P1/P2, acquire r11);
+    # Petrify r1.5 dmg75 (P3, 8 in a radial fan thrown 6 tiles out, cardinals cd1.5s/diagonals cd3.0s).
+    grenade_fuse: int = 15
     grenade_cd_p1: int = 15
     grenade_cd_p2: int = 10
+    grenade_cd_p3_diag: int = 30
+    grenade_range_confuse: float = 11.0
+    grenade_petrify_dist: float = 6.0
     grenade_radius_confuse: float = 3.5
     grenade_dmg_confuse: float = 150.0
     grenade_radius_petrify: float = 1.5
     grenade_dmg_petrify: float = 75.0
     confused_ticks: int = 10
     petrify_ticks: int = 10
-    # Stheno Swarm minions (Reproduce up to 5 every 1.5s in P1)
+    # Stheno Swarm minions (Reproduce) -- OMITTED by default (optional, no-player-gated); kept tunable.
     minion_max: int = 5
     minion_cd: int = 15
     minion_hp: float = 30.0
     enable_grenades: bool = True  # curriculum can disable for early stages
-    enable_minions: bool = True
+    enable_minions: bool = False
     # rewards (exploration-based, no global pathfinding). Scaled to PufferLib's roughly -1..1 rule:
     # per-step signals tiny, a full clean clear totals ~1-2.5 total episode reward.
     rew_explore: float = 0.01  # per newly-visited tile
@@ -174,14 +223,15 @@ class DungeonEnv(gym.Env):
         self.player_mp = c.player_mp_max
         self.staff_timer = 0
         self.spell_timer = 0
-        self.boss_pos = np.array([self.boss_xy[0] + 0.5, self.boss_xy[1] + 0.5], np.float32)
+        # boss_pos is float64 (matches the C env's double boss coords) so boss/player distances and
+        # blade origins stay bit-faithful whether or not the boss moves.
+        self.boss_pos = np.array([self.boss_xy[0] + 0.5, self.boss_xy[1] + 0.5], np.float64)
         self._prev_boss_dist = float(np.linalg.norm(self.player_pos - self.boss_pos))  # distance-shaping baseline
         self.boss_hp = c.boss_hp_max
         self.phase = 0
         self.fight_active = False
         self.invuln_timer = 0
         self.shoot_timers: dict = {}
-        self.rotate_angle = 0.0
         self.enemy_bullets = np.zeros((0, 6), np.float32)
         self.player_bullets = np.zeros((0, 6), np.float32)
         self.grenades = np.zeros((0, 6), np.float32)
@@ -203,11 +253,16 @@ class DungeonEnv(gym.Env):
         xs, ys = self._walk_xs[idx], self._walk_ys[idx]
         keep = (np.abs(xs - self.entrance_xy[0]) + np.abs(ys - self.entrance_xy[1])) > 6
         xs, ys = xs[keep], ys[keep]
-        self.snakes = np.zeros((len(xs), 4), np.float32)
+        n = len(xs)
+        self.snakes = np.zeros((n, 5), np.float32)
+        if n == 0:
+            return
+        types = self._rng.choice(len(SNAKE_TYPES), size=n, p=SNAKE_WEIGHTS)
         self.snakes[:, EX] = xs + 0.5
         self.snakes[:, EY] = ys + 0.5
-        self.snakes[:, EHP] = c.snake_hp
-        self.snakes[:, ETIMER] = self._rng.integers(0, c.snake_cooldown, size=len(xs))
+        self.snakes[:, ETYPE] = types
+        self.snakes[:, EHP] = SNAKE_TYPES[types, ST_HP]
+        self.snakes[:, ETIMER] = self._rng.integers(0, SNAKE_TIMER_JITTER, size=n)
 
     def step(self, action):
         c = self.cfg
@@ -237,7 +292,7 @@ class DungeonEnv(gym.Env):
             self._fire_staff(aim)
             self.staff_timer = c.staff_cooldown
         if cast == 1 and self.spell_timer == 0 and self.player_mp >= c.spell_cost:
-            self._cast_spell(aim)
+            self._cast_spell()
             self.player_mp -= c.spell_cost
             self.spell_timer = c.spell_cooldown
 
@@ -249,6 +304,7 @@ class DungeonEnv(gym.Env):
         if not self.fight_active and np.linalg.norm(self.player_pos - self.boss_pos) <= c.activation_range:
             self.fight_active = True
             self.phase = 1
+            self.invuln_timer = c.opening_invuln_ticks  # 1.0s invuln taunt before P1 acts
             reward += c.rew_reach
 
         self._snakes_tick()
@@ -280,33 +336,39 @@ class DungeonEnv(gym.Env):
     def _resolve_collisions(self) -> float:
         c = self.cfg
         reward = 0.0
-        # player bullets vs snakes
+        # player bullets vs snakes (per-bullet defense clamp by snake type)
         if self.player_bullets.shape[0] and self.snakes.shape[0]:
             alive = self.snakes[:, EHP] > 0
             for i in np.where(alive)[0]:
                 hit = np.linalg.norm(self.player_bullets[:, :2] - self.snakes[i, :2], axis=1) < (c.snake_radius + c.staff_radius)
                 if hit.any():
-                    self.snakes[i, EHP] -= float(self.player_bullets[hit, BDMG].sum())
+                    sdef = SNAKE_TYPES[int(self.snakes[i, ETYPE]), ST_DEF]
+                    self.snakes[i, EHP] -= self._defended(self.player_bullets[hit, BDMG], sdef)
                     self.player_bullets = self.player_bullets[~hit]
                     if self.snakes[i, EHP] <= 0:
                         reward += c.rew_kill
-        # player bullets vs boss
+        # player bullets vs boss (DEF 19)
         if self.player_bullets.shape[0] and self.invuln_timer == 0 and self.phase > 0:
             hit = np.linalg.norm(self.player_bullets[:, :2] - self.boss_pos, axis=1) < (c.boss_radius + c.staff_radius)
             if hit.any():
-                dmg = float(self.player_bullets[hit, BDMG].sum())
+                dmg = self._defended(self.player_bullets[hit, BDMG], c.boss_defense)
                 self.boss_hp -= dmg
                 reward += (dmg / c.boss_hp_max) * c.rew_boss_dmg
                 self.player_bullets = self.player_bullets[~hit]
-        # enemy bullets vs player
+        # enemy bullets vs player (robe DEF 17)
         if self.enemy_bullets.shape[0]:
             hit = np.linalg.norm(self.enemy_bullets[:, :2] - self.player_pos, axis=1) < (c.player_radius + c.ebullet_radius)
             if hit.any():
-                dmg = float(self.enemy_bullets[hit, BDMG].sum())
+                dmg = self._defended(self.enemy_bullets[hit, BDMG], c.player_defense)
                 self.player_hp -= dmg
                 reward -= (dmg / c.player_hp_max) * c.rew_damage_taken
                 self.enemy_bullets = self.enemy_bullets[~hit]
         return reward
+
+    def _defended(self, raw_dmg, defense: float) -> float:
+        """Real DamageWithDefense clamp summed over hitting bullets: max(raw*floor, raw - defense)."""
+        floor = self.cfg.damage_floor
+        return float(np.maximum(raw_dmg * floor, raw_dmg - defense).sum())
 
     # --- snakes ------------------------------------------------------------
 
@@ -315,20 +377,27 @@ class DungeonEnv(gym.Env):
         alive = self.snakes[:, EHP] > 0
         if not alive.any():
             return
-        idx = np.where(alive)[0]
-        # wander: small random drift, clamped to walkable
-        drift = self._rng.normal(0, c.snake_speed, size=(len(idx), 2)).astype(np.float32)
-        for k, i in enumerate(idx):
-            cand = self.snakes[i, :2] + drift[k]
+        for i in np.where(alive)[0]:
+            st = SNAKE_TYPES[int(self.snakes[i, ETYPE])]
+            to_player = self.player_pos - self.snakes[i, :2]
+            dist = float(np.linalg.norm(to_player))
+            # movement: Follow chase toward the player within acquire range, else Wander drift
+            if st[ST_FOLLOW] > 0 and dist <= st[ST_ACQ]:
+                mv = (to_player / (dist + 1e-6)) * st[ST_FSPD]
+            else:
+                mv = self._rng.normal(0, c.snake_speed, size=2).astype(np.float32)
+            cand = self.snakes[i, :2] + mv
             if self._walkable_at(cand):
                 self.snakes[i, :2] = cand
             self.snakes[i, ETIMER] -= 1
-            d = self.snakes[i, :2] - self.player_pos
-            if self.snakes[i, ETIMER] <= 0 and np.linalg.norm(d) <= c.snake_shoot_range:
-                self.snakes[i, ETIMER] = c.snake_cooldown
-                ang = np.arctan2(self.player_pos[1] - self.snakes[i, 1], self.player_pos[0] - self.snakes[i, 0])
-                vel = np.array([np.cos(ang), np.sin(ang)], np.float32) * c.snake_bullet_speed
-                self.enemy_bullets = self._append(self.enemy_bullets, [[self.snakes[i, 0], self.snakes[i, 1], vel[0], vel[1], c.snake_bullet_life, c.snake_bullet_dmg]])
+            if self.snakes[i, ETIMER] <= 0 and dist <= st[ST_SRANGE]:
+                self.snakes[i, ETIMER] = st[ST_CD]
+                base = np.arctan2(self.player_pos[1] - self.snakes[i, 1], self.player_pos[0] - self.snakes[i, 0])
+                cnt = int(st[ST_CNT])
+                angles = base + (np.arange(cnt) - (cnt - 1) / 2.0) * st[ST_ARC]
+                vel = np.stack([np.cos(angles), np.sin(angles)], 1).astype(np.float32) * st[ST_BVS]
+                rows = [[self.snakes[i, 0], self.snakes[i, 1], vel[j, 0], vel[j, 1], st[ST_BLIFE], st[ST_DMG]] for j in range(cnt)]
+                self.enemy_bullets = self._append(self.enemy_bullets, rows)
 
     # --- Wizard ------------------------------------------------------------
 
@@ -342,10 +411,11 @@ class DungeonEnv(gym.Env):
             rows.append([self.player_pos[0] + off[0], self.player_pos[1] + off[1], vel[0], vel[1], c.staff_life, self._rng.uniform(*c.staff_dmg)])
         self.player_bullets = self._append(self.player_bullets, rows)
 
-    def _cast_spell(self, direction):
+    def _cast_spell(self):
+        # Spell of Galactic Creation: a 360-degree BulletNova of spell_num bullets evenly over a full
+        # circle, emitted from the player position (point-blank). Aim is irrelevant for a full circle.
         c = self.cfg
-        base = np.arctan2(direction[1], direction[0])
-        angles = base + np.linspace(-np.radians(c.spell_arc_deg) / 2, np.radians(c.spell_arc_deg) / 2, c.spell_num)
+        angles = np.arange(c.spell_num) * (2 * np.pi / c.spell_num)
         vel = np.stack([np.cos(angles), np.sin(angles)], 1).astype(np.float32) * c.spell_speed
         dmg = self._rng.uniform(*c.spell_dmg, size=(c.spell_num, 1)).astype(np.float32)
         pos = np.tile(self.player_pos, (c.spell_num, 1)).astype(np.float32)
@@ -364,23 +434,26 @@ class DungeonEnv(gym.Env):
                 self.phase, self.invuln_timer = 2, c.invuln_ticks
             elif self.phase == 2 and frac <= 0.33:
                 self.phase, self.invuln_timer = 3, c.invuln_ticks
-        self.boss_pos = self.boss_pos + self._unit(self.player_pos - self.boss_pos) * c.boss_speed
+        # movement: Wander(0.3) random drift in P1, stationary in P2/P3
+        if self.phase == 1 and c.boss_wander_speed > 0:
+            cand = self.boss_pos + self._rng.normal(0, c.boss_wander_speed, size=2)
+            if self._walkable_at(cand):
+                self.boss_pos = cand
         if self.invuln_timer > 0:
             return
         if self.phase == 1:
-            if c.boss_shoots:
-                self._aimed_shoot("p1", 3, 15, 15)
+            if c.boss_shoots:  # 3-blade 15deg shot, point-blank acquire only (radius 2)
+                self._aimed_shoot("p1", 3, 15, c.blade_cd, c.blade_radius_p1)
             self._spawn_minions()
-            self._throw_grenade("g1", c.grenade_cd_p1, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
+            self._throw_grenade_targeted("g1", c.grenade_cd_p1, c.grenade_range_confuse, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
         elif self.phase == 2:
-            if c.boss_shoots:
-                self._rotating_shoot("p2", 4, 15, 3)
-            self._throw_grenade("g2", c.grenade_cd_p2, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
+            # P2's 4-shot references a nonexistent projectile (boss has only blades 0/1) -> fires
+            # nothing; the only threat is the Confused grenade.
+            self._throw_grenade_targeted("g2", c.grenade_cd_p2, c.grenade_range_confuse, c.grenade_radius_confuse, c.grenade_dmg_confuse, 0)
         elif self.phase == 3:
-            if c.boss_shoots:
-                self._aimed_shoot("p3a", 3, 15, 15)
-                self._rotating_shoot("p3b", 4, 15, 5)
-            self._throw_grenade("g3", c.grenade_cd_p1, c.grenade_radius_petrify, c.grenade_dmg_petrify, 1)
+            if c.boss_shoots:  # aimed 3-blade shot at range (the P3 4-shot is the same phantom projectile)
+                self._aimed_shoot("p3a", 3, 15, c.blade_cd, c.blade_radius_p3)
+            self._throw_petrify_fan()
 
     def _spawn_minions(self):
         c = self.cfg
@@ -394,21 +467,48 @@ class DungeonEnv(gym.Env):
             return
         ang = self._rng.uniform(0, 2 * np.pi, size=c.minion_max)
         pos = self.boss_pos + np.stack([np.cos(ang), np.sin(ang)], 1) * 3.0
-        new = np.zeros((c.minion_max, 4), np.float32)
+        new = np.zeros((c.minion_max, 5), np.float32)
         new[:, :2] = pos
-        new[:, EHP] = c.minion_hp
+        new[:, EHP] = c.minion_hp  # weak swarm: type 0 (the array default)
         self.snakes = np.concatenate([self.snakes, new], 0)
 
-    def _throw_grenade(self, key, cooldown, radius, dmg, status):
+    def _throw_grenade_targeted(self, key, cooldown, throw_range, radius, dmg, status):
+        """Confused grenade: thrown at the player once the cooldown elapses AND the player is within
+        the boss's acquire range (matches the real Grenade behavior gating on GetNearestEntity)."""
         if not self.cfg.enable_grenades:
             return
         if self.shoot_timers.get(key, 0) > 0:
             self.shoot_timers[key] -= 1
             return
+        if np.linalg.norm(self.player_pos - self.boss_pos) > throw_range:
+            return
         self.shoot_timers[key] = cooldown
-        # telegraphed at the player's current location
         g = [[self.player_pos[0], self.player_pos[1], self.cfg.grenade_fuse, radius, dmg, status]]
         self.grenades = np.concatenate([self.grenades, np.asarray(g, np.float32)], 0) if self.grenades.shape[0] else np.asarray(g, np.float32)
+
+    def _throw_petrify_fan(self):
+        # P3: 8 fixed-angle Petrify grenades thrown to a fixed distance from the boss -- cardinals
+        # (cd 1.5s) and diagonals (cd 3.0s), each a separate cooldown group.
+        c = self.cfg
+        self._throw_fixed_grenades("g3card", c.grenade_cd_p1, (0.0, 90.0, 180.0, 270.0))
+        self._throw_fixed_grenades("g3diag", c.grenade_cd_p3_diag, (45.0, 135.0, 225.0, 315.0))
+
+    def _throw_fixed_grenades(self, key, cooldown, angles_deg):
+        c = self.cfg
+        if not c.enable_grenades:
+            return
+        if self.shoot_timers.get(key, 0) > 0:
+            self.shoot_timers[key] -= 1
+            return
+        self.shoot_timers[key] = cooldown
+        rows = []
+        for ad in angles_deg:
+            a = np.radians(ad)
+            tx = self.boss_pos[0] + c.grenade_petrify_dist * np.cos(a)
+            ty = self.boss_pos[1] + c.grenade_petrify_dist * np.sin(a)
+            rows.append([tx, ty, c.grenade_fuse, c.grenade_radius_petrify, c.grenade_dmg_petrify, 1])
+        new = np.asarray(rows, np.float32)
+        self.grenades = np.concatenate([self.grenades, new], 0) if self.grenades.shape[0] else new
 
     def _grenades_tick(self) -> float:
         if self.grenades.shape[0] == 0:
@@ -419,8 +519,9 @@ class DungeonEnv(gym.Env):
         detonated = self.grenades[:, GFUSE] <= 0
         for g in self.grenades[detonated]:
             if np.linalg.norm(self.player_pos - g[:2]) <= g[GRAD]:
-                self.player_hp -= g[GDMG]
-                reward -= (g[GDMG] / c.player_hp_max) * c.rew_damage_taken
+                dmg = self._defended(np.asarray([g[GDMG]], np.float32), c.player_defense)
+                self.player_hp -= dmg
+                reward -= (dmg / c.player_hp_max) * c.rew_damage_taken
                 if int(g[GSTATUS]) == 0:
                     self.confused_timer = c.confused_ticks
                 else:
@@ -428,21 +529,17 @@ class DungeonEnv(gym.Env):
         self.grenades = self.grenades[~detonated]
         return reward
 
-    def _aimed_shoot(self, key, count, spread_deg, cooldown):
+    def _aimed_shoot(self, key, count, spread_deg, cooldown, acquire_radius):
+        """Blade shot: once the cooldown elapses, fire only if the player is within acquire_radius
+        (P1 is point-blank radius 2; P3 aims at range). The cooldown holds at 0 until in range."""
         if self.shoot_timers.get(key, 0) > 0:
             self.shoot_timers[key] -= 1
+            return
+        if np.linalg.norm(self.player_pos - self.boss_pos) > acquire_radius:
             return
         self.shoot_timers[key] = cooldown
         base = np.arctan2(*(self.player_pos - self.boss_pos)[::-1])
         self._spawn_burst(base, count, np.radians(spread_deg))
-
-    def _rotating_shoot(self, key, count, step_deg, cooldown):
-        if self.shoot_timers.get(key, 0) > 0:
-            self.shoot_timers[key] -= 1
-            return
-        self.shoot_timers[key] = cooldown
-        self.rotate_angle += np.radians(step_deg)
-        self._spawn_burst(self.rotate_angle, count, 2 * np.pi / count)
 
     def _spawn_burst(self, base_angle, count, gap):
         c = self.cfg
@@ -454,10 +551,6 @@ class DungeonEnv(gym.Env):
         self.enemy_bullets = self._append(self.enemy_bullets, np.concatenate([pos, vel, life, dmg], 1))
 
     # --- helpers -----------------------------------------------------------
-
-    @staticmethod
-    def _unit(v):
-        return v / (np.linalg.norm(v) + 1e-6)
 
     def _walkable_at(self, pos) -> bool:
         x, y = int(pos[0]), int(pos[1])

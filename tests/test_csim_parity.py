@@ -20,7 +20,10 @@ from rotmg_rl.csim.dungeon import OBS_SIZE, config_to_kwargs  # noqa: E402
 
 GRID_FLAT = NUM_CH * GRID * GRID
 MM_FLAT = NUM_MM_CH * MM * MM
-DET = dict(n_snakes=0, enable_minions=False, staff_dmg=(65.0, 65.0), spell_dmg=(157.0, 157.0))
+# Deterministic (RNG-free) config: no snakes/minions, a stationary boss (boss_wander_speed=0), and
+# point-mass damage ranges. The boss's Wander, snake spawn/drift and minion placement are the only
+# stochastic parts (matched in spirit, not bit-for-bit), so they are disabled here.
+DET = dict(n_snakes=0, enable_minions=False, boss_wander_speed=0.0, staff_dmg=(65.0, 65.0), spell_dmg=(157.0, 157.0))
 
 
 class CEnv:
@@ -153,20 +156,22 @@ def test_parity_entrance_wander():
 
 
 def test_parity_boss_fight():
-    """Inject the player next to the boss: boss movement, aimed/rotating bullets, phases, grenades."""
-    # huge player HP so the player survives the window and we test 150 steps of boss dynamics
+    """Inject the player point-blank on the boss: P1 point-blank blades, the Confused grenade, phase
+    transitions + invuln, the 360 spell nova, and the staff -- all RNG-free, so the C env matches the
+    numpy oracle bit-faithfully. The player is pinned (move=0) right on the boss so the blades acquire
+    (radius 2) and damage accumulates reliably across phases."""
     cfg = DungeonConfig(boss_hp_max=20000.0, player_hp_max=1e9, invuln_ticks=15, **DET)
     bx, by = 16, 73  # boss_xy
-    inject = {"player_x": bx + 3.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
+    inject = {"player_x": bx + 1.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}  # within blade radius 2
     actions = _fixed_actions(1, 150)
-    # always aim toward the boss (-x dir from player) and shoot+cast to engage
-    actions[:, 1] = 16  # aim ~ pointing -x (180 deg)
+    actions[:, 0] = 0  # pinned next to the boss (the boss is stationary in DET)
+    actions[:, 1] = 16  # aim ~ pointing -x (180 deg) for the staff
     actions[:, 2] = 1
     actions[:, 3] = 1
     compared, oracle, c = _run(cfg, seed=3, actions=actions, inject=inject, steps=150)
     assert compared == 150  # survives the window: 150 matched steps
     assert oracle.phase >= 2  # at least one phase transition (+ invuln) was exercised
-    assert oracle.confused_timer > 0 or oracle.petrify_timer > 0 or oracle.steps > 0  # status exercised
+    assert oracle.confused_timer > 0 or oracle.player_hp < 1e9  # the Confused grenade landed point-blank
 
 
 def test_minimap_fog_and_boss_reveal():
@@ -204,8 +209,9 @@ def test_parity_boss_to_death():
     """Same fight with low HP: parity holds through the boss death + clear reward."""
     cfg = DungeonConfig(boss_hp_max=2000.0, player_hp_max=1e9, invuln_ticks=15, **DET)
     bx, by = 16, 73
-    inject = {"player_x": bx + 3.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
+    inject = {"player_x": bx + 1.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
     actions = _fixed_actions(1, 200)
+    actions[:, 0] = 0  # pinned on the stationary boss so the staff/nova reliably kill it
     actions[:, 1] = 16
     actions[:, 2] = 1
     actions[:, 3] = 1
@@ -219,7 +225,7 @@ def test_parity_info_passive_boss_in_room():
     player moves around the boss but does not shoot, so the boss stays full -> boss_hp_frac is 1.0
     (NOT 0) and cleared is 0 every step, exactly matching the oracle. (The damaging boss_hp_frac<1.0
     case is covered by test_parity_boss_fight, whose _run also asserts info parity per step.)"""
-    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False)
+    cfg = DungeonConfig(boss_hp_max=300.0, player_hp_max=1e9, n_snakes=0, enable_grenades=False, enable_minions=False, boss_shoots=False, boss_wander_speed=0.0)
     bx, by = 16, 73
     inject = {"player_x": bx + 5.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}
     actions = _fixed_actions(2, 120)

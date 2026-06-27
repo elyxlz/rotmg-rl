@@ -1,0 +1,470 @@
+diff -ruN a/lib/crypto/rc4.js b/lib/crypto/rc4.js
+--- a/lib/crypto/rc4.js	2026-06-27 17:20:10.807858934 +0100
++++ b/lib/crypto/rc4.js	2026-06-27 17:20:10.814006201 +0100
+@@ -29,6 +29,7 @@
+      * @param data A stream of data to cipher using the Keystream.
+      */
+     cipher(data) {
++        /*RC4-DISABLED*/ return;
+         for (let n = 0; n < data.length; n++) {
+             this.i = (this.i + 1) % 256;
+             this.j = (this.j + this.state[this.i]) % 256;
+diff -ruN a/lib/data/ground-tile-data.js b/lib/data/ground-tile-data.js
+--- a/lib/data/ground-tile-data.js	2026-06-27 17:20:10.807342641 +0100
++++ b/lib/data/ground-tile-data.js	2026-06-27 17:20:10.809376730 +0100
+@@ -7,9 +7,10 @@
+         this.type = 0;
+     }
+     read(reader) {
++        /*betterSkillys: tile type int32*/
+         this.x = reader.readShort();
+         this.y = reader.readShort();
+-        this.type = reader.readUnsignedShort();
++        this.type = reader.readInt32();
+     }
+     write(writer) {
+         writer.writeShort(this.x);
+diff -ruN a/lib/data/object-data.js b/lib/data/object-data.js
+--- a/lib/data/object-data.js	2026-06-27 17:20:10.807415433 +0100
++++ b/lib/data/object-data.js	2026-06-27 17:20:10.809461855 +0100
+@@ -7,7 +7,8 @@
+         this.status = new object_status_data_1.ObjectStatusData();
+     }
+     read(reader) {
+-        this.objectType = reader.readUnsignedShort();
++        /*betterSkillys: objectType int32*/
++        this.objectType = reader.readInt32();
+         this.status.read(reader);
+     }
+     write(writer) {
+diff -ruN a/lib/data/stat-data.js b/lib/data/stat-data.js
+--- a/lib/data/stat-data.js	2026-06-27 17:20:10.807520141 +0100
++++ b/lib/data/stat-data.js	2026-06-27 17:20:10.809616730 +0100
+@@ -1,11 +1,10 @@
+ "use strict";
+ Object.defineProperty(exports, "__esModule", { value: true });
+-const stat_type_1 = require("../models/stat-type");
+ class StatData {
+     constructor() {
+         this.statType = 0;
+         this.statValue = 0;
+-        this.stringStatValue = '';
++        this.stringStatValue = "";
+     }
+     read(reader) {
+         this.statType = reader.readUnsignedByte();
+@@ -26,16 +25,8 @@
+         }
+     }
+     isStringStat() {
+-        switch (this.statType) {
+-            case stat_type_1.StatType.NAME_STAT:
+-            case stat_type_1.StatType.GUILD_NAME_STAT:
+-            case stat_type_1.StatType.PET_NAME_STAT:
+-            case stat_type_1.StatType.ACCOUNT_ID_STAT:
+-            case stat_type_1.StatType.OWNER_ACCOUNT_ID_STAT:
+-                return true;
+-            default:
+-                return false;
+-        }
++        // betterSkillys ObjectStats.Write only sends Name(31) and GuildName(62) as strings
++        return this.statType === 31 || this.statType === 62;
+     }
+ }
+ exports.StatData = StatData;
+diff -ruN a/lib/packets/incoming/enemy-shoot-packet.js b/lib/packets/incoming/enemy-shoot-packet.js
+--- a/lib/packets/incoming/enemy-shoot-packet.js	2026-06-27 17:20:10.804335257 +0100
++++ b/lib/packets/incoming/enemy-shoot-packet.js	2026-06-27 17:20:10.811969820 +0100
+@@ -2,11 +2,7 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ const world_pos_data_1 = require("../../data/world-pos-data");
+ const packet_type_1 = require("../../packet-type");
+-/**
+- * Received when a visible enemy shoots a projectile.
+- */
+ class EnemyShootPacket {
+-    //#endregion
+     constructor() {
+         this.type = packet_type_1.PacketType.ENEMYSHOOT;
+         this.bulletId = 0;
+@@ -15,17 +11,18 @@
+         this.startingPos = new world_pos_data_1.WorldPosData();
+         this.angle = 0;
+         this.damage = 0;
+-        this.numShots = 0;
++        this.numShots = 1;
+         this.angleInc = 0;
+     }
+     read(reader) {
+-        this.bulletId = reader.readUnsignedByte();
++        // betterSkillys EnemyShootMessage: bulletId(int32), ownerId(int32), bulletType(byte), startPos, angle(float), damage(int32), numShots(byte), angleInc(float)
++        this.bulletId = reader.readInt32();
+         this.ownerId = reader.readInt32();
+         this.bulletType = reader.readUnsignedByte();
+         this.startingPos.read(reader);
+         this.angle = reader.readFloat();
+-        this.damage = reader.readShort();
+-        if (reader.index < reader.length) {
++        this.damage = reader.readInt32();
++        if (reader.remaining > 0) {
+             this.numShots = reader.readUnsignedByte();
+             this.angleInc = reader.readFloat();
+         }
+@@ -35,16 +32,14 @@
+         }
+     }
+     write(writer) {
+-        writer.writeUnsignedByte(this.bulletId);
++        writer.writeInt32(this.bulletId);
+         writer.writeInt32(this.ownerId);
+-        writer.writeUnsignedByte(this.bulletType);
++        writer.writeByte(this.bulletType);
+         this.startingPos.write(writer);
+         writer.writeFloat(this.angle);
+-        writer.writeShort(this.damage);
+-        if (this.numShots !== 1) {
+-            writer.writeUnsignedByte(this.numShots);
+-            writer.writeFloat(this.angleInc);
+-        }
++        writer.writeInt32(this.damage);
++        writer.writeByte(this.numShots);
++        writer.writeFloat(this.angleInc);
+     }
+ }
+ exports.EnemyShootPacket = EnemyShootPacket;
+diff -ruN a/lib/packets/incoming/failure-packet.js b/lib/packets/incoming/failure-packet.js
+--- a/lib/packets/incoming/failure-packet.js	2026-06-27 17:20:10.804367091 +0100
++++ b/lib/packets/incoming/failure-packet.js	2026-06-27 17:20:10.813010823 +0100
+@@ -1,23 +1,19 @@
+ "use strict";
+ Object.defineProperty(exports, "__esModule", { value: true });
+ const packet_type_1 = require("../../packet-type");
+-/**
+- * Received when an error has occurred.
+- */
+ class FailurePacket {
+-    //#endregion
+     constructor() {
+         this.type = packet_type_1.PacketType.FAILURE;
+         this.errorId = 0;
+-        this.errorDescription = '';
+-        this.errorPlace = '';
+-        this.errorConnectionId = '';
++        this.errorDescription = "";
++        this.errorPlace = "";
++        this.errorConnectionId = "";
+     }
+     read(reader) {
+         this.errorId = reader.readInt32();
+         this.errorDescription = reader.readString();
+-        this.errorPlace = reader.readString();
+-        this.errorConnectionId = reader.readString();
++        this.errorPlace = reader.remaining > 0 ? reader.readString() : "";
++        this.errorConnectionId = reader.remaining > 0 ? reader.readString() : "";
+     }
+     write(writer) {
+         writer.writeInt32(this.errorId);
+diff -ruN a/lib/packets/incoming/mapinfo-packet.js b/lib/packets/incoming/mapinfo-packet.js
+--- a/lib/packets/incoming/mapinfo-packet.js	2026-06-27 17:20:10.804666050 +0100
++++ b/lib/packets/incoming/mapinfo-packet.js	2026-06-27 17:20:10.813271199 +0100
+@@ -1,74 +1,61 @@
+ "use strict";
+ Object.defineProperty(exports, "__esModule", { value: true });
+ const packet_type_1 = require("../../packet-type");
+-/**
+- * Received in response to the `HelloPacket`.
+- */
+ class MapInfoPacket {
+-    //#endregion
+     constructor() {
+         this.type = packet_type_1.PacketType.MAPINFO;
+         this.width = 0;
+         this.height = 0;
+-        this.name = '';
+-        this.displayName = '';
+-        this.realmName = '';
++        this.name = "";
++        this.displayName = "";
++        this.realmName = "";
+         this.difficulty = 0;
+         this.fp = 0;
+         this.background = 0;
+         this.allowPlayerTeleport = false;
+         this.showDisplays = false;
+         this.maxPlayers = 0;
+-        this.connectionGuid = '';
++        this.connectionGuid = "";
+         this.clientXML = [];
+         this.extraXML = [];
+         this.gameOpenedTime = 0;
++        this.music = "";
++        this.disableShooting = false;
++        this.disableAbilities = false;
+     }
+     read(reader) {
+-        this.width = reader.readInt32();
+-        this.height = reader.readInt32();
++        this.width = reader.readShort();
++        this.height = reader.readShort();
+         this.name = reader.readString();
+         this.displayName = reader.readString();
+-        this.realmName = reader.readString();
+         this.fp = reader.readUInt32();
+-        this.background = reader.readInt32();
+-        this.difficulty = reader.readInt32();
++        this.background = reader.readUnsignedByte();
++        this.difficulty = reader.readUnsignedByte();
+         this.allowPlayerTeleport = reader.readBoolean();
+         this.showDisplays = reader.readBoolean();
+-        this.maxPlayers = reader.readShort();
+-        this.connectionGuid = reader.readString();
+-        this.gameOpenedTime = reader.readUInt32();
+-        this.clientXML = new Array(reader.readShort());
+-        for (let i = 0; i < this.clientXML.length; i++) {
+-            this.clientXML[i] = reader.readStringUTF32();
+-        }
+-        this.extraXML = new Array(reader.readShort());
+-        for (let i = 0; i < this.extraXML.length; i++) {
+-            this.extraXML[i] = reader.readStringUTF32();
+-        }
++        this.music = reader.readString();
++        this.disableShooting = reader.readBoolean();
++        this.disableAbilities = reader.readBoolean();
++        this.realmName = "";
++        this.maxPlayers = 0;
++        this.connectionGuid = "";
++        this.gameOpenedTime = 0;
++        this.clientXML = [];
++        this.extraXML = [];
+     }
+     write(writer) {
+-        writer.writeInt32(this.width);
+-        writer.writeInt32(this.height);
++        writer.writeShort(this.width);
++        writer.writeShort(this.height);
+         writer.writeString(this.name);
+         writer.writeString(this.displayName);
+-        writer.writeString(this.realmName);
+-        writer.writeInt32(this.fp);
+-        writer.writeInt32(this.background);
+-        writer.writeInt32(this.difficulty);
++        writer.writeUInt32(this.fp);
++        writer.writeByte(this.background);
++        writer.writeByte(this.difficulty);
+         writer.writeBoolean(this.allowPlayerTeleport);
+         writer.writeBoolean(this.showDisplays);
+-        writer.writeShort(this.maxPlayers);
+-        writer.writeString(this.connectionGuid);
+-        writer.writeShort(this.clientXML.length);
+-        writer.writeUInt32(this.gameOpenedTime);
+-        for (const xml of this.clientXML) {
+-            writer.writeStringUTF32(xml);
+-        }
+-        writer.writeShort(this.extraXML.length);
+-        for (const xml of this.extraXML) {
+-            writer.writeStringUTF32(xml);
+-        }
++        writer.writeString(this.music);
++        writer.writeBoolean(this.disableShooting);
++        writer.writeBoolean(this.disableAbilities);
+     }
+ }
+ exports.MapInfoPacket = MapInfoPacket;
+diff -ruN a/lib/packets/incoming/reconnect-packet.js b/lib/packets/incoming/reconnect-packet.js
+--- a/lib/packets/incoming/reconnect-packet.js	2026-06-27 17:20:10.805092926 +0100
++++ b/lib/packets/incoming/reconnect-packet.js	2026-06-27 17:20:10.813385408 +0100
+@@ -1,40 +1,35 @@
+ "use strict";
+ Object.defineProperty(exports, "__esModule", { value: true });
+ const packet_type_1 = require("../../packet-type");
+-/**
+- * Received to instruct the client to connect to a new host.
+- */
+ class ReconnectPacket {
+-    //#endregion
+     constructor() {
+         this.type = packet_type_1.PacketType.RECONNECT;
+-        this.name = '';
+-        this.host = '';
+-        this.stats = '';
++        this.name = "";
++        this.host = "";
++        this.stats = "";
+         this.port = 0;
+         this.gameId = 0;
+         this.keyTime = 0;
+-        this.key = [];
+         this.isFromArena = false;
++        this.key = [];
+     }
+     read(reader) {
++        // betterSkillys Reconnect.cs: Name(UTF16), Host(UTF16), Port(int32), GameId(int32), KeyTime(int32), Key(int16 len + bytes)
+         this.name = reader.readString();
+         this.host = reader.readString();
+-        this.stats = reader.readString();
+         this.port = reader.readInt32();
+         this.gameId = reader.readInt32();
+         this.keyTime = reader.readInt32();
+-        this.isFromArena = reader.readBoolean();
+         this.key = reader.readByteArray();
++        this.stats = "";
++        this.isFromArena = false;
+     }
+     write(writer) {
+         writer.writeString(this.name);
+         writer.writeString(this.host);
+-        writer.writeString(this.stats);
+         writer.writeInt32(this.port);
+         writer.writeInt32(this.gameId);
+         writer.writeInt32(this.keyTime);
+-        writer.writeBoolean(this.isFromArena);
+         writer.writeByteArray(this.key);
+     }
+ }
+diff -ruN a/lib/packets/outgoing/enemy-hit-packet.js b/lib/packets/outgoing/enemy-hit-packet.js
+--- a/lib/packets/outgoing/enemy-hit-packet.js	2026-06-27 17:20:10.800857289 +0100
++++ b/lib/packets/outgoing/enemy-hit-packet.js	2026-06-27 17:20:10.810588316 +0100
+@@ -15,13 +15,13 @@
+     }
+     write(writer) {
+         writer.writeInt32(this.time);
+-        writer.writeUnsignedByte(this.bulletId);
++        writer.writeInt32(this.bulletId);
+         writer.writeInt32(this.targetId);
+         writer.writeBoolean(this.kill);
+     }
+     read(reader) {
+         this.time = reader.readInt32();
+-        this.bulletId = reader.readUnsignedByte();
++        this.bulletId = reader.readInt32();
+         this.targetId = reader.readInt32();
+         this.kill = reader.readBoolean();
+     }
+diff -ruN a/lib/packets/outgoing/hello-packet.js b/lib/packets/outgoing/hello-packet.js
+--- a/lib/packets/outgoing/hello-packet.js	2026-06-27 17:20:10.801076790 +0100
++++ b/lib/packets/outgoing/hello-packet.js	2026-06-27 17:20:10.811531194 +0100
+@@ -29,24 +29,14 @@
+         this.previousConnectionGuid = '';
+     }
+     write(writer) {
++        /*betterSkillys-layout*/
+         writer.writeString(this.buildVersion);
+         writer.writeInt32(this.gameId);
+         writer.writeString(this.guid);
+-        writer.writeInt32(this.random1);
+         writer.writeString(this.password);
+-        writer.writeInt32(this.random2);
+-        writer.writeString(this.secret);
+         writer.writeInt32(this.keyTime);
+         writer.writeByteArray(this.key);
+         writer.writeStringUTF32(this.mapJSON);
+-        writer.writeString(this.entryTag);
+-        writer.writeString(this.gameNet);
+-        writer.writeString(this.gameNetUserId);
+-        writer.writeString(this.playPlatform);
+-        writer.writeString(this.platformToken);
+-        writer.writeString(this.userToken);
+-        writer.writeString(this.trailer);
+-        writer.writeString(this.previousConnectionGuid);
+     }
+     read(reader) {
+         this.buildVersion = reader.readString();
+diff -ruN a/lib/packets/outgoing/other-hit-packet.js b/lib/packets/outgoing/other-hit-packet.js
+--- a/lib/packets/outgoing/other-hit-packet.js	2026-06-27 17:20:10.801336582 +0100
++++ b/lib/packets/outgoing/other-hit-packet.js	2026-06-27 17:20:10.810623525 +0100
+@@ -15,13 +15,13 @@
+     }
+     write(writer) {
+         writer.writeInt32(this.time);
+-        writer.writeUnsignedByte(this.bulletId);
++        writer.writeInt32(this.bulletId);
+         writer.writeInt32(this.objectId);
+         writer.writeInt32(this.targetId);
+     }
+     read(reader) {
+         this.time = reader.readInt32();
+-        this.bulletId = reader.readUnsignedByte();
++        this.bulletId = reader.readInt32();
+         this.objectId = reader.readInt32();
+         this.targetId = reader.readInt32();
+     }
+diff -ruN a/lib/packets/outgoing/player-hit-packet.js b/lib/packets/outgoing/player-hit-packet.js
+--- a/lib/packets/outgoing/player-hit-packet.js	2026-06-27 17:20:10.801367832 +0100
++++ b/lib/packets/outgoing/player-hit-packet.js	2026-06-27 17:20:10.811566028 +0100
+@@ -12,11 +12,11 @@
+         this.objectId = 0;
+     }
+     write(writer) {
+-        writer.writeUnsignedByte(this.bulletId);
++        writer.writeInt32(this.bulletId);
+         writer.writeInt32(this.objectId);
+     }
+     read(reader) {
+-        this.bulletId = reader.readUnsignedByte();
++        this.bulletId = reader.readInt32();
+         this.objectId = reader.readInt32();
+     }
+ }
+diff -ruN a/lib/packets/outgoing/player-shoot-packet.js b/lib/packets/outgoing/player-shoot-packet.js
+--- a/lib/packets/outgoing/player-shoot-packet.js	2026-06-27 17:20:10.801399499 +0100
++++ b/lib/packets/outgoing/player-shoot-packet.js	2026-06-27 17:20:10.810304732 +0100
+@@ -2,11 +2,7 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ const world_pos_data_1 = require("../../data/world-pos-data");
+ const packet_type_1 = require("../../packet-type");
+-/**
+- * Sent when the player shoots a projectile.
+- */
+ class PlayerShootPacket {
+-    //#endregion
+     constructor() {
+         this.type = packet_type_1.PacketType.PLAYERSHOOT;
+         this.time = 0;
+@@ -18,24 +14,19 @@
+         this.lifeMult = 0;
+     }
+     write(writer) {
++        // betterSkillys PlayerShootHandler: time, bulletId(int32), containerType(int32), startPos, angle
+         writer.writeInt32(this.time);
+-        writer.writeByte(this.bulletId);
+-        writer.writeShort(this.containerType);
++        writer.writeInt32(this.bulletId);
++        writer.writeInt32(this.containerType);
+         this.startingPos.write(writer);
+         writer.writeFloat(this.angle);
+-        // NB(thomas-crane): the client uses AS3's `int` function which is
+-        // equivalent to `Math.floor` in JS.
+-        writer.writeShort(Math.floor(this.speedMult * 1000));
+-        writer.writeShort(Math.floor(this.lifeMult * 1000));
+     }
+     read(reader) {
+         this.time = reader.readInt32();
+-        this.bulletId = reader.readByte();
+-        this.containerType = reader.readShort();
++        this.bulletId = reader.readInt32();
++        this.containerType = reader.readInt32();
+         this.startingPos.read(reader);
+         this.angle = reader.readFloat();
+-        this.speedMult = Math.floor(reader.readShort() / 1000);
+-        this.lifeMult = Math.floor(reader.readShort() / 1000);
+     }
+ }
+ exports.PlayerShootPacket = PlayerShootPacket;
+diff -ruN a/lib/packets/outgoing/square-hit-packet.js b/lib/packets/outgoing/square-hit-packet.js
+--- a/lib/packets/outgoing/square-hit-packet.js	2026-06-27 17:20:10.801714792 +0100
++++ b/lib/packets/outgoing/square-hit-packet.js	2026-06-27 17:20:10.810377858 +0100
+@@ -14,12 +14,12 @@
+     }
+     write(writer) {
+         writer.writeInt32(this.time);
+-        writer.writeByte(this.bulletId);
++        writer.writeInt32(this.bulletId);
+         writer.writeInt32(this.objectId);
+     }
+     read(reader) {
+         this.time = reader.readInt32();
+-        this.bulletId = reader.readByte();
++        this.bulletId = reader.readInt32();
+         this.objectId = reader.readInt32();
+     }
+ }

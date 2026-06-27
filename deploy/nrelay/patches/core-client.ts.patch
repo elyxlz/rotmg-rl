@@ -1,0 +1,29 @@
+diff --git a/src/core/client.ts b/src/core/client.ts
+index 9cdcb97..30af922 100644
+--- a/src/core/client.ts
++++ b/src/core/client.ts
+@@ -1164,7 +1164,7 @@ export class Client {
+ 
+   private getBulletId(): number {
+     const bId = this.currentBulletId;
+-    this.currentBulletId = (this.currentBulletId + 1) % 128;
++    this.currentBulletId = (this.currentBulletId + 1) % 2000000000;
+     return bId;
+   }
+ 
+@@ -1276,12 +1276,13 @@ export class Client {
+     if (hasEffect(this.playerData.condition, ConditionEffect.PARALYZED | ConditionEffect.PAUSED)) {
+       return;
+     }
++    const tileDefs = this.runtime.resources.tiles;
+     const xTile = this.mapTiles[Math.floor(this.worldPos.y) * this.mapInfo.width + Math.floor(x)];
+-    if (xTile && !xTile.occupied) {
++    if (xTile && !xTile.occupied && !(tileDefs[xTile.type] && tileDefs[xTile.type].noWalk)) {
+       this.worldPos.x = x;
+     }
+     const yTile = this.mapTiles[Math.floor(y) * this.mapInfo.width + Math.floor(this.worldPos.x)];
+-    if (yTile && !yTile.occupied) {
++    if (yTile && !yTile.occupied && !(tileDefs[yTile.type] && tileDefs[yTile.type].noWalk)) {
+       this.worldPos.y = y;
+     }
+   }

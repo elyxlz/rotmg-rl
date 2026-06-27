@@ -1,0 +1,8 @@
+[
+  {
+    "alias": "Wizardbot",
+    "guid": "YOUR_BOT_EMAIL@example.com",
+    "password": "YOUR_BOT_PASSWORD",
+    "serverPref": "Netherlands"
+  }
+]

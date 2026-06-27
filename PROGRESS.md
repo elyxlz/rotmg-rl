@@ -3,6 +3,32 @@
 Autonomous build log. Newest entry on top. See `GOAL.md` for the loop and
 `docs/specs/2026-06-25-rotmg-rl-design.md` for the design.
 
+## Consolidated onto ONE 4.0 stack: `train.py` single command + archived 3.0 (2026-06-27)
+
+- **One command**: `python3 train.py --wandb` cold-starts and runs the whole proven curriculum
+  (passive -> shooting -> combat -> combine1/2 spawn ramp -> gamma-0.97 finish; ~460M steps, ~2.5h on
+  one 3090) as **one process + one continuous wandb run** (phase index logged as the `phase` metric,
+  not 6 runs). Drives the 4.0 PuffeRL trainer directly: fresh trainer per phase (so LR anneals per
+  phase) but the **policy is reused in memory** (warm-start); env config + gamma/gae are the per-phase
+  levers (mirrors `scripts/archive/train_curriculum.py`). Self-bootstraps `.venv4` via
+  `setup_box_puffer4.sh`. Final -> `checkpoints/curriculum4/finish.pt` (4.0 torch state_dict; eval with
+  `eval_dungeon4.py`).
+- **Verified** (box, GPU 1, `--smoke 200000`): cold-start -> all 6 phases with in-memory warm-start
+  -> save, ~52K SPS, metrics flow. **NOT yet validated end-to-end at full length** — the ~3h run is
+  ON HOLD pending the sim-fidelity decision (the deploy revealed a real sim-to-real gap: real Wizard
+  spell is a weak 360 nova not our nuke; real Snake Pit is a 120x120 maze w/ boss 80-100 tiles in;
+  real tier-0 gear is short-range). If the sim is overhauled, env+curriculum change, so validating the
+  CURRENT curriculum may be moot. Run the full validation only once the sim is final.
+- **Archived** the 3.0 + redundant tooling to `scripts/archive/` (1083 LOC out of the active surface):
+  train_dungeon.py, train_curriculum.py, curriculum_dungeon.py, box.sh, follow_along.py,
+  eval_dungeon.py, sweep_dungeon.py, record_dungeon.py, bench_csim.py, wandb_metrics.py, setup_box.sh,
+  check_encoder_parity.py. Active 4.0 surface: `train.py` + `scripts/{train_dungeon4,eval_dungeon4,
+  follow_along4}.py` + `box4.sh` + `setup_box_puffer4.sh` (~695 LOC).
+- **DEPLOY UNTOUCHED**: the live deploy still loads `checkpoints/full_dungeon_95.pt` (a 3.0
+  `CDungeonPolicy`) via `src/rotmg_rl/csim/policy.py` + `deploy/v3/` — all KEPT. Switching the deploy
+  to a 4.0 policy is a deliberate LATER step (retrain + revalidate on 4.0 first); the 3.0 policy stays
+  the deployed one until then.
+
 ## FULL DUNGEON 95% — deliverable (A) MET, confirmed (2026-06-27): entrance + all threats + 7500 boss
 
 - **`full_dungeon_95.pt` (= `full_dungeon_best.pt`) clears the FULL deliverable config 95%** (57/60

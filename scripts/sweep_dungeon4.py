@@ -155,14 +155,27 @@ def main() -> None:
     if a.launch_best and best["hp"]:
         b = best["hp"]
         print(f"\n== launching the FULL 7500-HP run with the winner ({a.full_steps / 1e6:.0f}M steps) ==", flush=True)
+        import time as _time
+
+        use_wandb = True
+        try:
+            import wandb
+
+            wandb.init(project="rotmg-dungeon", name=f"continuous4-best-{int(_time.time())}", group="continuous4", config=b)
+        except Exception as exc:  # a wandb hiccup must not waste the swept config -> train anyway
+            print(f"[wandb] disabled ({exc}); training without logging", flush=True)
+            use_wandb = False
         full = T.build_args(a.num_envs, b["hidden_size"], b["learning_rate"], b["gamma"], b["gae_lambda"], b["ent_coef"], a.full_steps, T.BOSS_HP, b["rew_boss_dmg"])
         finish = REPO / "checkpoints" / "curriculum4"
         finish.mkdir(parents=True, exist_ok=True)
-        trainer, policy, _ = T.train_continuous(full, a.full_steps, b["ramp_frac"], b["rew_approach"], a.n_snakes_max, finish, use_wandb=False, boss_hp=T.BOSS_HP)
+        trainer, policy, _ = T.train_continuous(full, a.full_steps, b["ramp_frac"], b["rew_approach"], a.n_snakes_max, finish, use_wandb=use_wandb, boss_hp=T.BOSS_HP)
         trainer.save_weights(str(finish / "finish.pt"))
         trainer.close()
         rate = T.eval_clear_rate(policy, 100, d=1.0, boss_hp=T.BOSS_HP, n_snakes_max=a.n_snakes_max)
         print(f"== FULL RUN DONE -> {finish / 'finish.pt'} | d=1 clear rate {rate:.1%} ==", flush=True)
+        if use_wandb:
+            wandb.log({"final/clear_rate_d1": rate})
+            wandb.finish()
 
 
 if __name__ == "__main__":

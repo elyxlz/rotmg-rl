@@ -195,6 +195,11 @@ typedef struct {
     int steps;
     uint64_t rng_state; /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
+    /* Episode-outcome latch for the single-env eval wrapper: set on the step an episode ends (before
+     * the in-place auto-reset wipes boss_hp/phase), so a single-env caller can read the result via
+     * env_get after stepping. ep_done is 1 only on the ending step (cleared OR died OR truncated). */
+    int ep_done, ep_cleared;
+    double ep_boss_hp_frac;
 } Dungeon;
 
 /* Shared, read-only after init: the map-derived tables are identical for every env, so we build
@@ -841,6 +846,7 @@ static void c_step(Dungeon* env) {
     int move_idx = env->actions[0], aim_idx = env->actions[1];
     int shoot = env->actions[2], cast = env->actions[3];
 #endif
+    env->ep_done = 0;  /* set below only on the step the episode ends */
     double reward = c->rew_step;
 
     if (move_idx > 0 && env->petrify_timer == 0) {
@@ -942,6 +948,9 @@ static void c_step(Dungeon* env) {
         env->log.player_hp_end_sum += (env->player_hp > 0.0f ? env->player_hp : 0.0f) / c->player_hp_max;
         env->log.death_count += (terminated && !cleared) ? 1.0f : 0.0f;  // terminated but boss alive = died
         env->log.episodes += 1.0f;
+        env->ep_done = 1;  /* single-env eval latch (survives the auto-reset below) */
+        env->ep_cleared = cleared;
+        env->ep_boss_hp_frac = bhf_end;
     }
 
     compute_obs(env);

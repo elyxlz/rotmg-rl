@@ -128,16 +128,90 @@ static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
     return 0;
 }
 
-/* Expose internal state for the info-parity test + debugging (env_get). */
+/* Allocate a contiguous (rows, cols) float32 numpy array, handing back its data pointer to fill. */
+static PyObject* new_f32(npy_intp rows, npy_intp cols, float** data) {
+    npy_intp dims[2] = {rows, cols};
+    PyObject* arr = PyArray_SimpleNew(2, dims, NPY_FLOAT32);
+    if (arr) *data = (float*)PyArray_DATA((PyArrayObject*)arr);
+    return arr;
+}
+
+static void set_array(PyObject* dict, const char* key, PyObject* arr) {
+    if (arr) {
+        PyDict_SetItemString(dict, key, arr);
+        Py_DECREF(arr);
+    }
+}
+
+/* Expose internal state for the single-env eval/render wrapper + the info checks (env_get). The C env
+ * is the only dynamics source: this is a read-only snapshot of its live entity buffers, never a
+ * re-simulation. ep_* latch the just-ended episode's outcome (set before the in-place auto-reset). */
 static PyObject* my_get(PyObject* dict, Env* env) {
     assign_to_dict(dict, "boss_hp", env->boss_hp);
     assign_to_dict(dict, "boss_hp_max", env->cfg.boss_hp_max);
     assign_to_dict(dict, "fight_active", (float)env->fight_active);
     assign_to_dict(dict, "phase", (float)env->phase);
+    assign_to_dict(dict, "invuln_timer", (float)env->invuln_timer);
     assign_to_dict(dict, "player_hp", env->player_hp);
+    assign_to_dict(dict, "player_hp_max", env->cfg.player_hp_max);
+    assign_to_dict(dict, "player_mp", env->player_mp);
+    assign_to_dict(dict, "player_mp_max", env->cfg.player_mp_max);
+    assign_to_dict(dict, "confused", (float)(env->confused_timer > 0));
+    assign_to_dict(dict, "petrified", (float)(env->petrify_timer > 0));
     assign_to_dict(dict, "steps", (float)env->steps);
     assign_to_dict(dict, "px", env->px);
     assign_to_dict(dict, "py", env->py);
+    assign_to_dict(dict, "boss_x", (float)env->boss_x);
+    assign_to_dict(dict, "boss_y", (float)env->boss_y);
     assign_to_dict(dict, "boss_seen", (float)env->boss_seen);
+    assign_to_dict(dict, "ep_done", (float)env->ep_done);
+    assign_to_dict(dict, "ep_cleared", (float)env->ep_cleared);
+    assign_to_dict(dict, "ep_boss_hp_frac", (float)env->ep_boss_hp_frac);
+
+    float* d;
+    int ns = 0;
+    for (int i = 0; i < env->n_snake; i++)
+        if (env->snakes[i].hp > 0.0f) ns++;
+    PyObject* snakes = new_f32(ns, 2, &d);
+    if (snakes) {
+        int k = 0;
+        for (int i = 0; i < env->n_snake; i++)
+            if (env->snakes[i].hp > 0.0f) {
+                d[2 * k] = env->snakes[i].x;
+                d[2 * k + 1] = env->snakes[i].y;
+                k++;
+            }
+    }
+    set_array(dict, "snakes", snakes);
+
+    PyObject* ebul = new_f32(env->n_ebul, 2, &d);
+    if (ebul)
+        for (int i = 0; i < env->n_ebul; i++) {
+            d[2 * i] = env->ebul[i].x;
+            d[2 * i + 1] = env->ebul[i].y;
+        }
+    set_array(dict, "enemy_bullets", ebul);
+
+    PyObject* pbul = new_f32(env->n_pbul, 2, &d);
+    if (pbul)
+        for (int i = 0; i < env->n_pbul; i++) {
+            d[2 * i] = env->pbul[i].x;
+            d[2 * i + 1] = env->pbul[i].y;
+        }
+    set_array(dict, "player_bullets", pbul);
+
+    PyObject* gren = new_f32(env->n_gren, 3, &d);  /* x, y, radius */
+    if (gren)
+        for (int i = 0; i < env->n_gren; i++) {
+            d[3 * i] = env->grenades[i].x;
+            d[3 * i + 1] = env->grenades[i].y;
+            d[3 * i + 2] = env->grenades[i].rad;
+        }
+    set_array(dict, "grenades", gren);
+
+    npy_intp ddims[1] = {MAP_H * MAP_W};
+    PyObject* disc = PyArray_SimpleNew(1, ddims, NPY_UINT8);
+    if (disc) memcpy(PyArray_DATA((PyArrayObject*)disc), env->discovered, sizeof(env->discovered));
+    set_array(dict, "discovered", disc);
     return dict;
 }

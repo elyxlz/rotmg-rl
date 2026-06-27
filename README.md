@@ -19,17 +19,17 @@ current state, and [`docs/snakepit-spec.md`](docs/snakepit-spec.md) +
 One flat stack:
 
 ```
-pufferlib/        # vendored PufferLib 4.0 (pinned, pruned); our env edited IN PLACE in ocean/dungeon/
+_pufferlib/       # vendored PufferLib 4.0 (pinned, pruned); our env edited IN PLACE in ocean/dungeon/
 src/rotmg_rl/     # ALL Python logic, importable: training, sweep, eval, video, schedule, csim/, deploy/
 scripts/          # thin shell orchestration only: setup.sh (provision + build), box.sh (single run)
 train.py          # thin entrypoint -> rotmg_rl.training.main
 tests/            # CPU tier: spec-derived scenario tests + a fixed-seed golden tripwire
 ```
 
-`pufferlib/ocean/dungeon/dungeon.h` is the **single source of the Snake Pit dynamics**. It compiles
+`_pufferlib/ocean/dungeon/dungeon.h` is the **single source of the Snake Pit dynamics**. It compiles
 into PufferLib's `_C` backend for training and, via the standalone binding in `src/rotmg_rl/csim/`,
 into a numpy-only single-env wrapper for eval + POV rendering. See
-[`pufferlib/README.md`](pufferlib/README.md) for the vendored stack and build.
+[`_pufferlib/README.md`](_pufferlib/README.md) for the vendored stack and build.
 
 ## Usage
 

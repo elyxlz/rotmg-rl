@@ -18,8 +18,8 @@ dev = ["pytest>=8.0"]
 # Training deps are heavy and CUDA-specific; installed on the GPU box, not via a plain `uv sync`,
 # so the base scaffold resolves anywhere (incl. the aarch64 dev box).
 [project.optional-dependencies]
-# PufferLib 4.0 is NOT a pip dependency: it is the vendored editable install at pufferlib/, built
-# from source by scripts/setup.sh (`build.sh dungeon` then `pip install -e pufferlib/`). torch is the
+# PufferLib 4.0 is NOT a pip dependency: it is the vendored editable install at _pufferlib/, built
+# from source by scripts/setup.sh (`build.sh dungeon` then `pip install -e _pufferlib/`). torch is the
 # only pip-installable training dep; scripts/setup.sh installs the matching CUDA wheel. This group
 # exists only so `pip install -e .[train]` pulls torch on the box.
 train = ["torch>=2.9"]
@@ -33,7 +33,7 @@ packages = ["src/rotmg_rl"]
 
 [tool.ruff]
 line-length = 144
-exclude = ["pufferlib", "vendor", ".venv", "build", "dist"]
+exclude = ["_pufferlib", "vendor", ".venv", "build", "dist"]
 
 [tool.ruff.lint]
 # pyflakes (F), pycodestyle (E/W), isort (I), pyupgrade (UP), bugbear (B),

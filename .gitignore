@@ -9,10 +9,10 @@ dist/
 # uv
 .uv/
 
-# PufferLib build artifacts (the vendored source at pufferlib/ is committed; these are generated)
+# PufferLib build artifacts (the vendored source at _pufferlib/ is committed; these are generated)
 .venv-shim/
-pufferlib/_C*
-pufferlib/raylib-*/
+_pufferlib/_C*
+_pufferlib/raylib-*/
 
 # RL / training artifacts
 wandb/

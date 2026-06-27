@@ -1,12 +1,12 @@
 # Progress
 
 Current-state summary. See `GOAL.md` for the autonomous build loop, `docs/snakepit-spec.md` +
-`docs/real-game-analysis.md` for the env/real-game references, and `pufferlib/README.md` for the
+`docs/real-game-analysis.md` for the env/real-game references, and `_pufferlib/README.md` for the
 vendored training stack. Append new entries on top as the build advances.
 
 ## Where things stand (2026-06-27)
 
-**Env.** The Snake Pit dynamics are a single C source, `pufferlib/ocean/dungeon/dungeon.h` (config +
+**Env.** The Snake Pit dynamics are a single C source, `_pufferlib/ocean/dungeon/dungeon.h` (config +
 map in `src/rotmg_rl/config.py` + `snakepit_map.h`). Faithful T7 Wizard fight derived from the
 betterSkillys source: Staff of Destruction (90-170 with the x2.0 maxed-ATT multiplier, ~8 shots/s),
 Burning Retribution spell, DEF 8 / HP 810 / MP 455, HP regen 1.54/tick (the dominant survivability

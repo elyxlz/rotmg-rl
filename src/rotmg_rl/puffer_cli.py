@@ -2,7 +2,7 @@
 path, distinct from the one-command sweep+schedule flow in rotmg_rl.training).
 
 A thin launcher: maps our familiar knobs to 4.0's `--section.key` overrides and execs the venv
-`puffer` CLI against the env compiled into _C. Two encoder paths (see pufferlib/README.md):
+`puffer` CLI against the env compiled into _C. Two encoder paths (see _pufferlib/README.md):
   --slowly (torch):  OUR DungeonEncoder CNN + renderable torch checkpoints (the recommended daily
     driver; rotmg_rl.video renders it).
   default (native flat): puffernet's flat encoder, fast but the WRONG architecture for the spatial
@@ -20,7 +20,7 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-CLONE = REPO / "pufferlib"
+CLONE = REPO / "_pufferlib"
 PUFFER = REPO / ".venv" / "bin" / "puffer"
 
 
@@ -62,7 +62,7 @@ def main() -> None:
     cmd += ["--train.total-timesteps", str(args.total_timesteps)]
     cmd += ["--vec.total-agents", str(args.num_envs)]
     cmd += ["--policy.hidden-size", str(args.hidden)]  # the LSTM network is sized from policy.hidden_size
-    # absolute checkpoint dir: puffer runs with cwd=CLONE, so a relative path would land in pufferlib/
+    # absolute checkpoint dir: puffer runs with cwd=CLONE, so a relative path would land in _pufferlib/
     ckpt_dir = args.checkpoint_dir if os.path.isabs(args.checkpoint_dir) else str(REPO / args.checkpoint_dir)
     cmd += ["--checkpoint-dir", ckpt_dir, "--checkpoint-interval", str(args.checkpoint_interval)]
     if args.num_workers is not None:

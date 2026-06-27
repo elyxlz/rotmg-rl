@@ -3,7 +3,7 @@
 Mirrors `rotmg_rl.sim.snakepit_map.load_jm` + `_nearest_walkable` so the C env loads the exact
 same map the Python oracle uses. Run on a host with numpy + the map data:
 
-    uv run python -m rotmg_rl.csim.gen_map_header > pufferlib/ocean/dungeon/snakepit_map.h
+    uv run python -m rotmg_rl.csim.gen_map_header > _pufferlib/ocean/dungeon/snakepit_map.h
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Shared Snake Pit config + layout constants (pure Python: dataclass + numpy tables only).
 
 This is the single Python home for the env's tunable config (`DungeonConfig`) and the obs-layout /
-calibration constants that every consumer imports (the C env in `pufferlib/ocean/dungeon/dungeon.h` is the single source
+calibration constants that every consumer imports (the C env in `_pufferlib/ocean/dungeon/dungeon.h` is the single source
 of truth for the *dynamics*; this module mirrors its config + layout for the Python layers — policies,
 the real-server obs bridge, the eval/render wrappers). It deliberately pulls in no gym / pufferlib /
 torch so it can be imported anywhere (the cheap dev box, the deploy bridge, the scenario tests).

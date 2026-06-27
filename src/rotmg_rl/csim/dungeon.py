@@ -11,8 +11,8 @@ from dataclasses import asdict
 
 import gymnasium
 import numpy as np
-
 import pufferlib
+
 from rotmg_rl.config import N_AIM, DungeonConfig
 from rotmg_rl.csim import binding  # ty: ignore[unresolved-import]  compiled C extension built at runtime, no static stubs
 from rotmg_rl.csim.single import OBS_SIZE

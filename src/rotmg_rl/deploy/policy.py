@@ -14,6 +14,7 @@ import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not 
 class PolicyRunner:
     def __init__(self, checkpoint: str, hidden: int = 256, device: str | None = None) -> None:
         from pufferlib.ocean import torch as ocean_torch  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
+
         from rotmg_rl.csim.dungeon import CDungeon
         from rotmg_rl.csim.policy import CDungeonPolicy
 

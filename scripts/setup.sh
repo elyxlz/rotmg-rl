@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Provision the training stack in .venv with our dungeon env compiled into PufferLib 4.0's _C backend.
-# PufferLib 4.0 is vendored in-repo at pufferlib/ (our env edited IN PLACE in ocean/dungeon/) — this
+# PufferLib 4.0 is vendored in-repo at _pufferlib/ (our env edited IN PLACE in ocean/dungeon/) — this
 # builds it from source; there is no clone or setup-time copy.
 #
 # What it does: .venv (torch>=2.9 + deps) -> build.sh dungeon (compiles _C with our env statically
-# linked) -> pip install -e pufferlib/ + our package. Then train with `python3 train.py` (the
+# linked) -> pip install -e _pufferlib/ + our package. Then train with `python3 train.py` (the
 # one-command flow) or `scripts/box.sh train --slowly ...` (a single configurable run).
 #
 # SAFETY: torch>=2.9 + a CUDA build is several GB + heavy I/O. Run with disk headroom. This script
@@ -17,7 +17,7 @@ export UV_LINK_MODE=copy
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-PUFFER_DIR="$REPO_ROOT/pufferlib"   # the vendored, committed PufferLib (env edited in place)
+PUFFER_DIR="$REPO_ROOT/_pufferlib"   # the vendored, committed PufferLib (env edited in place)
 VENV="$REPO_ROOT/.venv"
 VENV_PY="$VENV/bin/python"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.4}"   # box: nvcc lives here, not on PATH

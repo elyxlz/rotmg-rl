@@ -1,6 +1,6 @@
 """Reconstruct the trained env observation from REAL betterSkillys game state.
 
-Ground truth: the C env's obs (pufferlib/ocean/dungeon/dungeon.h compute_obs / update_visibility). We mirror it
+Ground truth: the C env's obs (_pufferlib/ocean/dungeon/dungeon.h compute_obs / update_visibility). We mirror it
 bit-for-bit so the 95%-clear CDungeonPolicy sees the same 9807-float vector on the real server that
 it saw in sim: an egocentric 7x31x31 grid + a 3x32x32 fog-of-war minimap + 8 scalars, flattened
 [grid, minimap, scalars]. Constants + normalization come from rotmg_rl.config, never re-hardcoded.

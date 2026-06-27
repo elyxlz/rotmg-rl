@@ -1,8 +1,8 @@
-"""Behavioral tests for the C Snake Pit env (pufferlib/ocean/dungeon/dungeon.h) via the single-env wrapper.
+"""Behavioral tests for the C Snake Pit env (_pufferlib/ocean/dungeon/dungeon.h) via the single-env wrapper.
 
 Qualitative "does the env behave" coverage (local vision, exploration, snakes take damage, the boss's
 P1 point-blank-only blades). The exact spec numbers + the drift tripwire live in
-tests/test_dungeon_scenarios.py. Numpy + the compiled C binding only (no pufferlib/torch).
+tests/test_dungeon_scenarios.py. Numpy + the compiled C binding only (no pufferlib / torch).
 """
 
 from __future__ import annotations

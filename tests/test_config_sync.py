@@ -10,9 +10,9 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-DUNGEON_H = REPO / "pufferlib" / "ocean" / "dungeon" / "dungeon.h"
-OCEAN_BINDING = REPO / "pufferlib" / "ocean" / "dungeon" / "binding.c"
-OCEAN_INI = REPO / "pufferlib" / "config" / "dungeon.ini"
+DUNGEON_H = REPO / "_pufferlib" / "ocean" / "dungeon" / "dungeon.h"
+OCEAN_BINDING = REPO / "_pufferlib" / "ocean" / "dungeon" / "binding.c"
+OCEAN_INI = REPO / "_pufferlib" / "config" / "dungeon.ini"
 EVAL_BINDING = REPO / "src" / "rotmg_rl" / "csim" / "binding.c"
 
 # kwargs a binding reads that are NOT Config fields (env wiring, not stored on cfg).

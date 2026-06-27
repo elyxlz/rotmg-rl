@@ -1,4 +1,4 @@
-"""Spec-derived scenario tests for the C Snake Pit env (pufferlib/ocean/dungeon/dungeon.h, the single dynamics source).
+"""Spec-derived scenario tests for the C Snake Pit env (_pufferlib/ocean/dungeon/dungeon.h, the single dynamics source).
 
 These are NOT output-pinning golden tests (which would be circular -- they'd just re-assert whatever
 the code emits). Each expected value is HAND-COMPUTED from the betterSkillys formulas the env mirrors:
@@ -11,7 +11,7 @@ the code emits). Each expected value is HAND-COMPUTED from the betterSkillys for
 A `test_golden_trajectory` drift tripwire sits on top: a fixed seed + fixed action schedule whose
 aggregate signals are committed, so any unintended change to the dynamics trips it.
 
-Runs with numpy + the compiled C binding only (no pufferlib/torch), via the single-env wrapper.
+Runs with numpy + the compiled C binding only (no pufferlib / torch), via the single-env wrapper.
 """
 
 from __future__ import annotations

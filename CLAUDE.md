@@ -5,11 +5,11 @@ Code-hygiene conventions for rotmg-rl. Read before changing code. See `README.md
 
 ## Structure
 
-- **`pufferlib/`** — vendored PufferLib 4.0 (pinned, pruned). Our env is edited **IN PLACE** in
-  `pufferlib/ocean/dungeon/` (`dungeon.h`, `snakepit_map.h`, `binding.c`) + `pufferlib/config/dungeon.ini`
-  + the `DungeonEncoder` in `pufferlib/pufferlib/models.py`. This is the env's single home — there is
+- **`_pufferlib/`** — vendored PufferLib 4.0 (pinned, pruned). Our env is edited **IN PLACE** in
+  `_pufferlib/ocean/dungeon/` (`dungeon.h`, `snakepit_map.h`, `binding.c`) + `_pufferlib/config/dungeon.ini`
+  + the `DungeonEncoder` in `_pufferlib/pufferlib/models.py`. This is the env's single home — there is
   **no setup-time copy** (that duplication once caused a stale-binding bug). Don't re-introduce a
-  clone-and-copy step. See `pufferlib/README.md`.
+  clone-and-copy step. See `_pufferlib/README.md`.
 - **`src/rotmg_rl/`** — **all** Python logic, as importable modules (`training`, `sweep`, `eval`,
   `video`, `schedule`, `config`, `csim/`, `sim/`, `deploy/`). New logic goes here, never in an
   entrypoint.
@@ -20,7 +20,7 @@ Code-hygiene conventions for rotmg-rl. Read before changing code. See `README.md
 
 ## The env is one source of truth
 
-`pufferlib/ocean/dungeon/dungeon.h` is the **single source of the Snake Pit dynamics**. It compiles
+`_pufferlib/ocean/dungeon/dungeon.h` is the **single source of the Snake Pit dynamics**. It compiles
 both into PufferLib's `_C` training backend and (via `src/rotmg_rl/csim/`) into the numpy-only
 single-env wrapper for eval/render. **Never add a second env implementation.** A `Config` field added
 or removed here must be matched in the ocean binding, the eval binding, and `dungeon.ini` —

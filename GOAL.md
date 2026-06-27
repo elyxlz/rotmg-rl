@@ -14,7 +14,7 @@ GROUND TRUTH (box: ssh ripbox [multiplexed]; 2x3090, 16 cores)
 - Repo: ~/Repos/rotmg-rl (read PROGRESS.md first). betterSkillys source + client vendored at
   vendor/betterSkillys (faithful-sim ground truth + the real client for M5). Real Snake Pit is a
   FIXED map (EmbeddedData_SnakePitCXML.xml), not procedural -> train on the real layout.
-- Faithful sim: the C env pufferlib/ocean/dungeon/dungeon.h (single source of dynamics; config + layout in config.py).
+- Faithful sim: the C env _pufferlib/ocean/dungeon/dungeon.h (single source of dynamics; config + layout in config.py).
   Local 31x31 vision (VIS 15), mouse-aim (32 dir), Wizard (staff+Spell+MP), snakes, 3-phase Stheno
   (grenades/minions/status). PuffeRL 4.0 + CNN-LSTM; single-env wrapper (csim/single.py) for eval/render.
 
@@ -37,7 +37,7 @@ HARD CONSTRAINTS
 - Keep the workspace tidy/simple/abstracted; keep PROGRESS.md + GOAL.md up to date.
 
 THE PLAN (keep iterating each stage until it works; don't stop between stages)
-M4 (DONE). The env is rewritten in C (PufferLib Ocean style): pufferlib/ocean/dungeon/dungeon.h is
+M4 (DONE). The env is rewritten in C (PufferLib Ocean style): _pufferlib/ocean/dungeon/dungeon.h is
     the single source of the Snake Pit dynamics (the slow Python sim is removed). Ocean C envs do
     millions of SPS where the old Python sim did ~20K and starved the GPU, so experiments run in
     minutes. The C env defines the obs layout, action space, and dynamics; a policy trained in C

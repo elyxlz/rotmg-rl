@@ -118,9 +118,9 @@ typedef struct {
     int max_steps;
     float activation_range, spawn_in_room_prob, random_spawn_prob, spawn_in_room_radius;
     float player_hp_max, player_mp_max, player_defense, damage_floor, mp_regen, hp_regen;
-    int staff_cooldown, staff_num;
-    float staff_dmg_lo, staff_dmg_hi, staff_speed;
-    int staff_life;
+    int staff_num;
+    float staff_cooldown; /* ticks/shot, fractional (DEX 75 -> 1.25); the accumulator carries the remainder */
+    float staff_dmg_lo, staff_dmg_hi, staff_speed, staff_life;
     float staff_radius, staff_offset, spell_cost;
     int spell_cooldown, spell_num;
     float spell_dmg_lo, spell_dmg_hi, spell_speed;
@@ -169,7 +169,8 @@ typedef struct {
 
     float px, py;          /* player pos (float32 in oracle) */
     float player_hp, player_mp;
-    int staff_timer, spell_timer;
+    double staff_timer; /* fractional staff cooldown accumulator (double, parity-matched to the oracle) */
+    int spell_timer;
     double boss_x, boss_y; /* boss_pos becomes float64 in oracle after first move */
     double boss_spawn_x, boss_spawn_y; /* ReturnToSpawn anchor: the boss is pulled back toward here in P1 */
     double boss_hp; /* float64 like the numpy oracle (Python float), for phase/collision fidelity */
@@ -809,7 +810,7 @@ static void c_reset(Dungeon* env) {
     }
     env->player_hp = c->player_hp_max;
     env->player_mp = c->player_mp_max;
-    env->staff_timer = 0;
+    env->staff_timer = 0.0;
     env->spell_timer = 0;
     env->boss_x = bx + 0.5;
     env->boss_y = by + 0.5;
@@ -860,7 +861,7 @@ static void c_step(Dungeon* env) {
         reward += c->rew_explore;
     }
 
-    if (env->staff_timer > 0) env->staff_timer--;
+    env->staff_timer -= 1.0;  /* fractional cooldown: carried on fire, snapped up to 0 when idle below */
     if (env->spell_timer > 0) env->spell_timer--;
     env->player_mp = env->player_mp + c->mp_regen;
     if (env->player_mp > c->player_mp_max) env->player_mp = c->player_mp_max;
@@ -871,9 +872,11 @@ static void c_step(Dungeon* env) {
     }
 
     float aimx = g_aim_dx[aim_idx], aimy = g_aim_dy[aim_idx];
-    if (shoot == 1 && env->staff_timer == 0) {
+    if (shoot == 1 && env->staff_timer <= 0.0) {
         fire_staff(env, aimx, aimy);
-        env->staff_timer = c->staff_cooldown;
+        env->staff_timer += c->staff_cooldown;
+    } else if (env->staff_timer < 0.0) {
+        env->staff_timer = 0.0;
     }
     if (cast == 1 && env->spell_timer == 0 && env->player_mp >= c->spell_cost) {
         cast_spell(env);

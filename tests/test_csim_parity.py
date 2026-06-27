@@ -160,7 +160,9 @@ def test_parity_boss_fight():
     transitions + invuln, the 360 spell nova, and the staff -- all RNG-free, so the C env matches the
     numpy oracle bit-faithfully. The player is pinned (move=0) right on the boss so the blades acquire
     (radius 2) and damage accumulates reliably across phases."""
-    cfg = DungeonConfig(boss_hp_max=20000.0, player_hp_max=1e9, invuln_ticks=15, **DET)
+    # boss_hp sized so the point-blank Wizard (T7 DPS: x2 attack mult + ~8 shots/s staff + nova) does
+    # NOT kill it inside the 150-step parity window but DOES cross the 66% phase-2 threshold.
+    cfg = DungeonConfig(boss_hp_max=54000.0, player_hp_max=1e9, invuln_ticks=15, **DET)
     bx, by = 16, 73  # boss_xy
     inject = {"player_x": bx + 1.5, "player_y": by + 0.5, "fight_active": 1, "phase": 1}  # within blade radius 2
     actions = _fixed_actions(1, 150)

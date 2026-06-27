@@ -38,12 +38,12 @@ void my_init(Env* env, Dict* kwargs) {
     c->damage_floor = dict_get(kwargs, "damage_floor")->value;
     c->mp_regen = dict_get(kwargs, "mp_regen")->value;
     c->hp_regen = dict_get(kwargs, "hp_regen")->value;
-    c->staff_cooldown = (int)dict_get(kwargs, "staff_cooldown")->value;
+    c->staff_cooldown = dict_get(kwargs, "staff_cooldown")->value;
     c->staff_num = (int)dict_get(kwargs, "staff_num")->value;
     c->staff_dmg_lo = dict_get(kwargs, "staff_dmg_lo")->value;
     c->staff_dmg_hi = dict_get(kwargs, "staff_dmg_hi")->value;
     c->staff_speed = dict_get(kwargs, "staff_speed")->value;
-    c->staff_life = (int)dict_get(kwargs, "staff_life")->value;
+    c->staff_life = dict_get(kwargs, "staff_life")->value;
     c->staff_radius = dict_get(kwargs, "staff_radius")->value;
     c->staff_offset = dict_get(kwargs, "staff_offset")->value;
     c->spell_cost = dict_get(kwargs, "spell_cost")->value;

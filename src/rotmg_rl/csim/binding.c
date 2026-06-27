@@ -24,12 +24,12 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     c->damage_floor = unpack(kwargs, "damage_floor");
     c->mp_regen = unpack(kwargs, "mp_regen");
     c->hp_regen = unpack(kwargs, "hp_regen");
-    c->staff_cooldown = (int)unpack(kwargs, "staff_cooldown");
+    c->staff_cooldown = unpack(kwargs, "staff_cooldown");
     c->staff_num = (int)unpack(kwargs, "staff_num");
     c->staff_dmg_lo = unpack(kwargs, "staff_dmg_lo");
     c->staff_dmg_hi = unpack(kwargs, "staff_dmg_hi");
     c->staff_speed = unpack(kwargs, "staff_speed");
-    c->staff_life = (int)unpack(kwargs, "staff_life");
+    c->staff_life = unpack(kwargs, "staff_life");
     c->staff_radius = unpack(kwargs, "staff_radius");
     c->staff_offset = unpack(kwargs, "staff_offset");
     c->spell_cost = unpack(kwargs, "spell_cost");

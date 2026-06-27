@@ -12,14 +12,17 @@ Snake Pit is a low-level dungeon; T7 is what a normal player brings), not the ol
   circle from the player position (point-blank detonation), [95,185] dmg each, MP 90, no cooldown.
   No focused arc nuke exists in the real game; point-blank only the few bullets whose headings cross
   a target connect, so vs a single boss it is chip/support DPS, not a nuke.
-- Staff = "Staff of Destruction" (T7): 2 parallel shots (ArcGap 0), [45,85] dmg each, range
-  ~8.55 tiles (Speed 180, Life 475ms). Long range -> the realistic strategy is to KITE at ~8 tiles
-  and sustain staff DPS, since the boss's P1 Blades are point-blank only.
+- Staff = "Staff of Destruction" (T7): 2 parallel shots (ArcGap 0), raw [45,85] dmg scaled by the
+  maxed-ATT attack multiplier (x2.0) -> [90,170] each, ~8 shots/s (GetAttackFreq at DEX 75), range
+  ~8.55 tiles (Speed 180, Life 475ms). The staff is the DPS; KITE at ~8 tiles since the boss's P1
+  Blades are point-blank only.
 - Damage uses the real defense clamp: dealt = max(raw*0.1, raw - defense). Boss DEF 19; the T7
-  Wizard has DEF 30 (Robe of the Invoker) and 770 max HP (670 base + 100 ring).
-- HP/MP regen (Player.cs HandleRegen): the real player recovers ~15.4 HP/s and ~15.4 MP/s between
-  hits (VIT 40 / WIS 60). WITHOUT this the faithful fight is far deadlier than the real one; it is
-  why the player survives long enough to sustain the kill.
+  Wizard has DEF 8 (robe stat21=Defense; Wizard robes give little raw DEF), 810 max HP (670 base +
+  100 ring + 40 spell) and 455 max MP. Move speed 0.773 t/tick (SPD 50). Gear "stat" ids are
+  StatDataType bonuses (stat 3 = MaxMana, stat 21 = Defense, stat 0 = MaxHP), resolved via GetStatIndex.
+- HP/MP regen (Player.cs HandleRegen): the real player recovers ~15.4 HP/s (VIT 40) and ~17.8 MP/s
+  (WIS 70) between hits. WITHOUT this the faithful fight is far deadlier than the real one; it is why
+  the player survives long enough to sustain the kill.
 - Boss Stheno: P1 fires 3-blade 15deg shots ONLY point-blank (acquire radius 2) + a Confused grenade
   + Wander(0.3) with a ReturnToSpawn(0.7, 1) anchor so it stays in the room; P2 fires NOTHING but the
   Confused grenade (its 4-shot references a nonexistent projectile); P3 fires aimed 3-blade shots + 8
@@ -83,33 +86,38 @@ SNAKE_TIMER_JITTER = 10  # initial shoot-timer desync (ticks)
 
 @dataclass
 class DungeonConfig:
-    player_speed: float = 0.55
+    player_speed: float = 0.773  # MoveSpeed at SPD 50: 0.004 + 50/75*(0.0096-0.004) = 0.00773 t/ms -> 0.773 t/tick
     player_radius: float = 0.4
     max_steps: int = 4000
     activation_range: float = 20.0
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)
     spawn_in_room_radius: float = 6.0  # ring distance (tiles) from the boss for the in-room spawn; ramp it up to teach navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
     random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
-    # Wizard (realistic T7 Snake-Pit loadout: 670 base HP + 100 ring (Ring of Superior Health), Robe
-    # of the Invoker DEF +30). Health/Mana regen from Player.cs HandleRegen at the base maxed Wizard
-    # VIT 40 / WIS 60: hp/s = 1 + 0.36*VIT = 15.4, mp/s = 1 + 0.24*WIS = 15.4 -> 1.54 per 100ms tick.
-    player_hp_max: float = 770.0
-    player_mp_max: float = 385.0
-    player_defense: float = 30.0  # robe; incoming damage reduced by the real clamp
+    # Wizard, realistic maxed T7 Snake-Pit loadout (gear stats are StatDataType bonuses resolved via
+    # GetStatIndex, NOT raw core-stat ids): 670 base HP + 100 ring (stat0) + 40 spell (stat0) = 810;
+    # 385 base MP + 30 robe (stat3=MaxMana) + 40 spell (stat3=MaxMana) = 455; DEF = 0 base + 8 robe
+    # (stat21=Defense) = 8 (Wizard robes give little raw DEF); WIS = 60 + 3 robe + 7 spell = 70; VIT 40.
+    # Regen (Player.cs HandleRegen): hp/s = 1 + 0.36*VIT = 15.4 -> 1.54/tick, mp/s = 1 + 0.24*WIS = 17.8
+    # -> 1.78/tick. The HP regen is why the real fight is survivable -- the player recovers between hits.
+    player_hp_max: float = 810.0
+    player_mp_max: float = 455.0
+    player_defense: float = 8.0  # robe stat21=Defense; incoming damage reduced by the real clamp
     damage_floor: float = 0.1  # DamageWithDefense floor: dealt = max(raw*floor, raw - defense)
-    mp_regen: float = 1.54  # (1 + 0.24*WIS)/s at WIS 60, per 100ms tick
-    hp_regen: float = 1.54  # (1 + 0.36*VIT)/s at VIT 40, per 100ms tick; the real fight is survivable because the player recovers between hits
-    # Staff of Destruction (T7): 2 parallel shots (ArcGap 0), [45,85] dmg, Speed 180 (1.8 t/tick),
-    # Life 475ms -> range ~8.55 tiles (life 6 ticks * 1.8 reaches ~9 tiles, just past the kite distance).
-    staff_cooldown: int = 2
+    mp_regen: float = 1.78  # (1 + 0.24*WIS)/s at WIS 70, per 100ms tick
+    hp_regen: float = 1.54  # (1 + 0.36*VIT)/s at VIT 40, per 100ms tick
+    # Staff of Destruction (T7): 2 parallel shots (ArcGap 0), Speed 180 (1.8 t/tick), Life 475ms.
+    # Damage is the raw item [45,85] * the maxed-ATT attack multiplier (0.5 + 75/75*1.5 = 2.0) =
+    # [90,170] (the BulletNova spell does NOT take the multiplier; only the staff). Fire rate is the
+    # real GetAttackFreq at DEX 75 = 0.008 = 125ms/shot = 1.25 ticks, carried fractionally (see step).
+    staff_cooldown: float = 1.25  # ticks/shot, fractional accumulator -> ~8 shots/s
     staff_num: int = 2
-    staff_dmg: tuple[float, float] = (45.0, 85.0)
+    staff_dmg: tuple[float, float] = (90.0, 170.0)
     staff_speed: float = 1.8
-    staff_life: int = 6
+    staff_life: float = 4.75  # Life 475ms = 4.75 ticks (range ~8.55 tiles)
     staff_radius: float = 0.5
     staff_offset: float = 0.5
-    # Burning Retribution Spell (T7): 360-degree BulletNova from the player, 20 bullets, [95,185] dmg,
-    # Speed 160 (1.6 t/tick), Life 1000ms (10 ticks, ~16-tile range), MP 90, no cooldown.
+    # Burning Retribution Spell (T7): 360-degree BulletNova from the player, 20 bullets, [95,185] dmg
+    # (raw, NOT attack-scaled), Speed 160 (1.6 t/tick), Life 1000ms (10 ticks, ~16-tile range), MP 90.
     spell_cost: float = 90.0
     spell_cooldown: int = 0
     spell_num: int = 20
@@ -231,7 +239,7 @@ class DungeonEnv(gym.Env):
             self.player_pos = np.array([self.entrance_xy[0] + 0.5, self.entrance_xy[1] + 0.5], np.float32)
         self.player_hp = c.player_hp_max
         self.player_mp = c.player_mp_max
-        self.staff_timer = 0
+        self.staff_timer = 0.0  # float: fractional staff cooldown accumulator
         self.spell_timer = 0
         # boss_pos is float64 (matches the C env's double boss coords) so boss/player distances and
         # blade origins stay bit-faithful whether or not the boss moves.
@@ -299,17 +307,21 @@ class DungeonEnv(gym.Env):
             self.visited[ty, tx] = True
             reward += c.rew_explore
 
-        # Wizard: staff toward aim, spell toward aim
-        self.staff_timer = max(0, self.staff_timer - 1)
+        # Wizard: staff toward aim, spell toward aim. The staff cooldown is FRACTIONAL (1.25 ticks at
+        # DEX 75 -> ~8 shots/s): decrement, fire+carry the remainder when ready, and snap an idle
+        # negative timer back to 0 so idling never banks a burst (matches the real nextAttack clock).
+        self.staff_timer -= 1.0
         self.spell_timer = max(0, self.spell_timer - 1)
         self.player_mp = min(c.player_mp_max, self.player_mp + c.mp_regen)
         # HealthRegen (Player.cs HandleRegen): (1 + 0.36*VIT)/s, here a flat per-tick rate, capped at max
         if self.player_hp < c.player_hp_max:
             self.player_hp = min(c.player_hp_max, self.player_hp + c.hp_regen)
         aim = AIM_DIRS[aim_idx]
-        if shoot == 1 and self.staff_timer == 0:
+        if shoot == 1 and self.staff_timer <= 0.0:
             self._fire_staff(aim)
-            self.staff_timer = c.staff_cooldown
+            self.staff_timer += c.staff_cooldown
+        elif self.staff_timer < 0.0:
+            self.staff_timer = 0.0
         if cast == 1 and self.spell_timer == 0 and self.player_mp >= c.spell_cost:
             self._cast_spell()
             self.player_mp -= c.spell_cost

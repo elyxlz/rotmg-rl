@@ -1,4 +1,4 @@
-"""Spec-derived scenario tests for the C Snake Pit env (csim/dungeon.h, the single dynamics source).
+"""Spec-derived scenario tests for the C Snake Pit env (pufferlib/ocean/dungeon/dungeon.h, the single dynamics source).
 
 These are NOT output-pinning golden tests (which would be circular -- they'd just re-assert whatever
 the code emits). Each expected value is HAND-COMPUTED from the betterSkillys formulas the env mirrors:

@@ -1,6 +1,6 @@
 """Thin single-env handle over the C dungeon binding (rotmg_rl.csim.binding).
 
-The C env (csim/dungeon.h) is the single source of the Snake Pit dynamics. This wraps ONE env
+The C env (pufferlib/ocean/dungeon/dungeon.h) is the single source of the Snake Pit dynamics. This wraps ONE env
 instance for evaluation + POV rendering using only numpy (no pufferlib / torch), so it runs in any
 venv that has the compiled binding. `step` returns the flat [grid, minimap, scalars] obs plus the
 gym-style (reward, terminated, truncated, info); `render_state` is a read-only snapshot of the live C

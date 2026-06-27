@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from rotmg_rl.deploy.v3.obs import RealObsBuilder
+from rotmg_rl.deploy.obs import RealObsBuilder
 
 _BOSS_RADIUS = 0.8  # DungeonConfig.boss_radius (cosmetic dot size only)
 

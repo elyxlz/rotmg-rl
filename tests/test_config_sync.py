@@ -11,9 +11,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 DUNGEON_H = REPO / "pufferlib" / "ocean" / "dungeon" / "dungeon.h"
-BINDING_4 = REPO / "pufferlib" / "ocean" / "dungeon" / "binding.c"
-INI_4 = REPO / "pufferlib" / "config" / "dungeon.ini"
-BINDING_3 = REPO / "src" / "rotmg_rl" / "csim" / "binding.c"
+OCEAN_BINDING = REPO / "pufferlib" / "ocean" / "dungeon" / "binding.c"
+OCEAN_INI = REPO / "pufferlib" / "config" / "dungeon.ini"
+EVAL_BINDING = REPO / "src" / "rotmg_rl" / "csim" / "binding.c"
 
 # kwargs a binding reads that are NOT Config fields (env wiring, not stored on cfg).
 NON_CONFIG_KWARGS = {"seed"}
@@ -54,7 +54,7 @@ def _ini_env_keys() -> set[str]:
     """Keys defined in the [env] section of dungeon.ini."""
     keys: set[str] = set()
     in_env = False
-    for line in INI_4.read_text().splitlines():
+    for line in OCEAN_INI.read_text().splitlines():
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             in_env = stripped == "[env]"
@@ -75,23 +75,23 @@ def test_config_fields_parse_is_sane():
         assert stale not in fields, f"stale field {stale!r} unexpectedly present in Config"
 
 
-def test_puffer4_binding_reads_exactly_the_config_fields():
+def test_ocean_binding_reads_exactly_the_config_fields():
     config = set(_config_fields())
-    read = _kwargs_read(BINDING_4, "dict_get")
-    assert config - read == set(), f"puffer4/binding.c my_init MISSING Config fields: {sorted(config - read)}"
-    assert read - config == set(), f"puffer4/binding.c my_init reads STALE non-Config fields: {sorted(read - config)}"
+    read = _kwargs_read(OCEAN_BINDING, "dict_get")
+    assert config - read == set(), f"ocean binding.c my_init MISSING Config fields: {sorted(config - read)}"
+    assert read - config == set(), f"ocean binding.c my_init reads STALE non-Config fields: {sorted(read - config)}"
 
 
-def test_puffer4_dungeon_ini_defines_exactly_the_config_fields():
+def test_ocean_ini_defines_exactly_the_config_fields():
     config = set(_config_fields())
     keys = _ini_env_keys()
-    assert config - keys == set(), f"puffer4/dungeon.ini [env] MISSING Config fields: {sorted(config - keys)}"
-    assert keys - config == set(), f"puffer4/dungeon.ini [env] has STALE non-Config keys: {sorted(keys - config)}"
+    assert config - keys == set(), f"config/dungeon.ini [env] MISSING Config fields: {sorted(config - keys)}"
+    assert keys - config == set(), f"config/dungeon.ini [env] has STALE non-Config keys: {sorted(keys - config)}"
 
 
-def test_csim_3_0_binding_stays_in_lockstep():
-    """Bonus: the 3.0 parity-harness binding must cover the same fields, so all bindings agree."""
+def test_eval_binding_stays_in_lockstep():
+    """The standalone eval binding (csim) must cover the same fields, so all bindings agree."""
     config = set(_config_fields())
-    read = _kwargs_read(BINDING_3, "unpack")
+    read = _kwargs_read(EVAL_BINDING, "unpack")
     assert config - read == set(), f"csim/binding.c my_init MISSING Config fields: {sorted(config - read)}"
     assert read - config == set(), f"csim/binding.c my_init reads STALE non-Config fields: {sorted(read - config)}"

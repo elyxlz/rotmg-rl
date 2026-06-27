@@ -60,9 +60,10 @@ login credentials are encrypted with the key the local server can decrypt.
 An nrelay `@Library` that wires the live game to the trained policy:
 
 - **Spawns the policy server** as a subprocess:
-  `uv run --extra train python -m rotmg_rl.deploy.v3.server --checkpoint checkpoints/full_dungeon_95.pt`
-  (cwd `~/rotmg-rl`), and talks to it over line-delimited JSON on stdin/stdout. The Python side lives
-  in this repo at `src/rotmg_rl/deploy/v3/`.
+  `.venv/bin/python -m rotmg_rl.deploy.server --checkpoint checkpoints/full_dungeon_95.pt`
+  (cwd `~/rotmg-rl`, under the `scripts/setup.sh`-provisioned venv that has torch + the vendored
+  pufferlib), and talks to it over line-delimited JSON on stdin/stdout. The Python side lives in this
+  repo at `src/rotmg_rl/deploy/`.
 - **Per-tick loop** (`onNewTick`): reconstructs the policy's view from decoded packets — player
   state, enemies (with boss detection for Stheno/Snake Queen), player bullets, walkable tiles, and
   enemy-shot bursts forward-simulated from `EnemyShoot` (`onEnemyShoot`) — ships it to the policy,

@@ -1,7 +1,7 @@
 [project]
 name = "rotmg-rl"
 version = "0.1.0"
-description = "Cold-start RL agent that clears a ROTMG dungeon (Snake Pit) via a custom PufferLib sim."
+description = "Cold-start RL agent that clears a ROTMG dungeon (Snake Pit) via a custom C simulator."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,21 +15,14 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=8.0"]
 
-# Training deps (pufferlib + torch) are heavy and CUDA-specific; installed on the GPU box.
-# Kept in an optional group so the base scaffold resolves anywhere (incl. the aarch64 dev box).
+# Training deps are heavy and CUDA-specific; installed on the GPU box, not via a plain `uv sync`,
+# so the base scaffold resolves anywhere (incl. the aarch64 dev box).
 [project.optional-dependencies]
-# PufferLib 3.x's PuffeRL kernel must be compiled against the installed torch, so the GPU-box
-# env is built via scripts/setup_box.sh (not a plain `uv sync`). Versions pinned to the working
-# combo. See scripts/setup_box.sh for the required install order.
-train = [
-    "torch==2.8.0",
-    "pufferlib==3.0",  # 3.x ships the PuffeRL trainer; build with --no-build-isolation (see setup_box.sh)
-]
-# PufferLib 4.0 (native C/CUDA rewrite) is adopted via a SEPARATE venv (.venv4), not this `train`
-# group: it is GitHub-only (PyPI is still 3.0.0) and its _C backend is built from a pinned, vendored
-# clone with our env compiled in (PufferLib's build.sh, not pip). Provision with
-# scripts/setup_box_puffer4.sh; train with scripts/train_dungeon4.py. See docs/pufferlib4-migration.md.
-# The 3.0 `train` group above stays as a fallback until 4.0 has a full long run behind it.
+# PufferLib 4.0 is NOT a pip dependency: it is the vendored editable install at pufferlib/, built
+# from source by scripts/setup.sh (`build.sh dungeon` then `pip install -e pufferlib/`). torch is the
+# only pip-installable training dep; scripts/setup.sh installs the matching CUDA wheel. This group
+# exists only so `pip install -e .[train]` pulls torch on the box.
+train = ["torch>=2.9"]
 
 [build-system]
 requires = ["hatchling"]

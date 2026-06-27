@@ -22,8 +22,8 @@ import json
 import signal
 import sys
 
-from rotmg_rl.deploy.v3.obs import RealObsBuilder, action_to_intent
-from rotmg_rl.deploy.v3.policy import PolicyRunner
+from rotmg_rl.deploy.obs import RealObsBuilder, action_to_intent
+from rotmg_rl.deploy.policy import PolicyRunner
 
 
 def main() -> None:
@@ -49,7 +49,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, save_and_exit)
 
     if args.record:
-        from rotmg_rl.deploy.v3.render import render_frame
+        from rotmg_rl.deploy.render import render_frame
 
     print(json.dumps({"ready": True}), flush=True)
 

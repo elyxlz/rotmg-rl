@@ -13,7 +13,7 @@ deploy/
 ```
 
 The Python policy server the bridge spawns lives in the main tree at
-`src/rotmg_rl/deploy/v3/` (`server.py`, `obs.py`, `policy.py`).
+`src/rotmg_rl/deploy/` (`server.py`, `obs.py`, `policy.py`).
 
 ## Components on the box (for orientation)
 
@@ -86,7 +86,7 @@ redis-cli hset account.1 admin 1
 See `deploy/nrelay/README.md` for the full sequence (npm install, apply the `@realmlib/net` patches,
 `tsc`, `node start-bot.js`). On connect the bridge:
 
-1. spawns the Python policy server (`rotmg_rl.deploy.v3.server`, checkpoint `full_dungeon_95.pt`);
+1. spawns the Python policy server (`rotmg_rl.deploy.server`, checkpoint `full_dungeon_95.pt`);
 2. in the Nexus, sends `/max` then `/spawn Snake Pit Portal` and uses the spawned portal;
 3. in the Snake Pit, `/tppos`-es to the boss and lets the policy fight.
 

@@ -1,4 +1,4 @@
-"""Behavioral tests for the C Snake Pit env (csim/dungeon.h) via the single-env wrapper.
+"""Behavioral tests for the C Snake Pit env (pufferlib/ocean/dungeon/dungeon.h) via the single-env wrapper.
 
 Qualitative "does the env behave" coverage (local vision, exploration, snakes take damage, the boss's
 P1 point-blank-only blades). The exact spec numbers + the drift tripwire live in

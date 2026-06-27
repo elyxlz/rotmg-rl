@@ -3,7 +3,7 @@
 Draws the same player-POV view the old numpy env produced (camera on the player, like the real ROTMG
 client: explored floor + fog-of-war minimap + entity dots + HP/MP/boss bars), but reads a render-state
 snapshot taken from the C env (`CDungeonSingle.render_state()`) rather than re-simulating anything. The
-C env (csim/dungeon.h) is the single source of dynamics; this module only paints what it reports.
+C env (pufferlib/ocean/dungeon/dungeon.h) is the single source of dynamics; this module only paints what it reports.
 """
 
 from __future__ import annotations

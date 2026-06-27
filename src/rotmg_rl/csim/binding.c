@@ -83,6 +83,7 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     c->rew_survive = unpack(kwargs, "rew_survive");
     c->rew_damage_taken = unpack(kwargs, "rew_damage_taken");
     c->rew_clear = unpack(kwargs, "rew_clear");
+    c->rew_speed = unpack(kwargs, "rew_speed");
     c->rew_death = unpack(kwargs, "rew_death");
     c->rew_step = unpack(kwargs, "rew_step");
     c->rew_approach = unpack(kwargs, "rew_approach");

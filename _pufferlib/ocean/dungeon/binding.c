@@ -96,6 +96,7 @@ void my_init(Env *env, Dict *kwargs) {
     c->rew_survive = dict_get(kwargs, "rew_survive")->value;
     c->rew_damage_taken = dict_get(kwargs, "rew_damage_taken")->value;
     c->rew_clear = dict_get(kwargs, "rew_clear")->value;
+    c->rew_speed = dict_get(kwargs, "rew_speed")->value;
     c->rew_death = dict_get(kwargs, "rew_death")->value;
     c->rew_step = dict_get(kwargs, "rew_step")->value;
     c->rew_approach = dict_get(kwargs, "rew_approach")->value;

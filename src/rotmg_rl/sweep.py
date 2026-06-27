@@ -27,7 +27,7 @@ from rotmg_rl.schedule import N_SNAKES_MAX
 # don't sweep horizon since minibatch_size % horizon must hold, nor the clip coeffs per the guide).
 SWEEP_TRAIN = ("learning_rate", "gamma", "gae_lambda", "ent_coef", "vf_coef", "max_grad_norm", "minibatch_size", "ramp_frac")
 SWEEP_POLICY = ("hidden_size", "num_layers")
-SWEEP_ENV = ("rew_approach", "rew_boss_dmg", "rew_clear", "rew_death", "rew_step")
+SWEEP_ENV = ("rew_approach", "rew_boss_dmg", "rew_clear", "rew_speed", "rew_death", "rew_step")
 _INT_HP = ("hidden_size", "num_layers", "minibatch_size")
 
 
@@ -55,10 +55,10 @@ def _space(distribution, lo, hi, mean):
 
 
 def build_sweep_config(metric: str = "clear_d1") -> dict:
-    """Protein search space (15 knobs) -- give Protein the heavy lifting, few hand-set assumptions.
+    """Protein search space (16 knobs) -- give Protein the heavy lifting, few hand-set assumptions.
     Every knob is read by 4.0 PuffeRL / load_policy / the env Config (verified). gamma keeps the
     long-horizon attention (the lever that broke the 73% plateau); ramp_frac is the schedule's own knob.
-    NOTE: 15 dims wants more than the default trial budget -- raise --sweep-trials (~40+) for a thorough
+    NOTE: 16 dims wants more than the default trial budget -- raise --sweep-trials (~40+) for a thorough
     search; 16-24 is a coarse pass. We deliberately do NOT sweep the clip coefficients (guide warning)
     nor horizon (minibatch_size % horizon must hold)."""
     return {
@@ -87,6 +87,7 @@ def build_sweep_config(metric: str = "clear_d1") -> dict:
             "rew_approach": _space("uniform", 0.0, 0.06, 0.02),
             "rew_boss_dmg": _space("uniform", 0.5, 2.0, 1.0),
             "rew_clear": _space("uniform", 0.5, 3.0, 1.0),
+            "rew_speed": _space("uniform", 0.0, 0.6, 0.2),  # small fast-clear bonus, tuned alongside the clear reward
             "rew_death": _space("uniform", 0.1, 1.0, 0.5),
             "rew_step": _space("uniform", -0.003, 0.0, -0.001),
         },

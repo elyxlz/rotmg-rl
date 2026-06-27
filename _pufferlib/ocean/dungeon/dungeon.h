@@ -145,6 +145,7 @@ typedef struct {
     int enable_grenades, enable_minions;
     float rew_explore, rew_kill, rew_boss_dmg, rew_reach, rew_survive;
     float rew_damage_taken, rew_clear, rew_death, rew_step;
+    float rew_speed; /* terminal fast-clear bonus: rew_speed * (max_steps - steps)/max_steps, on a win only */
     float rew_approach; /* potential-based distance-to-boss shaping (0 = off) */
 } Config;
 
@@ -995,6 +996,7 @@ static void c_step(Dungeon *env) {
         terminated = 1;
         cleared = 1;
         reward += c->rew_clear;
+        reward += c->rew_speed * (float)(c->max_steps - env->steps) / (float)c->max_steps; /* faster clear -> more time left -> bigger bonus */
     } else if (env->player_hp <= 0.0f) {
         terminated = 1;
         reward -= c->rew_death;

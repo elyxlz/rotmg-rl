@@ -154,6 +154,10 @@ class DungeonConfig:
     rew_survive: float = 0.0  # NO reward for existing (paid the agent to flee -> cleared fell)
     rew_damage_taken: float = 0.5  # applied normalized by player_hp_max (full HP lost == 0.5)
     rew_clear: float = 1.0
+    # terminal fast-CLEAR bonus, granted only on a win alongside rew_clear: rew_speed * (max_steps -
+    # steps)/max_steps, so a faster clear scores higher. Small relative to rew_clear -- nudge toward
+    # efficient clears without punishing the exploration/survival a clear needs.
+    rew_speed: float = 0.2
     rew_death: float = 0.5  # small: don't make it terrified to engage the boss
     rew_step: float = -0.001  # net-negative existence: must make progress (kill the boss)
     # potential-based distance-to-boss shaping (privileged TRAINING signal, not in the obs): while

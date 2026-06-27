@@ -179,6 +179,67 @@ def test_timeout_truncates():
     env.close()
 
 
+def _clear_after_wait(wait_steps: int, max_steps: int = 200, rew_speed: float = 0.2) -> tuple[float, int]:
+    """Drive a deterministic point-blank clear after `wait_steps` idle (noop) ticks, returning the
+    total episode reward and the env step count at the clear. Everything but the fast-clear bonus is
+    held flat: no per-step reward (rew_step/survive/explore = 0), no boss-damage reward (so the random
+    nova roll can't leak in), no snakes/grenades, the boss can't shoot, and a fixed nova damage. The
+    only thing that varies with wait_steps is the terminal rew_speed bonus -- isolating it."""
+    cfg = DungeonConfig(
+        boss_hp_max=100.0,  # one fixed-damage nova (20 * defended(185,19) = 3320) overkills -> clears
+        player_hp_max=1e9,
+        n_snakes=0,
+        boss_wander_speed=0.0,
+        boss_shoots=False,
+        enable_grenades=False,
+        spell_dmg_lo=185.0,
+        spell_dmg_hi=185.0,  # fixed nova damage so the boss-damage step is identical in both runs
+        rew_boss_dmg=0.0,
+        rew_explore=0.0,
+        rew_step=0.0,
+        rew_survive=0.0,
+        rew_clear=1.0,
+        rew_speed=rew_speed,
+        max_steps=max_steps,
+        invuln_ticks=0,
+        opening_invuln_ticks=0,
+    )
+    env = CDungeonSingle(cfg, seed=1)
+    env.reset(seed=1)
+    env.put(player_x=BOSS_TILE[0] + 0.5, player_y=BOSS_TILE[1] + 0.5, fight_active=1, phase=1)
+    total, steps = 0.0, 0
+    for _ in range(wait_steps):  # idle: stationary, boss unharmed -> every per-step signal is 0
+        _, r, terminated, truncated, _ = env.step([0, 0, 0, 0])
+        total += r
+        steps += 1
+        assert not (terminated or truncated)
+    cleared = False
+    for action in ([0, 0, 0, 1], [0, 0, 0, 0]):  # cast the nova, then let it resolve into the boss
+        _, r, terminated, truncated, info = env.step(action)
+        total += r
+        steps += 1  # the env auto-resets steps on clear, so count what we drove (= env->steps at clear)
+        cleared = info["cleared"]
+        if terminated or truncated:
+            break
+    assert terminated and cleared
+    env.close()
+    return total, steps
+
+
+def test_fast_clear_scores_higher_than_slow_clear():
+    """The terminal fast-clear bonus rewards clearing with more time left: reward += rew_speed *
+    (max_steps - steps)/max_steps on a win. Two otherwise-identical clears that differ only in how
+    many idle ticks preceded the kill must differ in total reward by exactly that bonus delta,
+    rew_speed * (steps_slow - steps_fast)/max_steps (the per-step terms are all zeroed here)."""
+    max_steps, rew_speed = 200, 0.2
+    total_fast, steps_fast = _clear_after_wait(0, max_steps=max_steps, rew_speed=rew_speed)
+    total_slow, steps_slow = _clear_after_wait(40, max_steps=max_steps, rew_speed=rew_speed)
+    assert steps_slow > steps_fast
+    assert total_fast > total_slow  # clearing sooner is worth more
+    expected_delta = rew_speed * (steps_slow - steps_fast) / max_steps
+    assert (total_fast - total_slow) == pytest.approx(expected_delta, abs=1e-5)
+
+
 # --- drift tripwire ---------------------------------------------------------------------------------
 # A fixed seed + deterministic action schedule, 200 steps, with the boss HP high enough that it never
 # clears and the player HP high enough that it never dies (so the episode runs the full window). The

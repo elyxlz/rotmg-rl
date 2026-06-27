@@ -20,8 +20,8 @@ GROUND TRUTH (box: ssh ripbox [multiplexed]; 2x3090, 16 cores)
 
 TOOLING (use these, don't reinvent or hand-ssh):
 - scripts/box.sh {kill|train <args>|follow|status|metrics} -- all box management, one clean run.
-- scripts/wandb_metrics.py (box.sh metrics) -- ALWAYS read metrics via the wandb API, never
-  log-grep (the rich dashboard hides boss_hp_frac/learning_rate; the API revealed both).
+- scripts/box.sh metrics -- the latest per-episode + per-step metrics (the rich dashboard hides
+  boss_hp_frac/learning_rate; prefer the wandb API over log-grep when you need more).
 - train+rollout runs share a wandb group (box.sh sets WANDB_RUN_GROUP -> cfg['wandb_group']).
 
 KEY FINDINGS (so far):
@@ -46,8 +46,8 @@ M4 (PRIORITY: SPEED THE LOOP). Rewrite the env in C (PufferLib Ocean style) so i
 M3  Train a policy that COMPLETES the faithful sim >=80% (stochastic eval). Flat cold-start does
     NOT clear (proven). Bootstrap exploration with a PASSIVE BOSS (boss_shoots=False -> learn
     aim+kill), then an ADAPTIVE CURRICULUM (weak->full boss, add threat/snakes/grenades, shift
-    spawns fight->navigation). ALWAYS read run metrics via the wandb API (scripts/wandb_metrics.py),
-    not log-grepping. Watch entropy (collapse at ent_coef 0.001 -> raise it) + boss_hp_frac.
+    spawns fight->navigation). Read run metrics via the wandb API or `scripts/box.sh metrics`.
+    Watch entropy (collapse at ent_coef 0.001 -> raise it) + boss_hp_frac.
     Then AUTO-TUNE hparams (ent_coef/lr/reward coefs) with PufferLib's PROTEIN sweep (CARBS
     successor: pufferl.sweep, cost-aware Bayesian over env 'score'). Needs the C env (M4) for speed
     + a dense env 'score' metric = (1-boss_hp_frac)+cleared. Stop hand-guessing hparams.

@@ -97,6 +97,9 @@ static int my_log(PyObject* dict, Log* log) {
     /* score/episodes are per-episode sums (both already divided by n); their ratio is the
      * per-episode mean end-of-episode score -- the metric the Protein sweep maximizes. */
     assign_to_dict(dict, "score", log->episodes > 0.0f ? log->score / log->episodes : 0.0f);
+    /* clear_rate = fraction of episodes cleared = the TRUE per-episode clear rate (what we care
+     * about), unlike `cleared` above which is a per-STEP rate (clears/steps, ~0.03 even at 100%). */
+    assign_to_dict(dict, "clear_rate", log->episodes > 0.0f ? log->clear_count / log->episodes : 0.0f);
     assign_to_dict(dict, "episodes", log->episodes);
     return 0;
 }

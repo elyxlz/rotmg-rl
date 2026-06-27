@@ -64,6 +64,7 @@ typedef struct {
      * fields are summed then divided by n (step count) in vec_log, so my_log recovers the
      * per-episode mean as score/episodes (the n divisor cancels in the ratio). */
     float score;          /* sum of per-episode end-state scores */
+    float clear_count;    /* sum of per-episode cleared flags -> clear_rate = clear_count/episodes */
     float episodes;       /* count of episodes ended (terminated or truncated) */
     float n;              /* step count (required as the last field) */
 } Log;
@@ -827,6 +828,7 @@ static void c_step(Dungeon* env) {
     if (terminated || truncated) {
         float bhf_end = (env->boss_hp > 0.0 ? (float)env->boss_hp : 0.0f) / c->boss_hp_max;
         env->log.score += cleared ? 1.0f : (1.0f - bhf_end);
+        env->log.clear_count += cleared ? 1.0f : 0.0f;
         env->log.episodes += 1.0f;
     }
 

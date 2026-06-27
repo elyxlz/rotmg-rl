@@ -55,9 +55,11 @@ def build_sweep_config(metric: str) -> dict:
     return {
         "method": "Protein",
         "metric": metric,
+        "metric_distribution": "linear",  # clear rate is a linear 0..1 objective
         "goal": "maximize",
         "downsample": 5,
         "max_suggestion_cost": 3600,
+        "early_stop_quantile": 0.3,
         "train": {
             "learning_rate": _space("log_normal", 3e-4, 3e-2, 1.5e-2),
             "gamma": _space("logit_normal", 0.95, 0.999, 0.97),

@@ -29,6 +29,8 @@ def main() -> None:
     cmd = [
         "cc",
         "-O3",
+        "-Wall",
+        "-Wextra",
         "-march=native",
         "-funroll-loops",
         "-fopenmp",  # parallelize the per-env step loop across cores (vec_step)
@@ -39,11 +41,12 @@ def main() -> None:
         "-fwrapv",
         "-fno-strict-aliasing",
         "-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION",
-        f"-I{numpy.get_include()}",
-        f"-I{py_inc}",
+        # third-party headers as -isystem so -Wall/-Wextra only flags our own code (binding.c + dungeon.h)
+        f"-isystem{numpy.get_include()}",
+        f"-isystem{py_inc}",
+        f"-isystem{vendor}",
         f"-I{here}",
         f"-I{dungeon_dir}",  # dungeon.h + snakepit_map.h live in the vendored pufferlib tree
-        f"-I{vendor}",
         str(here / "binding.c"),
         "-lm",
         "-o",

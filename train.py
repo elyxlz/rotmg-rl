@@ -190,15 +190,24 @@ def build_args(num_envs: int, hidden_size: int, lr: float, gamma: float, gae_lam
     return args
 
 
-def train_continuous(args, total_steps, ramp_frac, rew_approach, n_snakes_max, out, use_wandb, cum_step=0, refresh_steps=REFRESH_STEPS, save_every=SAVE_EVERY, verbose=True):
-    """Run the continuous-difficulty schedule under ONE PuffeRL trainer. Returns (trainer, policy)."""
+def train_continuous(args, total_steps, ramp_frac, rew_approach, n_snakes_max, out, use_wandb, cum_step=0, refresh_steps=REFRESH_STEPS, save_every=SAVE_EVERY, verbose=True, eval_every=0, eval_episodes=24, boss_hp=BOSS_HP):
+    """Run the continuous-difficulty schedule under ONE PuffeRL trainer. Returns (trainer, policy,
+    evals) where evals is a list of {step, uptime, clear_d1} sampled every `eval_every` steps (empty
+    when eval_every<=0) -- the cost-aware trajectory the Protein sweep observes."""
     apply_difficulty(args, difficulty_at(0, total_steps, ramp_frac), rew_approach, n_snakes_max)
     vec = _C.create_vec(args, _C.gpu)
     policy = load_policy(args, vec)
     trainer = PuffeRL(args, vec, policy, verbose=False)
 
-    last_log, last_save, last_refresh, cur_d = 0.0, 0, 0, -1.0
+    evals: list[dict] = []
+    last_log, last_save, last_refresh, last_eval, cur_d = 0.0, 0, 0, 0, -1.0
     while trainer.global_step < total_steps:
+        if eval_every > 0 and (trainer.global_step - last_eval >= eval_every or trainer.global_step + trainer.total_agents * args["train"]["horizon"] >= total_steps):
+            last_eval = trainer.global_step
+            clear_d1 = eval_clear_rate(policy, eval_episodes, d=1.0, boss_hp=boss_hp, n_snakes_max=n_snakes_max)
+            evals.append({"step": trainer.global_step, "uptime": trainer.uptime, "clear_d1": clear_d1})
+            if verbose:
+                print(f"[eval] step={trainer.global_step / 1e6:.0f}M d=1 clear_rate={clear_d1:.3f}", flush=True)
         if trainer.global_step - last_refresh >= refresh_steps or cur_d < 0.0:
             last_refresh = trainer.global_step
             d = difficulty_at(trainer.global_step, total_steps, ramp_frac)
@@ -242,7 +251,7 @@ def train_continuous(args, total_steps, ramp_frac, rew_approach, n_snakes_max, o
                 import wandb
 
                 wandb.log(flat, step=step)
-    return trainer, policy
+    return trainer, policy, evals
 
 
 def main() -> None:
@@ -288,7 +297,7 @@ def main() -> None:
                            "hidden_size": a.hidden_size, "rew_approach": a.rew_approach, "rew_boss_dmg": a.rew_boss_dmg})
 
     args = build_args(a.num_envs, a.hidden_size, a.lr, a.gamma, a.gae_lambda, a.ent_coef, total, a.boss_hp, a.rew_boss_dmg)
-    trainer, policy = train_continuous(args, total, a.ramp_frac, a.rew_approach, a.n_snakes_max, out, a.wandb)
+    trainer, policy, _ = train_continuous(args, total, a.ramp_frac, a.rew_approach, a.n_snakes_max, out, a.wandb, boss_hp=a.boss_hp)
     final = out / "finish.pt"
     trainer.save_weights(str(final))
     trainer.close()

@@ -1,7 +1,7 @@
 """CNN-LSTM policy for the C dungeon env (flat float32 obs).
 
-Mirrors rotmg_rl.puffer_policy.DungeonPolicy but reads the native flat Box obs (no emulation):
-the first NUM_CH*GRID*GRID floats are the grid, the last NUM_SCALARS are the scalars.
+Reads the native flat Box obs: the first NUM_CH*GRID*GRID floats are the grid, the last
+NUM_SCALARS are the scalars.
 """
 
 from __future__ import annotations

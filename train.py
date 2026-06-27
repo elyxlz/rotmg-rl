@@ -57,7 +57,31 @@ STAGES = [
 ]
 
 
-SAVE_EVERY = 8_000_000  # rolling latest.pt cadence -> frequent eval/video updates within a phase
+SAVE_EVERY = 8_000_000  # rolling checkpoint + POV video cadence within a phase
+
+
+def _render_rollout(policy, max_frames=1200):
+    """In-process POV video of one full-dungeon episode (the training C env is headless, so this
+    runs the current policy on the numpy DungeonEnv). Logged to the SAME wandb run -- no follower."""
+    import numpy as np
+
+    from rotmg_rl.sim.dungeon import DungeonConfig, DungeonEnv
+
+    device = next(policy.parameters()).device
+    env = DungeonEnv(DungeonConfig(boss_hp_max=7500.0, n_snakes=40, spawn_in_room_prob=0.0), render_mode="rgb_array")
+    obs, _ = env.reset(seed=777)
+    state = policy.initial_state(1, device)
+    frames = []
+    with torch.no_grad():
+        for _ in range(max_frames):
+            flat = np.concatenate([obs["grid"].ravel(), obs["minimap"].ravel(), obs["scalars"]]).astype(np.float32)
+            logits, _, state = policy.forward_eval(torch.tensor(flat, device=device).unsqueeze(0), state)
+            action = [int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
+            obs, _, term, trunc, _ = env.step(action)
+            frames.append(env.render())
+            if term or trunc:
+                break
+    return frames
 
 
 def run_phase(args, phase_idx, name, gamma, gae, steps, policy, cum_step, use_wandb, out):
@@ -73,27 +97,27 @@ def run_phase(args, phase_idx, name, gamma, gae, steps, policy, cum_step, use_wa
     while trainer.global_step < steps:
         trainer.rollouts()
         trainer.train()
-        if trainer.global_step - last_save >= SAVE_EVERY:  # rolling checkpoint for the followers
+        if trainer.global_step - last_save >= SAVE_EVERY:  # rolling checkpoint + POV video
             last_save = trainer.global_step
             trainer.save_weights(str(out / "latest.pt"))
+            if use_wandb:
+                import wandb
+                import imageio.v2 as imageio
+
+                try:
+                    vid = str(out / "rollout.mp4")
+                    imageio.mimsave(vid, _render_rollout(policy), fps=15)
+                    wandb.log({"rollout": wandb.Video(vid, format="mp4")}, step=cum_step + trainer.global_step)
+                except Exception as exc:  # a render hiccup must never kill training
+                    print(f"[render] skipped: {exc}", flush=True)
         if time.time() - last_log > 1.0 or trainer.global_step >= steps:
             last_log = time.time()
-            flat = dict(unroll_nested_dict(trainer.log()))
-            # Replace the per-step env/* means (boss_hp_frac, cleared, player_hp_frac...) with
-            # legible END-OF-EPISODE metrics, derived from the raw fields the trainer already
-            # forwards (no PufferLib fork): per-step `cleared` summed = #cleared episodes so
-            # cleared/episodes = the true clear rate; boss HP at episode end = 1 - per-episode `score`.
-            ep = flat.get("env/episodes", 0.0)
-            clear_rate = flat.get("env/cleared", 0.0) / ep if ep > 0 else 0.0
-            boss_hp_remaining = 1.0 - flat.get("env/score", 0.0)
-            flat = {k: v for k, v in flat.items() if not k.startswith("env/")}  # drop the per-step means
-            flat["env/clear_rate"] = clear_rate  # under env/ to replace the per-step means on the dashboard
-            flat["env/boss_hp_remaining"] = boss_hp_remaining
+            flat = dict(unroll_nested_dict(trainer.log()))  # env/ now holds the legible end-of-episode metrics
             step = cum_step + trainer.global_step
             flat["phase"] = phase_idx
             flat["global_step"] = step
             print(f"[{name}] step={step/1e6:.1f}M SPS={flat.get('SPS', 0)/1e3:.0f}K "
-                  f"clear_rate={clear_rate:.2f} boss_left={boss_hp_remaining:.2f}", flush=True)
+                  f"clear_rate={flat.get('env/clear_rate', 0):.2f} boss_left={flat.get('env/boss_hp_remaining', 0):.2f}", flush=True)
             if use_wandb:
                 import wandb
 

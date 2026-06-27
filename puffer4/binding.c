@@ -99,18 +99,16 @@ void my_init(Env* env, Dict* kwargs) {
     init_globals();  /* idempotent: build the shared map/direction tables once */
 }
 
-/* Log fields are per-step accumulators; vecenv.h sums across envs then divides by n -> per-step
- * means (boss_hp_frac ~1.0 healthy, dropping as damaged; cleared = per-step clear rate). */
+/* Legible END-OF-EPISODE metrics (NOT per-step means). Every field below is a per-episode sum;
+ * vecenv.h divides all Log fields by n, so each sum and `episodes` arrive here both /n -> their
+ * ratio recovers the true per-episode value (the n divisor cancels). This is the first-class place
+ * to log: computed from the training rollouts the env already runs, surfaced under env/ for free. */
 void my_log(Log* log, Dict* out) {
-    dict_set(out, "boss_hp_frac", log->boss_hp_frac);
-    dict_set(out, "in_room", log->in_room);
-    dict_set(out, "cleared", log->cleared);
-    dict_set(out, "snakes", log->snakes);
-    dict_set(out, "player_hp_frac", log->player_hp_frac);
+    float ep = log->episodes;
+    dict_set(out, "clear_rate", ep > 0.0f ? log->clear_count / ep : 0.0f);          // fraction of episodes the boss dies
+    dict_set(out, "boss_hp_remaining", ep > 0.0f ? 1.0f - log->score / ep : 0.0f);   // mean boss HP frac at episode end
+    dict_set(out, "player_hp_remaining", ep > 0.0f ? log->player_hp_end_sum / ep : 0.0f);  // mean player HP frac at end
+    dict_set(out, "death_rate", ep > 0.0f ? log->death_count / ep : 0.0f);           // fraction of episodes the player dies
     dict_set(out, "reward", log->reward);
-    dict_set(out, "perf", log->perf);
-    /* score/episodes: per-episode end-state sums (both already /n); the ratio is the per-episode
-     * mean score (1.0 if cleared else 1-boss_hp_frac_at_end) -- the sweep metric. */
-    dict_set(out, "score", log->episodes > 0.0f ? log->score / log->episodes : 0.0f);
-    dict_set(out, "episodes", log->episodes);
+    dict_set(out, "episodes", ep);
 }

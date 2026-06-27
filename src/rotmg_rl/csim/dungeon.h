@@ -64,10 +64,12 @@ typedef struct {
      * "log a score, not raw reward"). score = 1.0 if cleared else (1 - boss_hp_frac_at_end). Both
      * fields are summed then divided by n (step count) in vec_log, so my_log recovers the
      * per-episode mean as score/episodes (the n divisor cancels in the ratio). */
-    float score;          /* sum of per-episode end-state scores */
-    float clear_count;    /* sum of per-episode cleared flags -> clear_rate = clear_count/episodes */
-    float episodes;       /* count of episodes ended (terminated or truncated) */
-    float n;              /* step count (required as the last field) */
+    float score;              /* sum of per-episode end-state scores */
+    float clear_count;        /* sum of per-episode cleared flags -> clear_rate = clear_count/episodes */
+    float player_hp_end_sum;  /* sum of player_hp_frac at episode end -> player_hp_remaining */
+    float death_count;        /* sum of player-death episodes -> death_rate */
+    float episodes;           /* count of episodes ended (terminated or truncated) */
+    float n;                  /* step count (required as the last field) */
 } Log;
 
 typedef struct {
@@ -903,6 +905,8 @@ static void c_step(Dungeon* env) {
         float bhf_end = (env->boss_hp > 0.0 ? (float)env->boss_hp : 0.0f) / c->boss_hp_max;
         env->log.score += cleared ? 1.0f : (1.0f - bhf_end);
         env->log.clear_count += cleared ? 1.0f : 0.0f;
+        env->log.player_hp_end_sum += (env->player_hp > 0.0f ? env->player_hp : 0.0f) / c->player_hp_max;
+        env->log.death_count += (terminated && !cleared) ? 1.0f : 0.0f;  // terminated but boss alive = died
         env->log.episodes += 1.0f;
     }
 

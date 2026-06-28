@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 
 N_SNAKES_MAX = 40
-BOSS_HP = 7500.0
+BOSS_HP = 9000.0  # real solo Stheno HP on the live server (7500 XML base, scaled by ScaleHP2 for 1 player)
 
 
 def _clamp01(x: float) -> float:
@@ -30,9 +30,10 @@ def difficulty_config(d: float, n_snakes_max: int = N_SNAKES_MAX) -> dict:
     n = round(n_snakes_max * d)
     lerp = lambda a, b: a + (b - a) * d  # noqa: E731
     return {
-        # Hold the in-room spawn near 1.0 across d: the /tppos deploy drops the policy point-blank INTO
-        # the protective swarm, so it must train the fight from inside the wall, not just navigate in.
-        "spawn_in_room_prob": lerp(1.0, 0.9),
+        # No-cheat deploy: the policy enters at the real portal and must NAVIGATE to the boss itself
+        # (no /tppos). Ramp the spawn from in-room (low d: learn the fight in isolation) to far-from-boss
+        # (high d: spawn at the entrance and navigate the maze into the swarm wall on its own).
+        "spawn_in_room_prob": lerp(1.0, 0.05),
         "spawn_in_room_radius": lerp(6.0, 14.0),
         "n_snakes": n,
         "n_snakes_jitter": round(0.35 * n),

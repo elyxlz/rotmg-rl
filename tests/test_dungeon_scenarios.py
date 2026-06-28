@@ -22,6 +22,7 @@ import pytest
 pytest.importorskip("rotmg_rl.csim.binding")
 from rotmg_rl.config import DungeonConfig  # noqa: E402
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle  # noqa: E402
+from rotmg_rl.sim.snakepit_map import _nearest_walkable, geodesic_field, load_jm  # noqa: E402
 
 BOSS_TILE = (16, 73)  # _nearest_walkable(Stheno) on the real map (matches the C env's BOSS_X/Y)
 
@@ -316,6 +317,72 @@ def test_protective_swarm_replenishes():
     env.close()
 
 
+# --- navigation fidelity (collision footprint + geodesic potential) ---------------------------------
+
+
+def test_footprint_blocks_concave_corner_cut():
+    """The 0.5-tile player footprint (isValidPosition) cannot cut a concave corner the dimensionless
+    point model cut. On the real map, tile (CX,CY) is floor, its east neighbor is a WALL, and its
+    north neighbor is open -- a concave corner. A point at (CX+0.5,CY+0.5) stepping NE samples only
+    tile centers, so walkable_at lets its x advance toward the wall; the 0.5 footprint's east edge
+    reaches into the wall tile, so the x-advance is rejected and the player slides north along the
+    wall instead. This is the cornering the live server enforces and the point sim never trained."""
+    cx, cy = 97, 55
+    m = load_jm()
+    assert m.walkable[cy, cx] and not m.walkable[cy, cx + 1]  # the concave corner: floor with a wall to the east
+    assert m.walkable[cy + 1, cx] and m.walkable[cy, cx - 1]  # north + west open (so only the corner is tight)
+    cfg = DungeonConfig(player_speed=0.3, player_radius=0.5, n_snakes=0, boss_wander_speed=0.0, enable_grenades=False)
+    env = CDungeonSingle(cfg, seed=0)
+    env.reset(seed=0)
+    env.put(player_x=cx + 0.5, player_y=cy + 0.5, fight_active=0, phase=0)
+    env.step([2, 0, 0, 0])  # move_idx 2 = NE (g_move_dx[1]=cos45, g_move_dy[1]=sin45)
+    s = env.get()
+    # x stays put: the footprint blocks the eastward advance the point model (walkable_at on the floor
+    # tile center) would have allowed. y advances freely -> the player slides north, never cutting in.
+    assert s["px"] == pytest.approx(cx + 0.5, abs=1e-4)
+    assert s["py"] > cy + 0.5 + 0.2
+    env.close()
+
+
+def _descend_geodesic(geo: np.ndarray, walkable: np.ndarray, start: tuple[int, int], target: tuple[int, int]) -> list[tuple[int, int]]:
+    """Follow steepest geodesic descent (8-connected) from start to target. The geodesic field has no
+    local minimum except the target, so the descent always arrives -- and every step is, by
+    construction, strictly closer, which is exactly the property the approach reward needs."""
+    h, w = walkable.shape
+    x, y = start
+    path = [(x, y)]
+    while (x, y) != target:
+        best, best_val = None, geo[y, x]
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h and walkable[ny, nx] and geo[ny, nx] < best_val:
+                    best, best_val = (nx, ny), geo[ny, nx]
+        assert best is not None, f"geodesic descent stuck at {(x, y)} (a local minimum off the boss)"
+        x, y = best
+        path.append((x, y))
+    return path
+
+
+def test_geodesic_field_decreases_along_entrance_to_boss_path():
+    """The privileged approach potential (baked into MAP_GEODESIC from this same function) decreases
+    monotonically along the real entrance->boss route, so closing GEODESIC distance -- including the
+    south-then-west detour that INCREASES euclidean distance -- always earns positive reward. The
+    field's value at the entrance exceeds the straight-line distance, proving the detour is real."""
+    m = load_jm()
+    bx, by = _nearest_walkable(m.walkable, 16, 73)
+    ex, ey = _nearest_walkable(m.walkable, 110, 21)
+    geo = geodesic_field(m.walkable, (bx, by))
+    assert geo[by, bx] == 0.0  # zero at the boss
+    euclid = ((ex - bx) ** 2 + (ey - by) ** 2) ** 0.5
+    assert np.isfinite(geo[ey, ex]) and geo[ey, ex] > euclid + 10.0  # the detour is ~28 tiles longer than straight-line
+    path = _descend_geodesic(geo, m.walkable, (ex, ey), (bx, by))
+    vals = [float(geo[y, x]) for x, y in path]
+    assert all(vals[i + 1] < vals[i] for i in range(len(vals) - 1))  # strictly closing every step
+
+
 # --- drift tripwire ---------------------------------------------------------------------------------
 # A fixed seed + deterministic action schedule, 200 steps, with the boss HP high enough that it never
 # clears and the player HP high enough that it never dies (so the episode runs the full window). The
@@ -323,7 +390,9 @@ def test_protective_swarm_replenishes():
 # are a TRIPWIRE, not a spec: regenerate them deliberately if the dynamics intentionally change.
 GOLDEN_SEED = 2024
 GOLDEN_STEPS = 200
-GOLDEN = {"total_reward": 0.5704, "obs_checksum": 51500.75, "player_hp": 999991.0, "boss_hp": 6445.59}
+# Regenerated when the player gained a 0.5-tile collision footprint (isValidPosition) + player_radius
+# 0.4->0.5: movement near walls and the player hitbox both changed, so the trajectory legitimately moved.
+GOLDEN = {"total_reward": 0.8275, "obs_checksum": 52072.52, "player_hp": 997405.3, "boss_hp": 6758.09}
 
 
 def _golden_actions(n: int) -> np.ndarray:

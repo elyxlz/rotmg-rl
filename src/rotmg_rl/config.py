@@ -59,7 +59,7 @@ SNAKE_TIMER_JITTER = 10  # initial shoot-timer desync (ticks)
 @dataclass
 class DungeonConfig:
     player_speed: float = 0.773  # MoveSpeed at SPD 50: 0.004 + 50/75*(0.0096-0.004) = 0.00773 t/ms -> 0.773 t/tick
-    player_radius: float = 0.4
+    player_radius: float = 0.5  # GameObject.radius_ (Player): the 0.5-tile footprint the corner/wall collision test enforces
     max_steps: int = 4000
     activation_range: float = 20.0
     spawn_in_room_prob: float = 0.0  # curriculum: prob of spawning near the boss (practice the fight)

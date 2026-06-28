@@ -217,7 +217,7 @@ typedef struct {
     unsigned char discovered[MAP_H * MAP_W]; /* fog-of-war: tiles ever within VIS_RADIUS of the player */
     float mm_terr[MM * MM];                  /* minimap terrain pool, accumulated as tiles are discovered (+1/-1/0) */
     int boss_seen;                           /* boss has been within vision at least once */
-    double prev_boss_dist;                   /* distance-shaping baseline: player->boss distance last step */
+    double prev_boss_geo;                    /* approach-shaping baseline: geodesic distance-to-boss last step */
     int steps;
     uint64_t rng_state;     /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
@@ -286,6 +286,21 @@ static inline int walkable_at(float fx, float fy) {
     if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H)
         return 0;
     return MAP_WALKABLE[y * MAP_W + x] != 0;
+}
+
+/* A tile is occupied (blocks a footprint edge) if it is off-map or non-walkable. MAP_WALKABLE bakes
+ * walls + occupySquare/fullOccupy objects, so this mirrors the real client's isFullOccupy. */
+static inline int occupied_tile(int x, int y) {
+    return x < 0 || x >= MAP_W || y < 0 || y >= MAP_H || MAP_WALKABLE[y * MAP_W + x] == 0;
+}
+
+/* Geodesic distance-to-boss (tiles) baked per walkable tile. Privileged TRAINING potential for the
+ * approach reward only -- never an obs channel. Sampled at the player's tile. */
+static inline float geo_at(float fx, float fy) {
+    int x = (int)fx, y = (int)fy;
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H)
+        return GEODESIC_UNREACHABLE;
+    return MAP_GEODESIC[y * MAP_W + x];
 }
 
 static double dist_ff(float ax, float ay, float bx, float by) {
@@ -851,10 +866,35 @@ static void spawn_snakes(Dungeon *env) {
 
 /* --- player movement --- */
 
+/* Real client Player.isValidPosition: the player is a disk of radius player_radius (0.5 = radius_),
+ * so a candidate position is rejected if its footprint overlaps an occupied tile -- the player can't
+ * cut concave corners and 1-tile passages stay tight. The candidate's own tile must be walkable;
+ * then each axis whose 0.5-extent crosses a tile boundary checks that neighbor, and when both cross
+ * the diagonal corner is checked too. At player_radius 0.5 the (xf<r / xf>1-r) crossings reduce
+ * exactly to isValidPosition's xFrac/yFrac<0.5 corner-neighbor checks. */
+static int position_valid(Dungeon *env, float fx, float fy) {
+    if (!walkable_at(fx, fy))
+        return 0;
+    float r = env->cfg.player_radius;
+    int ix = (int)fx, iy = (int)fy;
+    float xf = fx - ix, yf = fy - iy;
+    int left = xf < r, right = xf > 1.0f - r;
+    int down = yf < r, up = yf > 1.0f - r;
+    int nx = left ? ix - 1 : (right ? ix + 1 : ix);
+    int ny = down ? iy - 1 : (up ? iy + 1 : iy);
+    if ((left || right) && occupied_tile(nx, iy))
+        return 0;
+    if ((down || up) && occupied_tile(ix, ny))
+        return 0;
+    if ((left || right) && (down || up) && occupied_tile(nx, ny))
+        return 0;
+    return 1;
+}
+
 static void try_move(Dungeon *env, float sx, float sy) {
-    if (walkable_at(env->px + sx, env->py))
+    if (position_valid(env, env->px + sx, env->py))
         env->px = env->px + sx;
-    if (walkable_at(env->px, env->py + sy))
+    if (position_valid(env, env->px, env->py + sy))
         env->py = env->py + sy;
 }
 
@@ -1031,7 +1071,7 @@ static void c_reset(Dungeon *env) {
     env->boss_y = by + 0.5;
     env->boss_spawn_x = bx + 0.5;
     env->boss_spawn_y = by + 0.5;
-    env->prev_boss_dist = dist_df(env->boss_x, env->boss_y, env->px, env->py);
+    env->prev_boss_geo = geo_at(env->px, env->py);
     env->boss_hp = c->boss_hp_max;
     env->phase = 0;
     env->fight_active = 0;
@@ -1107,9 +1147,9 @@ static void c_step(Dungeon *env) {
     }
 
     if (!env->fight_active && c->rew_approach != 0.0f) { /* dense gradient toward the boss while navigating */
-        double cur_boss_dist = dist_df(env->boss_x, env->boss_y, env->px, env->py);
-        reward += c->rew_approach * (env->prev_boss_dist - cur_boss_dist);
-        env->prev_boss_dist = cur_boss_dist;
+        double cur_boss_geo = geo_at(env->px, env->py);    /* geodesic, not euclidean: rewards the real path, not pressing into walls */
+        reward += c->rew_approach * (env->prev_boss_geo - cur_boss_geo);
+        env->prev_boss_geo = cur_boss_geo;
     }
 
     if (!env->fight_active && dist_df(env->boss_x, env->boss_y, env->px, env->py) <= c->activation_range) {

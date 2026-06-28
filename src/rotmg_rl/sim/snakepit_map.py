@@ -1,21 +1,30 @@
 """Load the real Snake Pit dungeon map (.jm) into a navigable grid.
 
 The .jm is base64+zlib-compressed uint16 tile indices into a `dict` of tile types (ground +
-objects). "Empty" ground is void/wall; named ground is floor; objects whose id contains "Wall"
-block movement. This gives the navigation map for the whole-dungeon sim (M1).
+objects). "Empty" ground is void/wall; named ground is floor; an object blocks movement when the
+real client would block it: its id contains "Wall", or it is flagged OccupySquare/FullOccupy in the
+static-objects XML (e.g. Grey Pillar, Broken Grey Pillar). This gives the navigation map for the
+whole-dungeon sim (M1).
 """
 
 from __future__ import annotations
 
 import base64
+import functools
+import heapq
 import json
+import math
 import pathlib
+import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass
 
 import numpy as np
 
-MAP_PATH = pathlib.Path(__file__).resolve().parents[3] / "data" / "maps" / "snakepit.jm"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+MAP_PATH = REPO_ROOT / "data" / "maps" / "snakepit.jm"
+_XML_DIR = REPO_ROOT / "vendor" / "betterSkillys" / "source" / "Shared" / "resources" / "xml" / "prod"
+STATIC_OBJECTS_XML = _XML_DIR / "EmbeddedData_StaticObjectsCXML.xml"
 
 
 @dataclass
@@ -39,14 +48,58 @@ def load_jm(path: str | pathlib.Path = MAP_PATH) -> DungeonMap:
     return DungeonMap(w, h, idx, _walkable(d["dict"], idx), d["dict"])
 
 
+@functools.lru_cache(maxsize=1)
+def _occupy_ids() -> frozenset[str]:
+    """Object ids the real client treats as blocking: those flagged <OccupySquare/> or <FullOccupy/>
+    in the static-objects XML (Player.isFullOccupy / Square.isWalkable). Parsed once, cached."""
+    root = ET.fromstring(STATIC_OBJECTS_XML.read_text(encoding="latin-1"))
+    ids: set[str] = set()
+    for obj in root.findall("Object"):
+        oid = obj.get("id")
+        if oid and any(child.tag in ("OccupySquare", "FullOccupy") for child in obj):
+            ids.add(oid)
+    return frozenset(ids)
+
+
 def _walkable(entries: list, idx: np.ndarray) -> np.ndarray:
+    occupy = _occupy_ids()
     wlk = np.zeros(idx.shape, bool)
     for i, e in enumerate(entries):
         ground = e.get("ground", "Empty")
-        blocked = any("Wall" in (o.get("id") or "") for o in (e.get("objs") or []))
+        blocked = any("Wall" in (o.get("id") or "") or (o.get("id") or "") in occupy for o in (e.get("objs") or []))
         if ground != "Empty" and not blocked:
             wlk[idx == i] = True
     return wlk
+
+
+def geodesic_field(walkable: np.ndarray, target: tuple[int, int]) -> np.ndarray:
+    """Dijkstra geodesic distance (in tiles) from every walkable tile to `target`, over the real
+    walkable grid. 8-connected with no diagonal corner-cutting (a diagonal step is allowed only when
+    both orthogonal neighbors are walkable), diagonal cost sqrt(2) so distances stay in tile units
+    (comparable to the euclidean baseline the approach reward was tuned against). Unreachable tiles
+    are +inf. This is the privileged training-only navigation potential -- never an obs channel."""
+    h, w = walkable.shape
+    dist = np.full((h, w), math.inf, np.float64)
+    tx, ty = target
+    dist[ty, tx] = 0.0
+    pq: list[tuple[float, int, int]] = [(0.0, tx, ty)]
+    r2 = math.sqrt(2.0)
+    steps = ((1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0), (1, 1, r2), (1, -1, r2), (-1, 1, r2), (-1, -1, r2))
+    while pq:
+        d, x, y = heapq.heappop(pq)
+        if d > dist[y, x]:
+            continue
+        for dx, dy, cost in steps:
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < w and 0 <= ny < h) or not walkable[ny, nx]:
+                continue
+            if dx != 0 and dy != 0 and (not walkable[y, nx] or not walkable[ny, x]):
+                continue  # no corner-cut: the footprint blocks diagonals past a wall corner
+            nd = d + cost
+            if nd < dist[ny, nx]:
+                dist[ny, nx] = nd
+                heapq.heappush(pq, (nd, nx, ny))
+    return dist
 
 
 def _nearest_walkable(walkable, x, y):

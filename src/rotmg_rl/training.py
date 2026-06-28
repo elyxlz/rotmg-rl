@@ -31,8 +31,17 @@ from pufferlib.torch_pufferl import (  # ty: ignore[unresolved-import]  pufferli
     load_policy,
 )
 
-from rotmg_rl.eval import eval_clear_rate
-from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, apply_difficulty, difficulty_at, difficulty_config
+from rotmg_rl.eval import clear_rate_ladder, eval_clear_rate
+from rotmg_rl.schedule import (
+    BOSS_HP,
+    CURRICULUM_RUNGS,
+    LADDER_EPISODES,
+    N_SNAKES_MAX,
+    apply_difficulty,
+    curriculum_depth,
+    difficulty_at,
+    difficulty_config,
+)
 from rotmg_rl.sweep import apply_hparams, build_sweep_config, run_sweep
 from rotmg_rl.video import render_rollout
 
@@ -86,11 +95,14 @@ def train_continuous(
     verbose=True,
     eval_every=0,
     eval_episodes=24,
+    ladder_episodes=LADDER_EPISODES,
     boss_hp=BOSS_HP,
 ):
     """Run the continuous-difficulty schedule under ONE PuffeRL trainer. Returns (trainer, policy,
-    evals) where evals is a list of {step, uptime, clear_d1} sampled every `eval_every` steps (empty
-    when eval_every<=0) -- the cost-aware trajectory the Protein sweep observes."""
+    evals) where evals is a list of {step, uptime, depth, clear_d1, ladder} sampled every `eval_every`
+    steps (empty when eval_every<=0) -- the cost-aware trajectory the Protein sweep observes. `depth` is
+    the curriculum-depth objective (how far up the difficulty ladder the policy clears); `clear_d1` is
+    the d=1 rung of that same ladder, kept for reporting the real full-difficulty number."""
     apply_difficulty(args, difficulty_at(0, total_steps, ramp_frac), rew_approach, n_snakes_max)
     vec = _C.create_vec(args, _C.gpu)
     policy = load_policy(args, vec)
@@ -104,10 +116,13 @@ def train_continuous(
             or trainer.global_step + trainer.total_agents * args["train"]["horizon"] >= total_steps
         ):
             last_eval = trainer.global_step
-            clear_d1 = eval_clear_rate(policy, eval_episodes, d=1.0, boss_hp=boss_hp, n_snakes_max=n_snakes_max)
-            evals.append({"step": trainer.global_step, "uptime": trainer.uptime, "clear_d1": clear_d1})
+            ladder = clear_rate_ladder(policy, ladder_episodes, boss_hp=boss_hp, n_snakes_max=n_snakes_max)
+            depth = curriculum_depth(ladder)
+            clear_d1 = ladder[CURRICULUM_RUNGS[-1]]  # the d=1 rung == the TRUE full-difficulty clear rate
+            evals.append({"step": trainer.global_step, "uptime": trainer.uptime, "depth": depth, "clear_d1": clear_d1, "ladder": ladder})
             if verbose:
-                print(f"[eval] step={trainer.global_step / 1e6:.0f}M d=1 clear_rate={clear_d1:.3f}", flush=True)
+                rung_str = " ".join(f"{d:.1f}:{ladder[d]:.2f}" for d in CURRICULUM_RUNGS)
+                print(f"[eval] step={trainer.global_step / 1e6:.0f}M depth={depth:.3f} clear_d1={clear_d1:.3f} | {rung_str}", flush=True)
         if trainer.global_step - last_refresh >= refresh_steps or cur_d < 0.0:
             last_refresh = trainer.global_step
             d = difficulty_at(trainer.global_step, total_steps, ramp_frac)
@@ -161,7 +176,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description="THE Snake Pit entry point: by default sweep hyperparameters then train the winner.")
     p.add_argument("--wandb", action="store_true")
     p.add_argument("--no-sweep", action="store_true", help="skip the sweep; train the full schedule directly with the current good defaults")
-    p.add_argument("--hp-json", default=None, help="with --no-sweep: a JSON hp dict (e.g. a sweep winner) to train, overriding the CLI defaults")
+    p.add_argument(
+        "--hp-json", default=None, help="with --no-sweep: a JSON hp dict (e.g. a sweep winner) to train, overriding the CLI defaults"
+    )
     p.add_argument("--out-dir", default="checkpoints/curriculum")
     p.add_argument("--num-envs", type=int, default=1024)
     p.add_argument("--full-steps", type=int, default=460_000_000, help="length of the final full-difficulty (7500-HP) run")

@@ -19,7 +19,7 @@ import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not 
 
 from rotmg_rl.config import DungeonConfig
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle
-from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, difficulty_config
+from rotmg_rl.schedule import BOSS_HP, CURRICULUM_RUNGS, N_SNAKES_MAX, difficulty_config
 
 ACT_SIZES = [9, 32, 2, 2]  # MultiDiscrete: move, aim, shoot, cast
 
@@ -57,6 +57,20 @@ def eval_clear_rate(
                     break
             env.close()
     return clears / max(1, episodes)
+
+
+def clear_rate_ladder(
+    policy,
+    episodes: int,
+    rungs: tuple[float, ...] = CURRICULUM_RUNGS,
+    boss_hp: float = BOSS_HP,
+    n_snakes_max: int = N_SNAKES_MAX,
+    seed0: int = 50_000,
+) -> dict[float, float]:
+    """TRUE per-episode clear rate at each rung of the difficulty ladder -- the per-rung signal the
+    curriculum-depth objective consumes. `episodes` is per rung (kept modest so the ladder stays cheap
+    relative to training). Each rung reuses the same d-parameterized clear eval the d=1 objective uses."""
+    return {d: eval_clear_rate(policy, episodes, d=d, boss_hp=boss_hp, n_snakes_max=n_snakes_max, seed0=seed0) for d in rungs}
 
 
 @torch.no_grad()

@@ -1,5 +1,5 @@
-"""Protein hyperparameter sweep (cost-aware Bayesian over the TRUE d=1 clear rate) + the hparam
-plumbing the training entry shares.
+"""Protein hyperparameter sweep (cost-aware Bayesian over CURRICULUM DEPTH -- how far up the difficulty
+ladder the policy clears) + the hparam plumbing the training entry shares.
 
 `run_sweep` drives the continuous-difficulty training loop (rotmg_rl.training) over a Protein search
 space and returns the best hyperparameter dict. `python3 train.py` calls it then trains the winner;
@@ -19,7 +19,7 @@ from copy import deepcopy
 import pufferlib.sweep  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
 from pufferlib import pufferl  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
 
-from rotmg_rl.schedule import N_SNAKES_MAX
+from rotmg_rl.schedule import LADDER_EPISODES, N_SNAKES_MAX
 
 # Swept hyperparameters, by the pufferl-config section they live in. ramp_frac is schedule-only
 # (PuffeRL ignores it; train_continuous reads it). Every key here is verified to be read by 4.0
@@ -54,7 +54,7 @@ def _space(distribution, lo, hi, mean):
     return {"distribution": distribution, "min": lo, "max": hi, "mean": mean, "scale": "auto"}
 
 
-def build_sweep_config(metric: str = "clear_d1") -> dict:
+def build_sweep_config(metric: str = "curriculum_depth") -> dict:
     """Protein search space (16 knobs) -- give Protein the heavy lifting, few hand-set assumptions.
     Every knob is read by 4.0 PuffeRL / load_policy / the env Config (verified). gamma keeps the
     long-horizon attention (the lever that broke the 73% plateau); ramp_frac is the schedule's own knob.
@@ -64,7 +64,7 @@ def build_sweep_config(metric: str = "clear_d1") -> dict:
     return {
         "method": "Protein",
         "metric": metric,
-        "metric_distribution": "linear",  # clear rate is a linear 0..1 objective
+        "metric_distribution": "linear",  # curriculum depth is a linear 0..1 objective
         "goal": "maximize",
         "downsample": 5,
         "max_suggestion_cost": 3600,
@@ -94,10 +94,14 @@ def build_sweep_config(metric: str = "clear_d1") -> dict:
     }
 
 
-def run_sweep(num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes, n_snakes_max, out) -> dict | None:
-    """Protein sweep maximizing the TRUE d=1 clear rate (eval'd every eval_every steps -> the observed
-    cost-aware uptime trajectory). Trials use the reduced sweep_boss_hp so the metric has gradient in a
-    modest budget. Returns the best hyperparameter dict (None if every trial failed)."""
+def run_sweep(
+    num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes, n_snakes_max, out, ladder_episodes=LADDER_EPISODES
+) -> dict | None:
+    """Protein sweep maximizing CURRICULUM DEPTH -- how far up the difficulty ladder the policy clears
+    (eval'd every eval_every steps -> the observed cost-aware uptime trajectory). Depth gives gradient on
+    the authored map where the d=1 clear rate is 0 for every config at a sweep budget. The objective is
+    purely clear-based (per-rung clear rate only); the reward cocktail stays a search variable Protein
+    tunes to maximize it. Returns the best hyperparameter dict (None if every trial failed)."""
     from rotmg_rl.training import train_continuous  # deferred: training imports this module at top
 
     args = pufferl.load_config("dungeon")
@@ -109,7 +113,7 @@ def run_sweep(num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes,
     sweep_obj = getattr(pufferlib.sweep, method)(sweep_config)
     eval_every = max(1, trial_steps // 5)
 
-    best = {"clear": -1.0, "hp": None}
+    best = {"depth": -1.0, "hp": None}
     for i in range(sweep_trials):
         if i > 0:  # the first trial uses the config defaults; Protein suggests thereafter
             sweep_obj.suggest(args)
@@ -131,6 +135,7 @@ def run_sweep(num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes,
                 use_wandb=False,
                 eval_every=eval_every,
                 eval_episodes=eval_episodes,
+                ladder_episodes=ladder_episodes,
                 boss_hp=sweep_boss_hp,
             )
             trainer.close()
@@ -142,17 +147,20 @@ def run_sweep(num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes,
         if not evals:
             sweep_obj.observe(args, 0.0, max(time.time() - t0, 1.0), is_failure=True)
             continue
-        peak = max(e["clear_d1"] for e in evals)
-        print(f"TRIAL {i + 1}: d=1 clear final={evals[-1]['clear_d1']:.3f} peak={peak:.3f}", flush=True)
-        for e in evals:  # cost-aware trajectory: clear_d1 at uptime e['uptime'], cost in timesteps
+        peak = max(e["depth"] for e in evals)
+        print(
+            f"TRIAL {i + 1}: depth final={evals[-1]['depth']:.3f} peak={peak:.3f} (d=1 clear final={evals[-1]['clear_d1']:.3f})",
+            flush=True,
+        )
+        for e in evals:  # cost-aware trajectory: curriculum depth at uptime e['uptime'], cost in timesteps
             args["train"]["total_timesteps"] = e["step"]
-            sweep_obj.observe(args, float(e["clear_d1"]), float(e["uptime"]))
+            sweep_obj.observe(args, float(e["depth"]), float(e["uptime"]))
         args["train"]["total_timesteps"] = trial_steps
-        if peak > best["clear"]:
-            best = {"clear": peak, "hp": hp}
-            print(f"  >> new best d=1 clear {peak:.3f}", flush=True)
+        if peak > best["depth"]:
+            best = {"depth": peak, "hp": hp}
+            print(f"  >> new best curriculum depth {peak:.3f}", flush=True)
 
-    print(f"\n==== SWEEP DONE. best d=1 clear (boss_hp={sweep_boss_hp:g}): {best['clear']:.3f} ====", flush=True)
+    print(f"\n==== SWEEP DONE. best curriculum depth (boss_hp={sweep_boss_hp:g}): {best['depth']:.3f} ====", flush=True)
     print(f"==== BEST CONFIG: {best['hp']} ====", flush=True)
     return best["hp"]
 

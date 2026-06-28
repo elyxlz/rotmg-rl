@@ -539,11 +539,16 @@ class Protein:
             prune_pareto = True,
         ):
         # Process sweep config. NOTE: sweep_config takes precedence. It's not good.
-        _use_gpu = sweep_config['use_gpu'] if 'use_gpu' in sweep_config else use_gpu
         _prune_pareto = sweep_config['prune_pareto'] if 'prune_pareto' in sweep_config else prune_pareto
         _max_suggestion_cost = sweep_config['max_suggestion_cost'] if 'max_suggestion_cost' in sweep_config else max_suggestion_cost
 
-        self.device = torch.device("cuda:0" if _use_gpu and torch.cuda.is_available() else "cpu")
+        # LEGACY(remove-when: the box's torch ships a libtorch_cuda_linalg that resolves its CUDA
+        # linalg symbols): pin the GP surrogate to CPU. gpytorch fits/queries the GP with CUDA
+        # Cholesky/cholesky_solve, which aborts here ("libtorch_cuda_linalg.so: undefined symbol")
+        # once >num_random_samples trials accumulate and the GP path first runs (~trial 11). The
+        # surrogate is tiny (<=gp_max_obs x ~16 dims), so CPU Cholesky is instant; RL training keeps
+        # the GPU to itself. use_gpu / sweep_config['use_gpu'] are intentionally ignored here.
+        self.device = torch.device("cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
         self.metric_distribution = sweep_config['metric_distribution']
         self.global_search_scale = global_search_scale

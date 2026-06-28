@@ -15,6 +15,7 @@ policy -> checkpoints/curriculum/finish.pt; eval with `python -m rotmg_rl.eval`.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import sys
 import time
@@ -160,6 +161,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="THE Snake Pit entry point: by default sweep hyperparameters then train the winner.")
     p.add_argument("--wandb", action="store_true")
     p.add_argument("--no-sweep", action="store_true", help="skip the sweep; train the full schedule directly with the current good defaults")
+    p.add_argument("--hp-json", default=None, help="with --no-sweep: a JSON hp dict (e.g. a sweep winner) to train, overriding the CLI defaults")
     p.add_argument("--out-dir", default="checkpoints/curriculum")
     p.add_argument("--num-envs", type=int, default=1024)
     p.add_argument("--full-steps", type=int, default=460_000_000, help="length of the final full-difficulty (7500-HP) run")
@@ -227,7 +229,7 @@ def main() -> None:
 
     # pick the hyperparameters: sweep for the winner, or the CLI defaults on --no-sweep.
     if a.no_sweep:
-        hp = cli_hp
+        hp = json.loads(a.hp_json) if a.hp_json else cli_hp
     else:
         hp = run_sweep(a.num_envs, a.sweep_trials, a.trial_steps, a.sweep_boss_hp, a.eval_episodes, a.n_snakes_max, out)
         if hp is None:  # every trial failed -> fall back to the CLI defaults rather than abort

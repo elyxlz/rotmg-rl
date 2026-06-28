@@ -52,7 +52,10 @@ SNAKE_TYPES = np.array(
     ],
     np.float32,
 )
-SNAKE_WEIGHTS = np.array([0.40, 0.22, 0.15, 0.15, 0.08], np.float32)  # spawn mix: many fillers, few greaters
+# spawn mix = the real .jm population proportions (Pit Viper 156 + Pit Snake 134 = 290 weak fillers,
+# Fire Python 22, Yellow 24 + Brown 11 = 35, Greater Pit Snake 22, Greater Pit Viper 36; total 405).
+# The old [0.40,0.22,0.15,0.15,0.08] over-weighted the lethal greaters (~60% non-filler vs real ~28%).
+SNAKE_WEIGHTS = np.array([0.717, 0.054, 0.086, 0.054, 0.089], np.float32)  # weak filler carries the rounding remainder
 SNAKE_TIMER_JITTER = 10  # initial shoot-timer desync (ticks)
 
 
@@ -67,15 +70,18 @@ class DungeonConfig:
     # navigate-under-threats incrementally (6 = in-room, ~107 = entrance distance)
     spawn_in_room_radius: float = 6.0
     random_spawn_prob: float = 0.0  # spawn at a random walkable tile anywhere (coverage, less overfitting)
-    # Wizard, realistic maxed T7 Snake-Pit loadout (gear stats are StatDataType bonuses resolved via
-    # GetStatIndex, NOT raw core-stat ids): 670 base HP + 100 ring (stat0) + 40 spell (stat0) = 810;
-    # 385 base MP + 30 robe (stat3=MaxMana) + 40 spell (stat3=MaxMana) = 455; DEF = 0 base + 8 robe
-    # (stat21=Defense) = 8 (Wizard robes give little raw DEF); WIS = 60 + 3 robe + 7 spell = 70; VIT 40.
-    # Regen (Player.cs HandleRegen): hp/s = 1 + 0.36*VIT = 15.4 -> 1.54/tick, mp/s = 1 + 0.24*WIS = 17.8
-    # -> 1.78/tick. The HP regen is why the real fight is survivable -- the player recovers between hits.
-    player_hp_max: float = 810.0
+    # Wizard, matched to the LIVE deployed char on betterSkillys (NOT a theoretical loadout): the
+    # bridge logs read hp=670/670, and the incoming-damage histogram pins DEF=25. Every Greater-snake
+    # bullet (raw 50) lands as exactly 25 = max(50*0.15, 50-25), while every raw<=25 bullet floors to
+    # <=4 (Python 25->4, Pit Viper 20->3, Pit Snake 10->2) -- only DEF=25 yields that clean split; the
+    # old DEF 8 would show 42s and 17s, which never appear in any attempt log. So the real char is
+    # HP 670 / DEF 25, not the earlier assumed 810 / 8. Regen (Player.cs HandleRegen): hp/s = 1 +
+    # 0.36*VIT = 1.54/tick, mp/s = 1 + 0.24*WIS = 1.78/tick -- the regen is why the fight is survivable
+    # between hits. To push HP toward 810 the live char would need a +100 HP ring + the +40 spell slot
+    # equipped; re-gear the char first, then bump these to keep sim and deploy matched.
+    player_hp_max: float = 670.0
     player_mp_max: float = 455.0
-    player_defense: float = 8.0  # robe stat21=Defense; incoming damage reduced by the real clamp
+    player_defense: float = 25.0  # measured from the live damage histogram (Greater raw 50 -> 25); the real equipped DEF
     damage_floor: float = 0.1  # DamageWithDefense floor: dealt = max(raw*floor, raw - defense)
     mp_regen: float = 1.78  # (1 + 0.24*WIS)/s at WIS 70, per 100ms tick
     hp_regen: float = 1.54  # (1 + 0.36*VIT)/s at VIT 40, per 100ms tick
@@ -101,8 +107,12 @@ class DungeonConfig:
     spell_speed: float = 1.6
     spell_life: int = 10
     # snakes: real variety in SNAKE_TYPES (HP 5-500, dmg 20-50). snake_speed = wander drift std,
-    # snake_radius = collision size; per-type combat stats live in SNAKE_TYPES, not config.
-    n_snakes: int = 40
+    # snake_radius = collision size; per-type combat stats live in SNAKE_TYPES, not config. Count
+    # matched to the real density: the live .jm packs 405 snakes through the maze, and the bridge logs
+    # show ~27 in view in the boss-approach cluster the bot dies in. uniform-200 reproduces that
+    # in-view density (mean ~27, max ~38) where the old 40 gave only ~7 -- the survival-fidelity gap
+    # that let the sim report 96% clears while the live bot died crossing the swarm every run.
+    n_snakes: int = 200
     n_snakes_jitter: int = 0  # per-episode +/- band around n_snakes (difficulty schedule spreads a batch around d)
     snake_speed: float = 0.15
     snake_radius: float = 0.5

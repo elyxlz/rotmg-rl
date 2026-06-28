@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 
-N_SNAKES_MAX = 40
+N_SNAKES_MAX = 200  # matched to the real in-view density (~27 snakes at the boss-approach cluster); see config.py
 BOSS_HP = 7500.0  # real solo Stheno HP on the live server (no-spectator runs show 7500)
 
 

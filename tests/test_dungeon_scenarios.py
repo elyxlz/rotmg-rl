@@ -43,14 +43,14 @@ def test_obs_shape_and_scalar_range():
 
 
 def test_damage_clamp_player_blade():
-    """A 100-dmg boss blade vs the T7 Wizard's DEF 8 deals max(100*0.1, 100-8) = max(10, 92) = 92
-    (a SINGLE blade would take HP 810 -> 718). P1 fires a 3-blade volley point-blank; with regen off
-    and the blade cooldown raised so only one volley lands, the three clamped hits take 810 -> 534."""
-    per_blade = _defended(100.0, 8.0)
-    assert per_blade == 92.0
+    """A 100-dmg boss blade vs the real Wizard's DEF 25 deals max(100*0.1, 100-25) = max(10, 75) = 75
+    (a SINGLE blade would take HP 670 -> 595). P1 fires a 3-blade volley point-blank; with regen off
+    and the blade cooldown raised so only one volley lands, the three clamped hits take 670 -> 445."""
+    per_blade = _defended(100.0, 25.0)
+    assert per_blade == 75.0
     cfg = DungeonConfig(
         boss_hp_max=1e9,
-        player_hp_max=810.0,
+        player_hp_max=670.0,
         hp_regen=0.0,
         n_snakes=0,
         boss_wander_speed=0.0,
@@ -65,14 +65,14 @@ def test_damage_clamp_player_blade():
     env.put(player_x=BOSS_TILE[0] + 1.5, player_y=BOSS_TILE[1] + 0.5, fight_active=1, phase=1)
     for _ in range(25):  # let the single point-blank volley land (no regen, no further volleys)
         env.step([0, 0, 0, 0])
-    assert env.get()["player_hp"] == pytest.approx(810.0 - 3 * per_blade)  # 534.0
+    assert env.get()["player_hp"] == pytest.approx(670.0 - 3 * per_blade)  # 445.0
     env.close()
 
 
 def test_hp_regen_after_idle_ticks():
     """HealthRegen at VIT 40: (1 + 0.36*40)/s = 15.4/s = 1.54/tick, added flat while hp < max. After
-    the player is hurt (one 3-blade volley -> 534) and then idles T ticks far from any threat, HP rises
-    by exactly hp_regen * T."""
+    the player is hurt (one 3-blade volley -> 585 at DEF 25) and then idles T ticks far from any threat,
+    HP rises by exactly hp_regen * T."""
     cfg = DungeonConfig(
         boss_hp_max=1e9,
         player_hp_max=810.0,
@@ -390,9 +390,9 @@ def test_geodesic_field_decreases_along_entrance_to_boss_path():
 # are a TRIPWIRE, not a spec: regenerate them deliberately if the dynamics intentionally change.
 GOLDEN_SEED = 2024
 GOLDEN_STEPS = 200
-# Regenerated when the player gained a 0.5-tile collision footprint (isValidPosition) + player_radius
-# 0.4->0.5: movement near walls and the player hitbox both changed, so the trajectory legitimately moved.
-GOLDEN = {"total_reward": 0.8275, "obs_checksum": 52072.52, "player_hp": 997405.3, "boss_hp": 6758.09}
+# Regenerated for the swarm-survival fidelity fix: player DEF 8->25 + HP 810->670 (matched to the live
+# char) and SNAKE_WEIGHTS retuned to the real .jm population mix, so the trajectory legitimately moved.
+GOLDEN = {"total_reward": 1.5541, "obs_checksum": 69180.76, "player_hp": 999390.0, "boss_hp": 5965.92}
 
 
 def _golden_actions(n: int) -> np.ndarray:

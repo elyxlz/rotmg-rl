@@ -106,7 +106,9 @@ static const float SNAKE_TYPES[N_SNAKE_TYPES][12] = {
      15.0f},                                                                         /* Greater Pit Snake */
     {500.0f, 10.0f, 50.0f, 0.6f, 30.0f, 1.0f, 0.0f, 3.0f, 1.0f, 0.5f, 10.0f, 15.0f}, /* Greater Pit Viper */
 };
-static const float SNAKE_WEIGHTS[N_SNAKE_TYPES] = {0.40f, 0.22f, 0.15f, 0.15f, 0.08f};
+/* spawn mix = the real .jm population proportions (290 weak Pit Viper/Snake fillers, 22 Fire Python,
+ * 35 Yellow/Brown Python, 22 Greater Pit Snake, 36 Greater Pit Viper; total 405). Mirrors config.py. */
+static const float SNAKE_WEIGHTS[N_SNAKE_TYPES] = {0.717f, 0.054f, 0.086f, 0.054f, 0.089f};
 #define SNAKE_TIMER_JITTER 10
 
 typedef struct {
@@ -460,7 +462,7 @@ static double resolve_collisions(Dungeon *env) {
         }
     }
 
-    /* enemy bullets vs player (robe DEF 17) */
+    /* enemy bullets vs player (real equipped DEF 25, measured from the live damage histogram) */
     if (env->n_ebul > 0) {
         float thr = c->player_radius + c->ebullet_radius;
         double dmg = 0.0;

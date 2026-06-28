@@ -4,6 +4,31 @@ Current-state summary. See `GOAL.md` for the autonomous build loop, `docs/snakep
 `docs/real-game-analysis.md` for the env/real-game references, and `_pufferlib/README.md` for the
 vendored training stack. Append new entries on top as the build advances.
 
+## Swarm-survival fidelity fix (2026-06-28, branch `fix/swarm-survival`)
+
+The mortal no-cheat policy self-navigated to bossDist ~52 then died in the snake swarm every run while
+the sim reported 96% clears. Measured the real gap from the live bridge logs + the betterSkillys source:
+
+- **Player HP/DEF.** The live char is **HP 670** (bridge `hp=670/670`), **DEF 25** (not the assumed
+  810 / 8). The incoming-damage histogram is bimodal — a spike at exactly 25 and a cluster at 2-4,
+  nothing between. With the bot's own formula `max(dmg*3/20, dmg-def)` + `toFixed(0)`, only DEF=25
+  yields that split: Greater snake raw 50 -> 25, Python 25 -> 4, Pit Viper 20 -> 3, Pit Snake 10 -> 2
+  (DEF 8 would show 42s and 17s, which never appear). Set sim to 670 / 25.
+- **Swarm lethality = DENSITY, not per-bullet.** Every per-snake stat in `SNAKE_TYPES` already matches
+  the XML exactly. The gap is count: the real `.jm` packs **405 snakes** through the maze (mostly weak
+  Pit Snake/Viper fillers; ~14% lethal Greaters), and the bridge shows **~27 in view** at the death
+  cluster. The sim spawned only **40** uniformly -> local density ~7, measured **3.4 dmg/tick** vs the
+  real **~33/tick**. Fix: `n_snakes` 40 -> **200** (in-view density now mean ~27, matching the real
+  cluster) and `SNAKE_WEIGHTS` retuned to the real .jm proportions (`[0.716,0.054,0.086,0.054,0.089]`).
+  Held-still DPS rose 3.4 -> ~12/tick at the matched density; the residual vs the cornered real 33/tick
+  is the stationary-vs-moving measurement floor, not per-snake under-modeling (left untouched, faithful).
+- **Latency read.** The deaths are under-modeled damage, not reaction lag: HP fell from 670 to dead in
+  one ~2s burst of ~29 clean 25-dmg Greater-snake hits — a density spike the old sim could never
+  produce — not a few large hits the policy reacted to slowly.
+
+Deploy stays matched: the bridge normalizes obs hp by the server `hp_max` (670), the sim by
+`player_hp_max` (670). Retrain + revalidate after merge.
+
 ## Where things stand (2026-06-27)
 
 **Env.** The Snake Pit dynamics are a single C source, `_pufferlib/ocean/dungeon/dungeon.h` (config +

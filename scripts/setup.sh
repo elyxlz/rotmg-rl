@@ -45,7 +45,10 @@ echo "Free space on $REPO_ROOT: ${avail_g}G"
 # the _C build links.
 [ -d "$VENV" ] || uv venv "$VENV"
 uv pip install --python "$VENV_PY" "torch>=2.9" --index-url https://download.pytorch.org/whl/cu128
-uv pip install --python "$VENV_PY" numpy pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
+# Pin numpy<2 (the _C extension is built against the numpy-1.x C ABI) and scipy<1.16 — scipy>=1.18
+# requires numpy>=2.0, and an unpinned resolve mixes scipy 1.18 with numpy 1.26 -> the import-time
+# `numpy has no attribute 'long'` crash (training.py imports the sweep deps even under --no-sweep).
+uv pip install --python "$VENV_PY" "numpy<2" "scipy<1.16" pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
 
 # 2. Link prerequisites: build.sh links `-lcudnn -lnccl -lnvidia-ml`, but the pip nvidia wheels ship
 # only versioned .so files (no libcudnn.so / libnccl.so for `-l`) and NVML lives in the CUDA stubs

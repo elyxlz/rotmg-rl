@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 
 N_SNAKES_MAX = 40
-BOSS_HP = 9000.0  # real solo Stheno HP on the live server (7500 XML base, scaled by ScaleHP2 for 1 player)
+BOSS_HP = 7500.0  # real solo Stheno HP on the live server (no-spectator runs show 7500)
 
 
 def _clamp01(x: float) -> float:

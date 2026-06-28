@@ -20,11 +20,13 @@ import numpy as np
 import pytest
 
 pytest.importorskip("rotmg_rl.csim.binding")
-from rotmg_rl.config import DungeonConfig  # noqa: E402
+from rotmg_rl.config import GRID, DungeonConfig  # noqa: E402
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle  # noqa: E402
-from rotmg_rl.sim.snakepit_map import _nearest_walkable, geodesic_field, load_jm  # noqa: E402
+from rotmg_rl.schedule import N_SNAKES_MAX, difficulty_config  # noqa: E402
+from rotmg_rl.sim.snakepit_map import _nearest_walkable, authored_snakes, geodesic_field, load_jm  # noqa: E402
 
 BOSS_TILE = (16, 73)  # _nearest_walkable(Stheno) on the real map (matches the C env's BOSS_X/Y)
+ENTRANCE_TILE = (110, 21)  # _nearest_walkable(Portal of Cowardice) (matches the C env's ENTRANCE_X/Y)
 
 
 def _defended(raw: float, defense: float, floor: float = 0.1) -> float:
@@ -383,6 +385,97 @@ def test_geodesic_field_decreases_along_entrance_to_boss_path():
     assert all(vals[i + 1] < vals[i] for i in range(len(vals) - 1))  # strictly closing every step
 
 
+# --- authored map fidelity (real enemy positions + real entrance spawn + real walls) ----------------
+
+
+def test_authored_enemies_spawn_at_real_positions():
+    """At d=1 the env spawns every enemy at its AUTHORED .jm tile/type -- the exact real layout, not a
+    uniform random scatter. With the full roster active and no density jitter, the set of spawned snake
+    tiles is precisely the authored set (every cluster, including the entrance chokepoint, reproduced)."""
+    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX, n_snakes_jitter=0), seed=7)
+    env.reset(seed=7)
+    spawned = {(int(np.floor(x)), int(np.floor(y))) for x, y in env.get()["snakes"]}
+    env.close()
+    authored = {(x, y) for x, y, _ in authored_snakes()}
+    assert spawned == authored  # every authored tile occupied, nothing extra -> the real map exactly
+
+
+def test_authored_chokepoint_present_at_d1():
+    """The lethal entrance chokepoint (Fire Pythons + a Greater Pit Viper around (28-31, 41-44)) is
+    actually spawned at d=1 -- the cluster the random-scatter sim never reproduced and the live policy
+    dies in."""
+    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX, n_snakes_jitter=0), seed=11)
+    env.reset(seed=11)
+    spawned = {(int(np.floor(x)), int(np.floor(y))) for x, y in env.get()["snakes"]}
+    env.close()
+    assert {(30, 43), (30, 44), (26, 46), (31, 43), (28, 41)} <= spawned
+
+
+def test_authored_fraction_scales_with_difficulty():
+    """The curriculum ramps the FRACTION of authored enemies active: low d spawns ~round(N_AUTHORED*d)
+    of them (a subset of the authored tiles), d=1 the whole roster -- so easy early, the full real map
+    at the end. n_snakes is the count lever; with jitter off the spawn count matches it exactly."""
+    authored = {(x, y) for x, y, _ in authored_snakes()}
+    low = difficulty_config(0.2)["n_snakes"]
+    assert 0 < low < N_SNAKES_MAX
+    env = CDungeonSingle(DungeonConfig(n_snakes=low, n_snakes_jitter=0), seed=3)
+    env.reset(seed=3)
+    spawned = {(int(np.floor(x)), int(np.floor(y))) for x, y in env.get()["snakes"]}
+    env.close()
+    assert len(spawned) == low  # exactly the scheduled count
+    assert spawned <= authored  # always a subset of the real authored tiles, never random tiles
+
+
+def test_player_spawns_at_real_entrance():
+    """In the navigate-in regime the player starts at the REAL portal entrance (~110,21), so it learns
+    THIS entrance's route to the boss -- not a random far tile. With both random + in-room spawn off,
+    every reset lands on the entrance tile regardless of seed."""
+    env = CDungeonSingle(DungeonConfig(n_snakes=0, spawn_in_room_prob=0.0, random_spawn_prob=0.0), seed=0)
+    for s in range(5):
+        env.reset(seed=s)
+        st = env.get()
+        assert (st["px"], st["py"]) == pytest.approx((ENTRANCE_TILE[0] + 0.5, ENTRANCE_TILE[1] + 0.5))
+    env.close()
+
+
+def test_env_wall_window_matches_real_jm():
+    """Definitive walls-in-env check: the env's egocentric wall channel (CH_WALL) at the entrance equals
+    the real .jm walkable grid tile-for-tile. The C env navigates the actual authored walls, not an open
+    arena -- so the policy trains against the real corridors."""
+    m = load_jm()
+    env = CDungeonSingle(DungeonConfig(n_snakes=0, spawn_in_room_prob=0.0, random_spawn_prob=0.0), seed=0)
+    obs = env.reset(seed=0)
+    st = env.get()
+    px, py = int(st["px"]), int(st["py"])
+    assert (px, py) == ENTRANCE_TILE  # reset put us on the real entrance tile
+    wall = obs[: GRID * GRID].reshape(GRID, GRID)  # CH_WALL is channel 0, centered on the player tile
+    half = GRID // 2
+    mismatches = 0
+    for row in range(GRID):
+        for col in range(GRID):
+            wx, wy = px + col - half, py + row - half
+            if 0 <= wx < m.width and 0 <= wy < m.height:
+                expected = 0.0 if m.walkable[wy, wx] else 1.0  # 1 = wall in the obs channel
+                mismatches += wall[row, col] != expected
+    env.close()
+    assert mismatches == 0
+
+
+def test_entrance_wall_blocks_westward_shortcut():
+    """The entrance room is walled to the west (the .jm wall band at x94-101, y21), so a player can't
+    walk straight toward the SW boss -- it must take the real corridor. The env enforces that wall: a
+    step due west from the wall-adjacent floor tile (102,21) is rejected (the footprint hits the wall)."""
+    m = load_jm()
+    assert m.walkable[21, 102] and not m.walkable[21, 101]  # floor with a wall immediately west
+    cfg = DungeonConfig(player_speed=0.773, n_snakes=0, spawn_in_room_prob=0.0, random_spawn_prob=0.0)
+    env = CDungeonSingle(cfg, seed=0)
+    env.reset(seed=0)
+    env.put(player_x=102.5, player_y=21.5, fight_active=0, phase=0)
+    env.step([5, 0, 0, 0])  # move_idx 5 -> g_move_dx[4]=cos(pi)=-1: due west into the wall
+    assert env.get()["px"] == pytest.approx(102.5, abs=1e-4)  # blocked: the real entrance wall holds
+    env.close()
+
+
 # --- drift tripwire ---------------------------------------------------------------------------------
 # A fixed seed + deterministic action schedule, 200 steps, with the boss HP high enough that it never
 # clears and the player HP high enough that it never dies (so the episode runs the full window). The
@@ -390,9 +483,10 @@ def test_geodesic_field_decreases_along_entrance_to_boss_path():
 # are a TRIPWIRE, not a spec: regenerate them deliberately if the dynamics intentionally change.
 GOLDEN_SEED = 2024
 GOLDEN_STEPS = 200
-# Regenerated for the swarm-survival fidelity fix: player DEF 8->25 + HP 810->670 (matched to the live
-# char) and SNAKE_WEIGHTS retuned to the real .jm population mix, so the trajectory legitimately moved.
-GOLDEN = {"total_reward": 1.5541, "obs_checksum": 69180.76, "player_hp": 999390.0, "boss_hp": 5965.92}
+# Regenerated for the authored-map fidelity fix: snake spawning moved from uniform-random tiles to the
+# AUTHORED .jm positions/types (spawn_snakes draws a subset of AUTHORED_SNAKES), so the 30 in-room snakes
+# now sit on real authored tiles with their real archetypes -- the trajectory legitimately moved.
+GOLDEN = {"total_reward": 1.3400, "obs_checksum": 54701.94, "player_hp": 998425.0, "boss_hp": 3293.23}
 
 
 def _golden_actions(n: int) -> np.ndarray:

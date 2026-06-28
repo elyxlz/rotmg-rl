@@ -120,3 +120,39 @@ def find_objects(dmap: DungeonMap, id_substr: str) -> list[tuple[int, int]]:
             ys, xs = np.where(dmap.tile_index == i)
             locs.extend(zip(xs.tolist(), ys.tolist(), strict=True))
     return locs
+
+
+# The .jm's authored enemy ids -> the SNAKE_TYPES row each spawns with (the per-type stats live in the
+# C env's SNAKE_TYPES table / config.py's mirror; this is the only id->type mapping). Every real Snake
+# Pit enemy archetype has its own row so the authored map reproduces each one's HP/DEF/damage/follow
+# faithfully (Pit Snake is a weak dmg-10 filler, Brown Python a tanky DEF-20 wanderer, etc.).
+SNAKE_TYPE_BY_ID = {
+    "Pit Viper": 0,
+    "Fire Python": 1,
+    "Yellow Python": 2,
+    "Greater Pit Snake": 3,
+    "Greater Pit Viper": 4,
+    "Pit Snake": 5,
+    "Brown Python": 6,
+}
+
+
+def authored_snakes(dmap: DungeonMap | None = None) -> list[tuple[int, int, int]]:
+    """Every enemy the real .jm authors, as (x, y, snake_type_index) with exact id matching (NOT the
+    substring match of find_objects, so "Pit Snake" never absorbs "Greater Pit Snake"). These are the
+    real fixed enemy positions + types -- the env spawns from this list (a difficulty-scaled fraction of
+    it), so the chokepoint clusters and the full ~405-enemy d=1 map are exactly the authored layout."""
+    m = dmap if dmap is not None else load_jm()
+    out: list[tuple[int, int, int]] = []
+    for i, e in enumerate(m.entries):
+        type_idx = None
+        for o in e.get("objs") or []:
+            oid = o.get("id") or ""
+            if oid in SNAKE_TYPE_BY_ID:
+                type_idx = SNAKE_TYPE_BY_ID[oid]
+                break
+        if type_idx is None:
+            continue
+        ys, xs = np.where(m.tile_index == i)
+        out.extend((int(x), int(y), type_idx) for x, y in zip(xs.tolist(), ys.tolist(), strict=True))
+    return out

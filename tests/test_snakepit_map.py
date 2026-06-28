@@ -1,6 +1,9 @@
-"""The real Snake Pit map parses into a sane navigable grid."""
+"""The real Snake Pit map parses into a sane navigable grid + authors the real enemy roster."""
 
-from rotmg_rl.sim.snakepit_map import load_jm
+import collections
+
+from rotmg_rl.schedule import N_SNAKES_MAX
+from rotmg_rl.sim.snakepit_map import authored_snakes, load_jm
 
 
 def test_map_loads_with_expected_dims_and_floor():
@@ -13,3 +16,37 @@ def test_map_loads_with_expected_dims_and_floor():
     assert 0 < floor < total  # some floor, some wall/void
     # walkable region is connected enough to be a real dungeon, not noise
     assert floor > 200
+
+
+# The exact per-archetype enemy population the real .jm authors (exact id counts, NOT find_objects'
+# substring counts). These are the fixed positions/types the env reproduces; if the map or the id->type
+# mapping changes, this is the canonical count to re-pin.
+EXPECTED_BY_TYPE = {0: 156, 1: 22, 2: 24, 3: 22, 4: 36, 5: 134, 6: 11}  # types index SNAKE_TYPES
+EXPECTED_TOTAL = 405
+
+
+def test_authored_snakes_match_real_population():
+    """authored_snakes() returns every real Snake Pit enemy at its fixed tile, typed by archetype, all
+    on walkable floor -- the layout the env spawns from instead of scattering snakes at random."""
+    m = load_jm()
+    snakes = authored_snakes(m)
+    assert len(snakes) == EXPECTED_TOTAL
+    assert collections.Counter(t for _, _, t in snakes) == EXPECTED_BY_TYPE
+    assert all(m.walkable[y, x] for x, y, _ in snakes)  # every authored enemy stands on real floor
+    assert len({(x, y) for x, y, _ in snakes}) == EXPECTED_TOTAL  # one enemy per tile (no overlaps)
+
+
+def test_authored_roster_drives_curriculum_max():
+    """The schedule's N_SNAKES_MAX is the full authored roster, so d=1 activates the entire real map."""
+    assert len(authored_snakes()) == N_SNAKES_MAX
+
+
+def test_authored_chokepoint_cluster_reproduced():
+    """The hard entrance chokepoint the live policy dies in: a tight pack of 200-HP Fire Pythons + a
+    500-HP Greater Pit Viper (+ a tanky Brown Python) around tiles (28-31, 41-46). Reproducing this exact
+    cluster -- not a uniform scatter -- is the point of the authored map."""
+    cluster = {(x, y, t) for x, y, t in authored_snakes() if 26 <= x <= 32 and 40 <= y <= 47}
+    assert (31, 43, 4) in cluster  # Greater Pit Viper (500 HP)
+    fire_pythons = {(x, y) for x, y, t in cluster if t == 1}  # Fire Python (200 HP, 3-shot)
+    assert {(30, 43), (30, 44), (26, 46)} <= fire_pythons
+    assert (28, 41, 6) in cluster  # Brown Python (DEF 20)

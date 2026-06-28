@@ -42,6 +42,9 @@ GX, GY, GFUSE, GRAD, GDMG, GSTATUS = range(6)  # grenade columns (status: 0 conf
 # hp, defense, dmg, bvspeed, blife(ticks), count, arc(rad), cooldown(ticks), follow, follow_speed,
 # acquire_range, shoot_range.
 ST_HP, ST_DEF, ST_DMG, ST_BVS, ST_BLIFE, ST_CNT, ST_ARC, ST_CD, ST_FOLLOW, ST_FSPD, ST_ACQ, ST_SRANGE = range(12)
+# One row per real Snake Pit enemy archetype; the env spawns each authored enemy with its own row (see
+# snakepit_map.authored_snakes / SNAKE_TYPE_BY_ID), so the fixed map reproduces every archetype's
+# HP/DEF/damage/follow faithfully. Mirrors the C env's SNAKE_TYPES table (the dynamics source of truth).
 SNAKE_TYPES = np.array(
     [
         [5.0, 0.0, 20.0, 0.6, 20.0, 1.0, 0.0, 10.0, 0.0, 0.0, 0.0, 20.0],  # Pit Viper (HP5)
@@ -49,13 +52,11 @@ SNAKE_TYPES = np.array(
         [200.0, 5.0, 25.0, 0.8, 30.0, 1.0, 0.0, 10.0, 1.0, 0.5, 10.0, 20.0],  # Yellow Python (Follow)
         [500.0, 10.0, 50.0, 0.8, 30.0, 3.0, np.radians(5.0), 10.0, 1.0, 0.5, 10.0, 15.0],  # Greater Pit Snake (3-shot)
         [500.0, 10.0, 50.0, 0.6, 30.0, 1.0, 0.0, 3.0, 1.0, 0.5, 10.0, 15.0],  # Greater Pit Viper (cd 300ms)
+        [5.0, 0.0, 10.0, 0.6, 20.0, 1.0, 0.0, 10.0, 0.0, 0.0, 0.0, 20.0],  # Pit Snake (HP5, dmg 10)
+        [200.0, 20.0, 25.0, 0.8, 30.0, 1.0, 0.0, 10.0, 0.0, 0.0, 0.0, 20.0],  # Brown Python (DEF 20, no follow)
     ],
     np.float32,
 )
-# spawn mix = the real .jm population proportions (Pit Viper 156 + Pit Snake 134 = 290 weak fillers,
-# Fire Python 22, Yellow 24 + Brown 11 = 35, Greater Pit Snake 22, Greater Pit Viper 36; total 405).
-# The old [0.40,0.22,0.15,0.15,0.08] over-weighted the lethal greaters (~60% non-filler vs real ~28%).
-SNAKE_WEIGHTS = np.array([0.717, 0.054, 0.086, 0.054, 0.089], np.float32)  # weak filler carries the rounding remainder
 SNAKE_TIMER_JITTER = 10  # initial shoot-timer desync (ticks)
 
 

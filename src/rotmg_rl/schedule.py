@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import math
 
-N_SNAKES_MAX = 200  # matched to the real in-view density (~27 snakes at the boss-approach cluster); see config.py
+# The full authored roster: every enemy the real .jm places (== len(snakepit_map.authored_snakes),
+# pinned by test_snakepit_map). The curriculum ramps n_snakes from 0 up to this, so d=1 activates the
+# ENTIRE authored map -- the real ~405-enemy layout incl. the entrance chokepoint -- not a random scatter.
+N_SNAKES_MAX = 405
 BOSS_HP = 7500.0  # real solo Stheno HP on the live server (no-spectator runs show 7500)
 
 

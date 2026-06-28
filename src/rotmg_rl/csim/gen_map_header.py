@@ -12,7 +12,7 @@ import sys
 
 import numpy as np
 
-from rotmg_rl.sim.snakepit_map import _nearest_walkable, find_objects, geodesic_field, load_jm
+from rotmg_rl.sim.snakepit_map import _nearest_walkable, authored_snakes, find_objects, geodesic_field, load_jm
 
 # Unreachable tiles get this sentinel geodesic value (finite, so the C reward arithmetic never sees
 # inf/NaN). The player only spawns/navigates on reachable walkable tiles, so it is never read in
@@ -48,6 +48,16 @@ def main() -> None:
     for i in range(0, geo.size, 20):
         chunk = ",".join(f"{float(v):.3f}f" for v in geo[i : i + 20])
         out.write(chunk + ",\n")
+    out.write("};\n\n")
+    # AUTHORED_SNAKES: every enemy the real .jm places, as {x+0.5, y+0.5, snake_type}. The env spawns
+    # from this fixed list (a difficulty-scaled fraction of it), reproducing the real clusters/chokepoint
+    # instead of scattering snakes uniformly. d=1 (all rows active) is the exact authored ~405-enemy map.
+    snakes = authored_snakes(m)
+    out.write(f"#define N_AUTHORED {len(snakes)}\n")
+    out.write("static const float AUTHORED_SNAKES[N_AUTHORED][3] = {\n")
+    for i in range(0, len(snakes), 8):
+        chunk = "".join(f"{{{x + 0.5:.1f}f,{y + 0.5:.1f}f,{t}.0f}}," for x, y, t in snakes[i : i + 8])
+        out.write(chunk + "\n")
     out.write("};\n\n#endif\n")
 
 

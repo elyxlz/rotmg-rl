@@ -84,7 +84,7 @@ typedef struct {
 /* Real Snake Pit enemies (EmbeddedData_SnakePitCXML.xml + BehaviorDb.SnakePit.cs), the SNAKE_TYPES
  * table. Columns: hp, defense, dmg, bvspeed, blife(ticks), count, arc(rad),
  * cooldown(ticks), follow, follow_speed, acquire_range, shoot_range. */
-#define N_SNAKE_TYPES 5
+#define N_SNAKE_TYPES 7
 #define ST_HP 0
 #define ST_DEF 1
 #define ST_DMG 2
@@ -105,10 +105,9 @@ static const float SNAKE_TYPES[N_SNAKE_TYPES][12] = {
     {500.0f, 10.0f, 50.0f, 0.8f, 30.0f, 3.0f, (float)(5.0 * M_PI / 180.0), 10.0f, 1.0f, 0.5f, 10.0f,
      15.0f},                                                                         /* Greater Pit Snake */
     {500.0f, 10.0f, 50.0f, 0.6f, 30.0f, 1.0f, 0.0f, 3.0f, 1.0f, 0.5f, 10.0f, 15.0f}, /* Greater Pit Viper */
+    {5.0f, 0.0f, 10.0f, 0.6f, 20.0f, 1.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 20.0f},    /* Pit Snake (dmg 10) */
+    {200.0f, 20.0f, 25.0f, 0.8f, 30.0f, 1.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 20.0f}, /* Brown Python (DEF 20, no follow) */
 };
-/* spawn mix = the real .jm population proportions (290 weak Pit Viper/Snake fillers, 22 Fire Python,
- * 35 Yellow/Brown Python, 22 Greater Pit Snake, 36 Greater Pit Viper; total 405). Mirrors config.py. */
-static const float SNAKE_WEIGHTS[N_SNAKE_TYPES] = {0.717f, 0.054f, 0.086f, 0.054f, 0.089f};
 #define SNAKE_TIMER_JITTER 10
 
 typedef struct {
@@ -790,16 +789,6 @@ static double grenades_tick(Dungeon *env) {
 
 /* --- snakes --- */
 
-static int sample_snake_type(Dungeon *env) {
-    float r = frand(env), cum = 0.0f;
-    for (int t = 0; t < N_SNAKE_TYPES; t++) {
-        cum += SNAKE_WEIGHTS[t];
-        if (r < cum)
-            return t;
-    }
-    return N_SNAKE_TYPES - 1;
-}
-
 static void snakes_tick(Dungeon *env) {
     Config *c = &env->cfg;
     for (int i = 0; i < env->n_snake; i++) {
@@ -837,31 +826,37 @@ static void snakes_tick(Dungeon *env) {
     }
 }
 
+/* Spawn enemies at the AUTHORED .jm positions/types (AUTHORED_SNAKES, baked from the real map), not at
+ * uniform-random tiles -- so the real clusters and the hard entrance chokepoint are reproduced exactly.
+ * The curriculum activates a fraction of the authored roster: `want` (= n_snakes, ramped by difficulty
+ * d, +/- the density jitter) members are chosen as a random subset via a partial Fisher-Yates over the
+ * authored index list. At d=1 (want >= N_AUTHORED) every authored enemy is active -> the full real
+ * ~405-enemy map; each carries its authored type, so its HP/DEF/damage/follow are the real archetype. */
 static void spawn_snakes(Dungeon *env) {
     Config *c = &env->cfg;
     env->n_snake = 0;
     int want = c->n_snakes;
-    /* per-episode density jitter: spread the snake count in a band around the scheduled target so a
-     * single difficulty d spans easier/harder episodes within a batch (no draw when jitter == 0). */
     if (c->n_snakes_jitter > 0) {
         int span = 2 * c->n_snakes_jitter + 1;
         want += (int)(rng_next(env) % (unsigned)span) - c->n_snakes_jitter;
-        if (want < 0)
-            want = 0;
     }
-    if (want > g_n_walk)
-        want = g_n_walk;
-    /* sample distinct walkable tiles + a weighted archetype (training randomness; not seed-deterministic) */
+    if (want < 0)
+        want = 0;
+    if (want > N_AUTHORED)
+        want = N_AUTHORED;
+    int order[N_AUTHORED];
+    for (int i = 0; i < N_AUTHORED; i++)
+        order[i] = i;
     for (int s = 0; s < want; s++) {
         if (env->n_snake >= MAX_SNAKES)
             break;
-        int idx = rng_next(env) % g_n_walk;
-        int x = g_walk_x[idx], y = g_walk_y[idx];
-        if (abs(x - ENTRANCE_X) + abs(y - ENTRANCE_Y) <= 6)
-            continue;
-        int type = sample_snake_type(env);
-        Snake sn = {x + 0.5f, y + 0.5f, SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER),
-                    (float)type};
+        int j = s + (int)(rng_next(env) % (unsigned)(N_AUTHORED - s));
+        int tmp = order[s];
+        order[s] = order[j];
+        order[j] = tmp;
+        const float *a = AUTHORED_SNAKES[order[s]];
+        int type = (int)a[2];
+        Snake sn = {a[0], a[1], SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
         env->snakes[env->n_snake++] = sn;
     }
 }

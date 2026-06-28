@@ -1,63 +1,39 @@
 # GOAL
 
-Paste the block below into `/goal`. See `docs/real-game-analysis.md` (real mechanics) +
-`docs/snakepit-spec.md` + `PROGRESS.md`.
-
 ```text
-/goal DELIVER, autonomously, without stopping to ask: a full .mp4 SCREEN RECORDING of the REAL
-betterSkillys game client, connected to the REAL betterSkillys server, with the RL policy
-controlling the character, ENTERING and COMPLETING the Snake Pit dungeon end to end. Iterate as
-long as it takes. Do NOT pause for confirmation; make the calls yourself and keep going until the
-mp4 exists and a live real-server clear is verified.
+/goal DELIVER, autonomously and without stopping to ask, this exact artifact and nothing less:
 
-GROUND TRUTH (box: ssh ripbox [multiplexed]; 2x3090, 16 cores)
-- Repo: ~/Repos/rotmg-rl (read PROGRESS.md first). betterSkillys source + client vendored at
-  vendor/betterSkillys (faithful-sim ground truth + the real client for M5). Real Snake Pit is a
-  FIXED map (EmbeddedData_SnakePitCXML.xml), not procedural -> train on the real layout.
-- Faithful sim: the C env _pufferlib/ocean/dungeon/dungeon.h (single source of dynamics; config + layout in config.py).
-  Local 31x31 vision (VIS 15), mouse-aim (32 dir), Wizard (staff+Spell+MP), snakes, 3-phase Stheno
-  (grenades/minions/status). PuffeRL 4.0 + CNN-LSTM; single-env wrapper (csim/single.py) for eval/render.
+A single continuous, unedited screen-recording (.mp4), filmed from the point of view of the
+policy-controlled character itself, showing a reinforcement-learning policy play the REAL
+betterSkillys game client on the REAL live server and clear a REAL Snake Pit dungeon entirely on
+its own: from ENTERING the dungeon portal, through navigating the maze and fighting, to KILLING the
+boss and COMPLETING the dungeon. Start to finish, one take.
 
-TOOLING (use these, don't reinvent or hand-ssh):
-- scripts/box.sh {kill|train <args>|follow|status|metrics} -- all box management, one clean run.
-- scripts/box.sh metrics -- the latest per-episode + per-step metrics (the rich dashboard hides
-  boss_hp_frac/learning_rate; prefer the wandb API over log-grep when you need more).
-- train+rollout runs share a wandb group (box.sh sets WANDB_RUN_GROUP -> cfg['wandb_group']).
+The policy alone controls the character and chooses every action (move, aim, shoot, abilities). It
+earns the clear the way a human would: walk in, find the boss, dodge, survive, and win.
 
-KEY FINDINGS (so far):
-- The RL LEARNS: passive-boss bootstrap drove boss_hp_frac 0.55->0.22 (agent learns to damage).
-- But LR ANNEALS to 0 over total_timesteps -- too-short runs stop learning mid-progress. Use a
-  long horizon (>=50M) so LR stays alive until it clears.
-- The Python env (~20K SPS) starves the GPU -> M4 (C env) is the speed unlock.
+THE RECORDING IS INVALID IF ANY CHEAT OCCURS:
+- Teleporting or position warping of any kind (no /tppos, /visit, or admin movement). The policy
+  navigates the real dungeon itself.
+- Invincibility, god-mode, or any damage immunity. The character is fully mortal, takes real
+  damage, and can die. It survives only by playing well.
+- Any scripted or human assistance with the play itself, including navigation, aiming, dodging,
+  target selection, or timing. No auto-pilot for the hard parts; every action is the policy's own.
+- Any admin or external help to the run: nothing spawns or weakens the boss, nothing buffs the
+  character mid-run, no second player or script fights, heals, or kills anything for it.
+- A modified dungeon: the real fixed layout, the real boss HP, the real enemy counts and damage,
+  exactly what an ordinary player faces. Nothing is reduced or removed.
+- An overpowered character: ordinary stats and gear only, no admin god-stats.
+- Altered time: real-time at normal speed, with no slowing, pausing, or speeding the game.
+- A third-person or spectator camera: the view must be the policy character's own POV.
+- Editing: one continuous take from portal-entry to boss-death, with no cuts, splices, speed-ups,
+  or hidden resets that obscure how the clear happened.
+- Faked or replayed input: the policy plays genuinely live against the real server.
 
-HARD CONSTRAINTS
-- Cold-start RL, no demos. Latest PufferLib. Character = Wizard. Sim stays FAITHFUL (local vision).
-- Deliverable is the REAL client recording, NOT the sim render. Real-game work only on the
-  self-hosted betterSkillys server (never official). NR-CORE is dead.
-- Keep the workspace tidy/simple/abstracted; keep PROGRESS.md + GOAL.md up to date.
+Failed attempts along the way are expected and fine. The deliverable is ONE genuine, clean,
+cheat-free successful run, recorded.
 
-THE PLAN (keep iterating each stage until it works; don't stop between stages)
-M4 (DONE). The env is rewritten in C (PufferLib Ocean style): _pufferlib/ocean/dungeon/dungeon.h is
-    the single source of the Snake Pit dynamics (the slow Python sim is removed). Ocean C envs do
-    millions of SPS where the old Python sim did ~20K and starved the GPU, so experiments run in
-    minutes. The C env defines the obs layout, action space, and dynamics; a policy trained in C
-    transfers to the real client on the same shared obs schema.
-M3  Train a policy that COMPLETES the faithful sim >=80% (stochastic eval). Flat cold-start does
-    NOT clear (proven). Bootstrap exploration with a PASSIVE BOSS (boss_shoots=False -> learn
-    aim+kill), then an ADAPTIVE CURRICULUM (weak->full boss, add threat/snakes/grenades, shift
-    spawns fight->navigation). Read run metrics via the wandb API or `scripts/box.sh metrics`.
-    Watch entropy (collapse at ent_coef 0.001 -> raise it) + boss_hp_frac.
-    Then AUTO-TUNE hparams (ent_coef/lr/reward coefs) with PufferLib's PROTEIN sweep (CARBS
-    successor: pufferl.sweep, cost-aware Bayesian over env 'score'). Needs the C env (M4) for speed
-    + a dense env 'score' metric = (1-boss_hp_frac)+cleared. Stop hand-guessing hparams.
-M5  Deploy to drive the REAL client: run the betterSkillys visual client headless (Xvfb), read
-    live game state (intercepted packets) -> the same local observation, inject the policy's
-    actions (WASD + mouse + click + spell key) into the client. Build a gap harness; refit sim if
-    transfer fails, then retrain. (betterSkillys source/client vendored at vendor/betterSkillys.)
-M6 = DELIVERABLE: screen-record the real client completing a real Snake Pit on the live server.
-    Save the .mp4 + copy to the user's machine.
-
-LOOP: read wandb metrics (API) -> advance the lowest unmet milestone -> VERIFY with a measured
-number (wandb cleared rate, eval, reviewed recording) -> update PROGRESS.md + commit/push -> stop
-old wandb runs cleanly -> continue. Never claim success without evidence. Stop only when the .mp4 exists.
+DONE only when that .mp4 exists, is verified to be a legitimate cheat-free clear on the live
+server, and is copied to the user's machine. Never claim success without evidence; if it is not a
+real, clean, cheat-free clear, it is not done.
 ```

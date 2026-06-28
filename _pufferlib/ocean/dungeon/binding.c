@@ -87,6 +87,15 @@ void my_init(Env *env, Dict *kwargs) {
     c->minion_max = (int)dict_get(kwargs, "minion_max")->value;
     c->minion_cd = (int)dict_get(kwargs, "minion_cd")->value;
     c->minion_hp = dict_get(kwargs, "minion_hp")->value;
+    c->enable_swarm = (int)dict_get(kwargs, "enable_swarm")->value;
+    c->swarm_max = (int)dict_get(kwargs, "swarm_max")->value;
+    c->swarm_cd = (int)dict_get(kwargs, "swarm_cd")->value;
+    c->swarm_fire_cd = (int)dict_get(kwargs, "swarm_fire_cd")->value;
+    c->swarm_radius = dict_get(kwargs, "swarm_radius")->value;
+    c->swarm_hp = dict_get(kwargs, "swarm_hp")->value;
+    c->swarm_def = dict_get(kwargs, "swarm_def")->value;
+    c->swarm_dmg = dict_get(kwargs, "swarm_dmg")->value;
+    c->swarm_speed = dict_get(kwargs, "swarm_speed")->value;
     c->enable_grenades = (int)dict_get(kwargs, "enable_grenades")->value;
     c->enable_minions = (int)dict_get(kwargs, "enable_minions")->value;
     c->rew_explore = dict_get(kwargs, "rew_explore")->value;

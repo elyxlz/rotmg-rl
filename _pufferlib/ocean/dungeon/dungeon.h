@@ -113,6 +113,23 @@ typedef struct {
     float x, y, fuse, rad, dmg, status;
 } Grenade;
 
+/* Stheno Swarm (Reproduce("Stheno Swarm", densityRadius 15, densityMax 5, coolDown 1500ms) +
+ * Prioritize(Protect(0.3, queen), Wander)). The boss maintains ~swarm_max members within swarm_radius
+ * of herself, REPLENISHED on a ~swarm_cd timer; each member steers to INTERPOSE on the player->boss
+ * line near the boss, body-blocking the player's bullets (the player-bullet-vs-entity collision
+ * consumes a bullet on hit, so a bullet that lands on a swarm member never reaches the boss). The
+ * member's own stats (HP 1000, Def 4, projectile Damage 40) live on Config; its projectile kinematics
+ * are the XML constants below (Aqua Missile: Speed 60 -> 0.6 t/tick, LifetimeMS 1000 -> 10 ticks). */
+#define MAX_SWARM 64
+#define SWARM_BVS 0.6f             /* Aqua Missile Speed 60 -> 0.6 t/tick */
+#define SWARM_BLIFE 10.0f          /* Aqua Missile LifetimeMS 1000 -> 10 ticks (~6-tile range) */
+#define SWARM_SHOOT_RANGE 10.0f    /* Shoot(10): the member fires at the player within 10 tiles */
+#define SWARM_INTERPOSE_DIST 2.0f  /* sit this far in front of the boss on the player->boss line */
+#define SWARM_REPROTECT 0.3f       /* stop closing once within this of the interpose point */
+typedef struct {
+    float x, y, hp, timer;
+} Swarm;
+
 typedef struct {
     /* --- DungeonConfig mirror --- */
     float player_speed, player_radius;
@@ -142,6 +159,11 @@ typedef struct {
     int confused_ticks, petrify_ticks;
     int minion_max, minion_cd;
     float minion_hp;
+    /* Stheno Swarm (protective, replenishing, bullet-blocking). swarm_max members maintained within
+     * swarm_radius of the boss, replenished every swarm_cd ticks; HP/def/dmg per member, swarm_fire_cd
+     * shoot cooldown, swarm_speed the interpose move rate. enable_swarm gates the whole system. */
+    int enable_swarm, swarm_max, swarm_cd, swarm_fire_cd;
+    float swarm_radius, swarm_hp, swarm_def, swarm_dmg, swarm_speed;
     int enable_grenades, enable_minions;
     float rew_explore, rew_kill, rew_boss_dmg, rew_reach, rew_survive;
     float rew_damage_taken, rew_clear, rew_death, rew_step;
@@ -186,6 +208,8 @@ typedef struct {
     int n_ebul;
     Snake snakes[MAX_SNAKES];
     int n_snake;
+    Swarm swarm[MAX_SWARM];
+    int n_swarm, swarm_timer;
     Grenade grenades[MAX_GRENADES];
     int n_gren;
 
@@ -374,6 +398,33 @@ static double resolve_collisions(Dungeon *env) {
         }
     }
 
+    /* player bullets vs Stheno Swarm (DEF 4). Resolved BEFORE the boss so an interposed member
+     * consumes the bullet first -- the body-block: the player must clear/penetrate the wall to reach
+     * the boss. Each surviving bullet falls through to the boss check below. */
+    for (int s = 0; s < env->n_swarm; s++) {
+        if (env->swarm[s].hp <= 0.0f)
+            continue;
+        if (env->n_pbul == 0)
+            break;
+        float thr = c->snake_radius + c->staff_radius;
+        double dmg = 0.0;
+        int any = 0, w = 0;
+        for (int i = 0; i < env->n_pbul; i++) {
+            if (dist_ff(env->pbul[i].x, env->pbul[i].y, env->swarm[s].x, env->swarm[s].y) < thr) {
+                dmg += defended(env->pbul[i].dmg, c->swarm_def, c->damage_floor);
+                any = 1;
+            } else {
+                env->pbul[w++] = env->pbul[i];
+            }
+        }
+        if (any) {
+            env->n_pbul = w;
+            env->swarm[s].hp -= (float)dmg;
+            if (env->swarm[s].hp <= 0.0f)
+                reward += c->rew_kill;
+        }
+    }
+
     /* player bullets vs boss (DEF 19) */
     if (env->n_pbul > 0 && env->invuln_timer == 0 && env->phase > 0) {
         float thr = c->boss_radius + c->staff_radius;
@@ -548,6 +599,89 @@ static void spawn_minions(Dungeon *env) {
                    0.0f};
         env->snakes[env->n_snake++] = s; /* weak swarm: type 0 */
     }
+}
+
+static int count_alive_swarm(Dungeon *env) {
+    int n = 0;
+    for (int i = 0; i < env->n_swarm; i++)
+        if (env->swarm[i].hp > 0.0f)
+            n++;
+    return n;
+}
+
+/* Reproduce("Stheno Swarm", 15, 5, 1500): once per swarm_cd ticks, top the live swarm back up to
+ * swarm_max members within swarm_radius of the boss. New members spawn already on the interpose point
+ * (on the player->boss line, in front of the boss) so they protect immediately. */
+static void spawn_swarm(Dungeon *env) {
+    Config *c = &env->cfg;
+    if (!c->enable_swarm)
+        return;
+    if (env->swarm_timer > 0) {
+        env->swarm_timer--;
+        return;
+    }
+    env->swarm_timer = c->swarm_cd;
+    double dx = env->px - env->boss_x, dy = env->py - env->boss_y;
+    double d = sqrt(dx * dx + dy * dy);
+    double off = SWARM_INTERPOSE_DIST;
+    if (off > d - 0.5)
+        off = d - 0.5; /* stay between the player and the boss */
+    if (off < 0.5)
+        off = 0.5;
+    float ix = (float)(d > 1e-6 ? env->boss_x + dx / d * off : env->boss_x);
+    float iy = (float)(d > 1e-6 ? env->boss_y + dy / d * off : env->boss_y);
+    for (int i = count_alive_swarm(env); i < c->swarm_max; i++) {
+        if (env->n_swarm >= MAX_SWARM)
+            break;
+        Swarm sw = {ix, iy, c->swarm_hp, (float)(rng_next(env) % SNAKE_TIMER_JITTER)};
+        env->swarm[env->n_swarm++] = sw;
+    }
+}
+
+/* Protect(0.3, queen): each member steers to interpose on the player->boss line, in front of the
+ * boss, body-blocking the player's bullets; it stops once on the point and fires at the player on a
+ * swarm_fire_cd cadence. Runs only while the boss is engaged. */
+static void swarm_tick(Dungeon *env) {
+    Config *c = &env->cfg;
+    if (!c->enable_swarm)
+        return;
+    spawn_swarm(env);
+    double dx = env->px - env->boss_x, dy = env->py - env->boss_y;
+    double d = sqrt(dx * dx + dy * dy);
+    double off = SWARM_INTERPOSE_DIST;
+    if (off > d - 0.5)
+        off = d - 0.5;
+    if (off < 0.5)
+        off = 0.5;
+    double ix = d > 1e-6 ? env->boss_x + dx / d * off : env->boss_x;
+    double iy = d > 1e-6 ? env->boss_y + dy / d * off : env->boss_y;
+    int w = 0;
+    for (int i = 0; i < env->n_swarm; i++) {
+        if (env->swarm[i].hp <= 0.0f)
+            continue;
+        double tdx = ix - env->swarm[i].x, tdy = iy - env->swarm[i].y;
+        double td = sqrt(tdx * tdx + tdy * tdy);
+        if (td > SWARM_REPROTECT) {
+            double step = c->swarm_speed < td ? c->swarm_speed : td;
+            float nx = (float)(env->swarm[i].x + tdx / td * step);
+            float ny = (float)(env->swarm[i].y + tdy / td * step);
+            if (walkable_at(nx, ny)) {
+                env->swarm[i].x = nx;
+                env->swarm[i].y = ny;
+            }
+        }
+        env->swarm[i].timer -= 1.0f;
+        double pd = dist_ff(env->swarm[i].x, env->swarm[i].y, env->px, env->py);
+        if (env->swarm[i].timer <= 0.0f && pd <= SWARM_SHOOT_RANGE) {
+            env->swarm[i].timer = (float)c->swarm_fire_cd;
+            double base = atan2((double)(env->py - env->swarm[i].y), (double)(env->px - env->swarm[i].x));
+            Bullet b = {env->swarm[i].x, env->swarm[i].y, (float)cos(base) * SWARM_BVS,
+                        (float)sin(base) * SWARM_BVS, SWARM_BLIFE, c->swarm_dmg};
+            append_bullet(env->ebul, &env->n_ebul, MAX_EBULLETS, c->max_bullets, b);
+        }
+        env->swarm[w++] = env->swarm[i];
+    }
+    env->n_swarm = w;
 }
 
 static void boss_tick(Dungeon *env) {
@@ -797,6 +931,11 @@ static void compute_obs(Dungeon *env) {
         if (env->snakes[i].hp > 0.0f)
             scatter_f(obs, CH_ENEMY, env->snakes[i].x - env->px, env->snakes[i].y - env->py, 0.6f);
 
+    /* The protective swarm reads as enemies in the same channel: the wall the policy must clear. */
+    for (int i = 0; i < env->n_swarm; i++)
+        if (env->swarm[i].hp > 0.0f)
+            scatter_f(obs, CH_ENEMY, env->swarm[i].x - env->px, env->swarm[i].y - env->py, 0.6f);
+
     int boss_visible = env->fight_active && dist_df(env->boss_x, env->boss_y, env->px, env->py) <= VIS_RADIUS;
     if (boss_visible) {
         int col = (int)floor(env->boss_x - env->px) + HALF;
@@ -899,6 +1038,7 @@ static void c_reset(Dungeon *env) {
     env->invuln_timer = 0;
     env->t_p1 = env->t_p3a = env->t_g1 = env->t_g2 = env->t_g3card = env->t_g3diag = 0;
     env->confused_timer = env->petrify_timer = env->minion_timer = 0;
+    env->n_swarm = env->swarm_timer = 0;
     env->n_pbul = env->n_ebul = env->n_gren = 0;
     memset(env->visited, 0, sizeof(env->visited));
     memset(env->discovered, 0, sizeof(env->discovered));
@@ -980,8 +1120,10 @@ static void c_step(Dungeon *env) {
     }
 
     snakes_tick(env);
-    if (env->fight_active)
+    if (env->fight_active) {
         boss_tick(env);
+        swarm_tick(env);
+    }
     reward += grenades_tick(env);
 
     advance_bullets(env->pbul, &env->n_pbul);

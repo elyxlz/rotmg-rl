@@ -240,6 +240,82 @@ def test_fast_clear_scores_higher_than_slow_clear():
     assert (total_fast - total_slow) == pytest.approx(expected_delta, abs=1e-5)
 
 
+def _swarm_fight_cfg(**overrides) -> DungeonConfig:
+    """A clean point-blank boss fight that isolates the player-bullet-vs-boss path: no snakes, no boss
+    fire, no grenades, no regen, the boss can't phase or die (huge HP), and a fixed staff damage so the
+    only variable is whether the protective swarm is interposed. Overrides tweak enable_swarm etc."""
+    base = {
+        "boss_hp_max": 1e9,
+        "player_hp_max": 1e9,
+        "hp_regen": 0.0,
+        "n_snakes": 0,
+        "boss_wander_speed": 0.0,
+        "boss_shoots": False,
+        "enable_grenades": False,
+        "staff_dmg_lo": 170.0,
+        "staff_dmg_hi": 170.0,  # fixed staff damage so each landed bullet is identical
+        "invuln_ticks": 0,
+        "opening_invuln_ticks": 0,
+    }
+    base.update(overrides)
+    return DungeonConfig(**base)
+
+
+def _fire_at_boss(env, steps: int) -> float:
+    """Hold the staff on the boss (aim -x, the boss sits at -x of the player) for `steps` ticks and
+    return how much boss HP was removed over the window."""
+    before = env.get()["boss_hp"]
+    for _ in range(steps):
+        env.step([0, 16, 1, 0])  # aim index 16 = angle pi = straight -x at the boss, shoot, no cast
+    return before - env.get()["boss_hp"]
+
+
+def test_protective_swarm_body_blocks_boss():
+    """The defining Snake-Pit-C mechanic: Stheno's replenishing swarm body-blocks the player's bullets.
+
+    Geometry (hand-derived): player point-blank at boss+3.0 tiles on +x, aiming -x at the boss. The
+    swarm interposes on the player->boss line at boss + min(SWARM_INTERPOSE_DIST=2, d-0.5)=2.0 tiles,
+    i.e. one tile in front of the player's muzzle. A staff bullet (speed 1.8) advances 19.5->17.7 in
+    one tick and lands 0.8 tiles from the interpose point (< snake_radius+staff_radius = 1.0), so the
+    swarm consumes it BEFORE the boss collision runs -> the boss takes ~zero damage while the wall is
+    up. Clear the wall and the identical fire reaches the boss. The replenishing 1000-HP swarm is what
+    the 98%-sim policy never faced, so it transferred to nothing on the real (walled) Stheno."""
+    px, py = BOSS_TILE[0] + 3.5, BOSS_TILE[1] + 0.5  # boss at 16.5,73.5 -> player at 19.5 (d = 3.0)
+
+    env = CDungeonSingle(_swarm_fight_cfg(enable_swarm=True, swarm_max=5), seed=3)
+    env.reset(seed=3)
+    env.put(player_x=px, player_y=py, fight_active=1, phase=1)
+    env.step([0, 0, 0, 0])  # one fight tick -> Reproduce spawns the swarm and it interposes
+    assert env.get()["swarm_count"] == 5  # ~swarm_max members maintained around the boss
+
+    shielded_loss = _fire_at_boss(env, 20)
+    assert shielded_loss == 0.0  # every staff bullet is eaten by the interposed wall
+
+    env.put(clear_swarm=1)  # tear the wall down (and hold off replenishment)
+    assert env.get()["swarm_count"] == 0
+    cleared_loss = _fire_at_boss(env, 20)
+    # with the lane open the identical fire reaches the boss: many clamped hits land (defended(170,19)
+    # = 151 per bullet, ~8 bullets over the window), so the boss takes hundreds of HP, not zero.
+    assert cleared_loss > 500.0
+
+
+def test_protective_swarm_replenishes():
+    """Reproduce tops the swarm back up to swarm_max on the swarm_cd cadence: kill the wall and, within
+    swarm_cd ticks, it is fully rebuilt around the boss (the wall the policy can never simply outlast)."""
+    px, py = BOSS_TILE[0] + 3.5, BOSS_TILE[1] + 0.5
+    env = CDungeonSingle(_swarm_fight_cfg(enable_swarm=True, swarm_max=5, swarm_cd=15), seed=4)
+    env.reset(seed=4)
+    env.put(player_x=px, player_y=py, fight_active=1, phase=1)
+    env.step([0, 0, 0, 0])
+    assert env.get()["swarm_count"] == 5
+    env.put(kill_swarm=1)  # wipe the live members but leave the Reproduce timer running
+    assert env.get()["swarm_count"] == 0
+    for _ in range(16):  # > swarm_cd (15): the next Reproduce tick must rebuild the wall
+        env.step([0, 0, 0, 0])
+    assert env.get()["swarm_count"] == 5  # replenished back to the cap, never starved
+    env.close()
+
+
 # --- drift tripwire ---------------------------------------------------------------------------------
 # A fixed seed + deterministic action schedule, 200 steps, with the boss HP high enough that it never
 # clears and the player HP high enough that it never dies (so the episode runs the full window). The

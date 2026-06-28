@@ -74,6 +74,15 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     c->minion_max = (int)unpack(kwargs, "minion_max");
     c->minion_cd = (int)unpack(kwargs, "minion_cd");
     c->minion_hp = unpack(kwargs, "minion_hp");
+    c->enable_swarm = (int)unpack(kwargs, "enable_swarm");
+    c->swarm_max = (int)unpack(kwargs, "swarm_max");
+    c->swarm_cd = (int)unpack(kwargs, "swarm_cd");
+    c->swarm_fire_cd = (int)unpack(kwargs, "swarm_fire_cd");
+    c->swarm_radius = unpack(kwargs, "swarm_radius");
+    c->swarm_hp = unpack(kwargs, "swarm_hp");
+    c->swarm_def = unpack(kwargs, "swarm_def");
+    c->swarm_dmg = unpack(kwargs, "swarm_dmg");
+    c->swarm_speed = unpack(kwargs, "swarm_speed");
     c->enable_grenades = (int)unpack(kwargs, "enable_grenades");
     c->enable_minions = (int)unpack(kwargs, "enable_minions");
     c->rew_explore = unpack(kwargs, "rew_explore");
@@ -131,6 +140,19 @@ static int my_put(Env *env, PyObject *args, PyObject *kwargs) {
     v = PyDict_GetItemString(kwargs, "boss_hp");
     if (v)
         env->boss_hp = PyFloat_AsDouble(v);
+    /* Scenario hook: drop the whole protective swarm and hold off replenishment, so a test can fire
+     * at the boss through the now-open lane (asserts the wall was the thing blocking the bullets). */
+    v = PyDict_GetItemString(kwargs, "clear_swarm");
+    if (v && PyLong_AsLong(v) != 0) {
+        env->n_swarm = 0;
+        env->swarm_timer = 1000000;
+    }
+    /* Scenario hook: kill the live members but leave the Reproduce timer running, so a test can prove
+     * the swarm replenishes back to its cap on the swarm_cd cadence. */
+    v = PyDict_GetItemString(kwargs, "kill_swarm");
+    if (v && PyLong_AsLong(v) != 0)
+        for (int i = 0; i < env->n_swarm; i++)
+            env->swarm[i].hp = 0.0f;
     compute_obs(env);
     return 0;
 }
@@ -192,6 +214,23 @@ static PyObject *my_get(PyObject *dict, Env *env) {
             }
     }
     set_array(dict, "snakes", snakes);
+
+    int nsw = 0;
+    for (int i = 0; i < env->n_swarm; i++)
+        if (env->swarm[i].hp > 0.0f)
+            nsw++;
+    assign_to_dict(dict, "swarm_count", (float)nsw);
+    PyObject *swarm = new_f32(nsw, 2, &d);
+    if (swarm) {
+        int k = 0;
+        for (int i = 0; i < env->n_swarm; i++)
+            if (env->swarm[i].hp > 0.0f) {
+                d[2 * k] = env->swarm[i].x;
+                d[2 * k + 1] = env->swarm[i].y;
+                k++;
+            }
+    }
+    set_array(dict, "swarm", swarm);
 
     PyObject *ebul = new_f32(env->n_ebul, 2, &d);
     if (ebul)

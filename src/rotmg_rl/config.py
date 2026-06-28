@@ -139,10 +139,27 @@ class DungeonConfig:
     grenade_dmg_petrify: float = 75.0
     confused_ticks: int = 10
     petrify_ticks: int = 10
-    # Stheno Swarm minions (Reproduce) -- OMITTED by default (optional, no-player-gated); kept tunable.
+    # Legacy weak-minion adds (Reproduce) -- OMITTED by default; superseded by the protective swarm below.
     minion_max: int = 5
     minion_cd: int = 15
     minion_hp: float = 30.0
+    # Stheno Swarm: the boss's protective, replenishing, bullet-blocking wall (the defining Snake-Pit-C
+    # mechanic the real Stheno is walled by). Reproduce("Stheno Swarm", densityRadius 15, densityMax 5,
+    # coolDown 1500ms) keeps ~swarm_max members within swarm_radius of the boss, replenished every
+    # swarm_cd ticks; each runs Protect(0.3, queen) to interpose on the player->boss line, body-blocking
+    # the player's bullets. Member stats from the Stheno Swarm XML: HP 1000, Def 4, projectile Damage 40,
+    # fire cd Cooldown(750,250) ~= swarm_fire_cd ticks (~1.33 shots/s). enable_swarm gates it (off by
+    # default; the difficulty schedule turns it on at high d). Aqua Missile kinematics (Speed 60 ->
+    # 0.6 t/tick, Life 1000ms -> 10 ticks) are constants in dungeon.h.
+    enable_swarm: bool = False
+    swarm_max: int = 5
+    swarm_cd: int = 15  # Reproduce coolDown 1500ms = 15 ticks (replenish cadence)
+    swarm_fire_cd: int = 8  # Shoot(10) Cooldown(750,250) ~= 8 ticks (~1.33 shots/s)
+    swarm_radius: float = 15.0  # densityRadius 15: members maintained within 15 tiles of the boss
+    swarm_hp: float = 1000.0
+    swarm_def: float = 4.0
+    swarm_dmg: float = 40.0  # Aqua Missile Damage 40
+    swarm_speed: float = 0.5  # Protect interpose move rate (tiles/tick)
     enable_grenades: bool = True  # curriculum can disable for early stages
     enable_minions: bool = False
     # rewards (exploration-based, no global pathfinding). Scaled to PufferLib's roughly -1..1 rule:

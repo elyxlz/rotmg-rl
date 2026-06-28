@@ -28,13 +28,15 @@ from rotmg_rl.deploy.policy import PolicyRunner
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", default="checkpoints/full_dungeon_95.pt")
+    ap.add_argument("--checkpoint", default="checkpoints/curriculum/finish.pt")
+    ap.add_argument("--hidden", type=int, default=256, help="policy hidden size (must match the checkpoint's arch)")
+    ap.add_argument("--num-layers", type=int, default=2, help="policy LSTM layers (must match the checkpoint's arch)")
     ap.add_argument("--greedy", action="store_true")
     ap.add_argument("--record", default=None, help="render a POV mp4 of the real-server rollout to this path")
     ap.add_argument("--fps", type=int, default=15)
     args = ap.parse_args()
 
-    runner = PolicyRunner(args.checkpoint)
+    runner = PolicyRunner(args.checkpoint, hidden=args.hidden, num_layers=args.num_layers)
     obs = RealObsBuilder()
     frames: list = []
 

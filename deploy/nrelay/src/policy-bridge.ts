@@ -9,7 +9,7 @@ import { Logger, LogLevel } from "./services";
 
 const RL_DIR = "/home/audiogen/rotmg-rl";
 const PYTHON = `${RL_DIR}/.venv/bin/python`;  // the scripts/setup.sh-provisioned venv (torch + vendored pufferlib)
-const CKPT = "checkpoints/full_dungeon_95.pt";
+const CKPT = "checkpoints/curriculum/finish.pt";  // the 98%-faithful-clear policy (trial-10 arch: server.py defaults hidden 256 / num_layers 2)
 const INVINCIBLE_MASK = ConditionEffect.INVINCIBLE | ConditionEffect.INVULNERABLE;
 const SNAKE_PIT_PORTAL_TYPE = 0x0718;
 const SPELL_MP_COST = 20;

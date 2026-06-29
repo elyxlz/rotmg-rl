@@ -108,6 +108,65 @@ worlds); (3) batch the GPU policy over a larger N once the worlds aren't CPU-sta
 box, N≈32 at ~2 ms/tick already projects to ~16K and the per-tick CPU cost is the only thing between that
 and 22K.
 
+## Learnability proof — a policy LEARNS to clear the real pit (easy fixed config)
+
+The plumbing above was only ever smoke-tested with a RANDOM policy, so reward stayed ~0 (the random
+agent never crossed the maze to the boss). To prove the per-episode loop (navigate-in spawn, reward
+incl. geodesic-approach shaping, reset, obs) is correct on the REAL game engine, a real `pufferl` PPO
+run was trained against it at an easy fixed difficulty — and it **learns to navigate and clear**.
+
+**Geodesic-approach reward (the navigate-in gradient).** `SimGeodesic.cs` (server side) BFS-floods the
+REAL Snake Pit walkable grid (the live `Wmap`, same walkability as `SimObsBuilder.TileWalkable` /
+`World.IsPassable`) outward from the boss tile, giving a geodesic distance-to-boss field. Each tick the
+reward gains `(prevGeo − curGeo) * SIM_APPROACH_SCALE` — the per-tick REDUCTION in geodesic distance.
+This is the signal the C-sim baked as `MAP_GEODESIC`; without it the agent has no gradient to cross the
+maze. The field re-anchors only when the (near-stationary) boss moves a whole tile, so it is built once
+per episode and cached. Reward components, all from the real game state: boss-dmg (HP delta), clear
+(+5 terminal), death (−1 terminal), approach (geodesic), small step penalty.
+
+**Difficulty knobs (`SimMode.cs`, the curriculum will drive them later).** The real dungeon enemies + AI
++ boss mechanics stay UNMODIFIED; only the agent spawn/stats + boss HP are controllable training aids
+(d=1 restores the real conditions). `SIM_AGENT_HP` (survivability), `SIM_AGENT_DEF` (flat per-hit
+reduction, applied in `SimAgent.Damage`), `SIM_BOSS_HP` (boss spawn HP), `SIM_SPAWN_GEO_DIST` (spawn at a
+walkable tile this many geodesic-tiles from the boss; −1 == the real entrance), `SIM_APPROACH_SCALE`,
+`SIM_STEP_PENALTY`, `SIM_EP_TIMEOUT` (hard episode cap → `reason=timeout`). Reset on done
+(clear/death/timeout) respawns at the configured distance and re-seeds the geodesic baseline.
+
+**Easy fixed config for this proof:**
+
+```bash
+SIM_SPAWN_GEO_DIST=25 SIM_AGENT_HP=5000 SIM_AGENT_DEF=40 SIM_BOSS_HP=1500 \
+  SIM_APPROACH_SCALE=0.02 SIM_EP_TIMEOUT=1500 ./run-server-sim.sh 32
+# then: nohup .venv/bin/python server_proof.py --agents 32 --steps 1500000 \
+#         --server-log /tmp/server_proof.log --out logs/server_proof_curve.csv &
+```
+
+**Result (N=32, GPU 1, ~1700 SPS):** the clear rate climbs from 0 toward 1.0 and reward from ~0 to a
+high plateau within ~50K steps — the agent navigates the geodesic from the spawn and kills the boss.
+
+```
+     step   reward  done_rt  clear_rt  clears  deaths  timeouts
+     2048  -0.0005    0.000     0.000       0       0         0   <- untrained: NEVER reaches the boss
+    20480   0.0206    0.109     1.000      39       0         0   <- first clears appear
+    38912   0.1085    0.562     1.000     239       0         0
+    77824   0.1773    0.891     0.998     886       0         2
+   307200   0.1767    0.906     1.000     848       0         0   <- plateau: clear_rate 1.0, 0 deaths
+```
+
+`clear_rate` is the fraction of ended episodes that were a clear (vs death/timeout), parsed from the
+server's ground-truth `[SIM-RL] EPISODE DONE ... reason=` lines; `done_rate` is the trainer's per-horizon
+terminal rate. Final clear_rate 1.0, done_rate ~0.8, ZERO deaths and ~32 timeouts across the whole run.
+The control is decisive: an untrained policy (step 2K) and the earlier random-policy smoke run BOTH
+produce 0 reward / 0 clears, so the clears are a LEARNED navigate-in skill, not the boss wandering to a
+stationary agent. Per-episode `ep_reward ≈ 6.0–6.4` (5.0 clear + ~1.0 boss-HP-delta + a positive
+geodesic-approach net) confirms the agent reduces geodesic distance, i.e. moves inward.
+
+`server_proof.py` (rotmg-rl) is the proof harness: it runs the real `server_train.py` PPO loop and tails
+the server log in parallel to align the trainer's step/reward/done_rate with the ground-truth
+clear/death/timeout counts into one learning-curve CSV; `curve_summary.py` renders it. With the loop
+proven LEARNABLE on the real engine, the curriculum + Protein sweep can drive these difficulty knobs
+toward d=1 (the real conditions) on top of this exact loop.
+
 ## Rough edges
 
 - **CPU-bound on the server worlds is the plateau**, not the gate. The shm bridge + futex barrier are
@@ -128,3 +187,16 @@ and 22K.
   C# worlds are independent (per-world state), so N agents see decorrelated episodes — good for PPO.
 - **`_C` is shared**: building `server_env` overwrites the dungeon `_C.so`. Rebuild `./build.sh dungeon --float`
   to return to the native-sim training flow.
+- **Boss damage is a proximity contact model**, not aimed-shot collision: `SimRlLoop._agentBossDamage`
+  applies `SIM_PROBE_DPS_TICK` to the boss whenever the agent is within ~8 tiles (the same scripted damage
+  model the lockstep proof used). So at the easy config the agent clears by *arriving* and staying close,
+  which is why the navigate-in geodesic reward is the load-bearing skill. This is intentional for the
+  difficulty proof; when the curriculum tightens toward d=1 the kill should be gated on real
+  aimed-projectile collision so "land your shots" becomes part of the learned policy.
+- **Deterministic geodesic spawn tile**: `SimGeodesic.TileAtDistance` returns the first row-major walkable
+  tile at the target distance, so all N worlds spawn at the same *relative* geodesic offset (decorrelated
+  only by the stochastic enemy/boss dynamics). Fine for the fixed-config proof; the curriculum may want to
+  randomize the spawn tile among the equidistant candidates for spatial coverage.
+- **Geodesic field is BFS in tile units, 4-connected**: a faithful navigation potential but not the exact
+  Euclidean path length (diagonal moves cost 1, not √2). The reward only needs the monotone "closer is
+  better" gradient, so this is sufficient; swap to a weighted/8-connected BFS if exactness ever matters.

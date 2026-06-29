@@ -114,9 +114,28 @@ class DungeonConfig:
     # in-view density (mean ~27, max ~38) where the old 40 gave only ~7 -- the survival-fidelity gap
     # that let the sim report 96% clears while the live bot died crossing the swarm every run.
     n_snakes: int = 200
-    n_snakes_jitter: int = 0  # per-episode +/- band around n_snakes (difficulty schedule spreads a batch around d)
     snake_speed: float = 0.15
     snake_radius: float = 0.5
+    # --- Domain randomization (per-EPISODE; ranges widen with the difficulty d in schedule.py) ---
+    # The policy must learn a ROBUST transfer skill, not memorize the sim's exact enemy configuration:
+    # the FIXED map (walls/floor/boss/entrance/geodesic) + the per-type archetype identities stay exact,
+    # but the enemy DYNAMICS are sampled fresh each reset so the real server is just one in-distribution
+    # sample. Identity defaults below (density 1..1, no hot bias, no jitter, boss_hp_lo>=hi) make a fresh
+    # agent / a pinned cfg deterministic; the schedule widens them with d. See dungeon.h's Config comment.
+    density_lo: float = 1.0  # per-episode multiplier on n_snakes (active count); ~0.6..1.4 at d=1
+    density_hi: float = 1.0
+    n_hot_regions: int = 0  # random "dense" authored anchors per episode (which regions are crowded shifts)
+    hot_radius: float = 12.0  # tiles around a hot anchor that get the density bias
+    hot_bias: float = 0.0  # extra selection weight for snakes near a hot anchor (0 = uniform subset)
+    spawn_jitter: int = 0  # max tiles an authored spawn is perturbed (kept on floor); breaks exact-tile memorization
+    fire_phase_jitter: int = 10  # per-enemy initial shoot-timer desync (ticks); the bullet-pattern phase
+    fire_cd_jitter: float = 0.0  # per-episode +/- fraction on every snake's fire cooldown (cadence)
+    acq_jitter: float = 0.0  # per-episode +/- fraction on Follow acquireRange (convergence density)
+    fspd_jitter: float = 0.0  # per-episode +/- fraction on Follow move speed
+    player_hp_jitter: float = 0.0  # per-episode +/- fraction around player_hp_max (~0.1 at d=1)
+    player_def_jitter: float = 0.0  # per-episode +/- fraction around player_defense (~0.1 at d=1)
+    boss_hp_lo: float = 0.0  # per-episode boss HP sampled in [lo,hi]; lo>=hi (or hi<=0) -> boss_hp_max
+    boss_hp_hi: float = 0.0
     # Snake Grate replenishment (BehaviorDb.SnakePit "Snake Grate"): the pit's continuous snake source.
     # The real grate runs Idle -> (when no child of a type exists within ~5 tiles) -> Spawn one Pit Snake
     # + one Pit Viper at the grate -> wait 2000ms -> Idle, so a small local population is sustained, not
@@ -124,11 +143,15 @@ class DungeonConfig:
     # an active authored snake that has died OR drifted beyond grate_radius from its authored tile is
     # respawned there (capped so each anchor holds only its own snake), so the authored clusters -- incl.
     # the converging Greater pack at the (38,43) boss-approach chokepoint -- stay stocked instead of
-    # evaporating during the long navigation. enable_grates gates it; the curriculum ramps it in with d.
+    # evaporating during the long navigation. Under domain randomization this is one density SAMPLE, not a
+    # forced strategy: enable_grates forces it on (explicit eval/tests), grate_prob turns it on with that
+    # per-episode probability (the curriculum's sustained, dense-chokepoint end). Sometimes-on, so the
+    # policy can't rely on a hold-and-clear -- the deadlock the old always-on grate caused.
     enable_grates: bool = False
     grate_cd: int = 20  # Spawn TimedTransition(2000ms) = 20 ticks (replenish cadence)
     grate_radius: float = 5.0  # EntityNotExistsTransition("Pit Snake", 5, ...): the local-density check radius
     grate_cap: int = 2  # max children per real grate tile within grate_radius (1 Pit Snake + 1 Pit Viper)
+    grate_prob: float = 0.0  # per-episode probability replenishment is active (the dense/sustained sample)
     # boss (Stheno the Snake Queen): 7500 HP, DEF 19, phases at 66%/33%.
     boss_hp_max: float = 7500.0
     boss_radius: float = 2.0

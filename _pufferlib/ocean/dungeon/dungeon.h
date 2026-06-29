@@ -144,14 +144,47 @@ typedef struct {
     int spell_cooldown, spell_num;
     float spell_dmg_lo, spell_dmg_hi, spell_speed;
     int spell_life;
-    int n_snakes, n_snakes_jitter;
+    int n_snakes;
     float snake_speed, snake_radius;
-    /* Snake Grate replenishment (the pit's continuous snake source). enable_grates gates it; on the
-     * grate_cd cadence each real grate tops its Pit Snake/Viper children up to grate_cap within
-     * grate_radius, and every active authored anchor whose snake died or strayed past grate_radius is
-     * respawned at its tile -- so the authored clusters (incl. the chokepoint Greaters) stay stocked. */
+    /* Domain randomization (sampled fresh per EPISODE in c_reset from a per-env RNG, so the policy
+     * trains on a DISTRIBUTION of enemy dynamics the real server is one sample of, not one memorizable
+     * layout). Every range below WIDENS with the curriculum d (schedule.py): narrow/easy at low d, full
+     * at d=1. The FIXED map walls/floor/boss/entrance/geodesic + the per-type archetype identities are
+     * never randomized -- only which authored enemies are active, where (within a few tiles), how
+     * densely they cluster, their fire phase/cadence, their aggression, the boss HP, and the player
+     * HP/DEF. Identity ranges (lo==hi / jitter 0) collapse to a fixed value, so a pinned cfg is
+     * deterministic (the golden tripwire pins them).
+     *   density_lo/hi  : per-episode multiplier on n_snakes (active count). 1..1 = exactly n_snakes.
+     *   n_hot_regions  : random "dense" authored anchors per episode; the subset is biased toward them
+     *                    by hot_bias within hot_radius, so WHICH regions are crowded shifts each episode
+     *                    (a chokepoint is sometimes a wall, sometimes light). 0 = uniform subset.
+     *   spawn_jitter   : max tiles an authored spawn is perturbed (kept on walkable floor) so exact-tile
+     *                    memorization fails. 0 = the exact authored tile.
+     *   fire_phase_jitter : per-ENEMY initial shoot-timer desync (ticks); the bullet-pattern phase.
+     *   fire_cd_jitter : per-episode +/- fraction on every snake's fire cooldown (cadence). 0 = authored.
+     *   acq_jitter     : per-episode +/- fraction on Follow acquireRange (convergence density). 0 = authored.
+     *   fspd_jitter    : per-episode +/- fraction on Follow move speed. 0 = authored.
+     *   player_hp_jitter / player_def_jitter : per-episode +/- fraction around the real 670 / 25.
+     *   boss_hp_lo/hi  : per-episode boss HP sampled in [lo,hi] (the real ScaleHP2 solo..populated band).
+     *                    lo>=hi (or hi<=0) -> exactly boss_hp_max. */
+    float density_lo, density_hi;
+    int n_hot_regions;
+    float hot_radius, hot_bias;
+    int spawn_jitter, fire_phase_jitter;
+    float fire_cd_jitter, acq_jitter, fspd_jitter, player_hp_jitter, player_def_jitter;
+    float boss_hp_lo, boss_hp_hi;
+    /* Snake Grate replenishment (the pit's continuous snake source). On the grate_cd cadence each real
+     * grate tops its Pit Snake/Viper children up to grate_cap within grate_radius, and every active
+     * authored anchor whose snake died or strayed past grate_radius is respawned at its tile -- so the
+     * authored clusters (incl. the chokepoint Greaters) stay stocked.
+     *   Under DOMAIN RANDOMIZATION this is folded in as just ONE density sample, NOT a forced strategy:
+     * each episode independently turns replenishment on with probability grate_prob (so a SUSTAINED,
+     * dense chokepoint -- the real ~9 converging Greaters -- is one end of the distribution) and off
+     * otherwise (the pack THINS by attrition -- the light end). Because it is only sometimes on, the
+     * policy can't rely on a hold-and-clear, which is exactly the deadlock the old always-on grate caused.
+     * enable_grates forces it on every episode (explicit eval/tests); grate_prob drives the curriculum. */
     int enable_grates, grate_cd, grate_cap;
-    float grate_radius;
+    float grate_radius, grate_prob;
     float boss_hp_max, boss_radius, boss_defense, boss_wander_speed, boss_return_speed;
     int boss_shoots, opening_invuln_ticks, invuln_ticks;
     int blade_cd;
@@ -220,7 +253,7 @@ typedef struct {
      * the curriculum subset is the only roster replenished), and the shared respawn-cadence timer. */
     int snake_anchor[MAX_SNAKES];
     int active_authored[N_AUTHORED], n_active_authored;
-    int grate_timer;
+    int grate_timer, ep_grates; /* ep_grates: whether grate replenishment is active THIS episode */
     Swarm swarm[MAX_SWARM];
     int n_swarm, swarm_timer;
     Grenade grenades[MAX_GRENADES];
@@ -232,6 +265,14 @@ typedef struct {
     int boss_seen;                           /* boss has been within vision at least once */
     double prev_boss_geo;                    /* approach-shaping baseline: geodesic distance-to-boss last step */
     int steps;
+    /* Per-EPISODE domain-randomization samples, drawn fresh in c_reset from the per-env RNG and held
+     * constant for the episode. ep_fire_cd_mul/ep_acq_mul/ep_fspd_mul scale every snake's authored
+     * cooldown/acquireRange/follow-speed; ep_player_def is the jittered DEF used in collisions. The
+     * boss HP / player HP samples land directly in boss_hp / player_hp_max-derived fields at reset. */
+    float ep_fire_cd_mul, ep_acq_mul, ep_fspd_mul, ep_player_def;
+    double ep_boss_hp_max; /* the episode's sampled initial boss HP: the normalizer for boss_hp_frac /
+                            * phase thresholds / the boss-damage reward, so randomizing HP keeps the
+                            * fraction in [0,1] and the 66%/33% phase cuts correct at any sampled HP. */
     uint64_t rng_state;     /* per-env RNG: thread-safe under OpenMP, independent per env */
     int last_ipx, last_ipy; /* wall-channel cache key (avoid refilling 31x31 walls every step) */
     /* Episode-outcome latch for the single-env eval wrapper: set on the step an episode ends (before
@@ -469,7 +510,7 @@ static double resolve_collisions(Dungeon *env) {
         if (any) {
             env->n_pbul = w;
             env->boss_hp -= dmg;
-            reward += (dmg / c->boss_hp_max) * c->rew_boss_dmg;
+            reward += (dmg / env->ep_boss_hp_max) * c->rew_boss_dmg;
         }
     }
 
@@ -480,7 +521,7 @@ static double resolve_collisions(Dungeon *env) {
         int any = 0, w = 0;
         for (int i = 0; i < env->n_ebul; i++) {
             if (dist_ff(env->ebul[i].x, env->ebul[i].y, env->px, env->py) < thr) {
-                dmg += defended(env->ebul[i].dmg, c->player_defense, c->damage_floor);
+                dmg += defended(env->ebul[i].dmg, env->ep_player_def, c->damage_floor);
                 any = 1;
             } else {
                 env->ebul[w++] = env->ebul[i];
@@ -717,7 +758,7 @@ static void boss_tick(Dungeon *env) {
     if (env->invuln_timer > 0) {
         env->invuln_timer--;
     } else {
-        double frac = env->boss_hp / c->boss_hp_max;
+        double frac = env->boss_hp / env->ep_boss_hp_max;
         if (env->phase == 1 && frac <= 0.66f) {
             env->phase = 2;
             env->invuln_timer = c->invuln_ticks;
@@ -783,7 +824,7 @@ static double grenades_tick(Dungeon *env) {
         g.fuse -= 1.0f;
         if (g.fuse <= 0.0f) {
             if (dist_ff(env->px, env->py, g.x, g.y) <= g.rad) {
-                float dmg = (float)defended(g.dmg, c->player_defense, c->damage_floor);
+                float dmg = (float)defended(g.dmg, env->ep_player_def, c->damage_floor);
                 env->player_hp -= dmg;
                 reward -= (dmg / c->player_hp_max) * c->rew_damage_taken;
                 if ((int)g.status == 0)
@@ -807,13 +848,16 @@ static void snakes_tick(Dungeon *env) {
         if (env->snakes[i].hp <= 0.0f)
             continue;
         const float *st = SNAKE_TYPES[(int)env->snakes[i].type];
+        /* Per-episode aggression jitter: the authored acquireRange/follow-speed scaled by the episode's
+         * sampled multipliers, so convergence density varies sample-to-sample (robust, not memorized). */
+        float acq = st[ST_ACQ] * env->ep_acq_mul, fspd = st[ST_FSPD] * env->ep_fspd_mul;
         double d = dist_ff(env->snakes[i].x, env->snakes[i].y, env->px, env->py);
         /* movement: Follow chase toward the player within acquire range, else Wander drift */
         float mvx, mvy;
-        if (st[ST_FOLLOW] > 0.0f && d <= st[ST_ACQ]) {
+        if (st[ST_FOLLOW] > 0.0f && d <= acq) {
             double inv = 1.0 / (d + 1e-6);
-            mvx = (float)((env->px - env->snakes[i].x) * inv) * st[ST_FSPD];
-            mvy = (float)((env->py - env->snakes[i].y) * inv) * st[ST_FSPD];
+            mvx = (float)((env->px - env->snakes[i].x) * inv) * fspd;
+            mvy = (float)((env->py - env->snakes[i].y) * inv) * fspd;
         } else {
             mvx = randn(env) * c->snake_speed;
             mvy = randn(env) * c->snake_speed;
@@ -825,7 +869,9 @@ static void snakes_tick(Dungeon *env) {
         }
         env->snakes[i].timer -= 1.0f;
         if (env->snakes[i].timer <= 0.0f && d <= st[ST_SRANGE]) {
-            env->snakes[i].timer = st[ST_CD];
+            /* Per-episode fire-cadence jitter: scale the authored cooldown so the bullet pattern the
+             * policy faces varies across episodes (robust dodging, not a memorized rhythm). */
+            env->snakes[i].timer = st[ST_CD] * env->ep_fire_cd_mul;
             double base = atan2((double)(env->py - env->snakes[i].y), (double)(env->px - env->snakes[i].x));
             int cnt = (int)st[ST_CNT];
             for (int j = 0; j < cnt; j++) {
@@ -838,41 +884,104 @@ static void snakes_tick(Dungeon *env) {
     }
 }
 
-/* Spawn enemies at the AUTHORED .jm positions/types (AUTHORED_SNAKES, baked from the real map), not at
- * uniform-random tiles -- so the real clusters and the hard entrance chokepoint are reproduced exactly.
- * The curriculum activates a fraction of the authored roster: `want` (= n_snakes, ramped by difficulty
- * d, +/- the density jitter) members are chosen as a random subset via a partial Fisher-Yates over the
- * authored index list. At d=1 (want >= N_AUTHORED) every authored enemy is active -> the full real
- * ~405-enemy map; each carries its authored type, so its HP/DEF/damage/follow are the real archetype. */
+/* Perturb an authored spawn tile by up to `jitter` tiles (uniform square), snapping to the nearest
+ * walkable floor so the snake never lands in a wall. jitter 0 returns the exact authored tile. */
+static void jitter_spawn(Dungeon *env, float ax, float ay, int jitter, float *ox, float *oy) {
+    if (jitter <= 0) {
+        *ox = ax;
+        *oy = ay;
+        return;
+    }
+    int span = 2 * jitter + 1;
+    int dx = (int)(rng_next(env) % (unsigned)span) - jitter;
+    int dy = (int)(rng_next(env) % (unsigned)span) - jitter;
+    int sx, sy;
+    nearest_walkable((int)ax + dx, (int)ay + dy, &sx, &sy);
+    *ox = sx + 0.5f;
+    *oy = sy + 0.5f;
+}
+
+/* Spawn enemies at the AUTHORED .jm positions/types (AUTHORED_SNAKES, baked from the real map): the
+ * real clusters and the entrance chokepoint, NEVER a uniform random scatter. DOMAIN RANDOMIZATION (all
+ * widened with d) makes the active configuration a per-episode SAMPLE so the policy can't memorize one
+ * layout: the active count is n_snakes * U(density_lo, density_hi); the chosen subset is biased toward
+ * n_hot_regions random authored anchors (so WHICH regions are dense shifts each episode -- a chokepoint
+ * is sometimes a wall, sometimes light); each spawn tile is perturbed up to spawn_jitter tiles (kept on
+ * floor); and the initial fire phase is desynced by up to fire_phase_jitter ticks. At d=1 with identity
+ * ranges (density 1..1, no hot bias, no jitter) every authored enemy is active at its exact tile -- the
+ * full real ~405-enemy map; each carries its authored type, so HP/DEF/damage/follow are the archetype. */
 static void spawn_snakes(Dungeon *env) {
     Config *c = &env->cfg;
     env->n_snake = 0;
     env->n_active_authored = 0;
     env->grate_timer = c->grate_cd;
-    int want = c->n_snakes;
-    if (c->n_snakes_jitter > 0) {
-        int span = 2 * c->n_snakes_jitter + 1;
-        want += (int)(rng_next(env) % (unsigned)span) - c->n_snakes_jitter;
-    }
+
+    /* per-episode active count: n_snakes scaled by a fresh density multiplier */
+    float mul = c->density_hi > c->density_lo ? uniform_f(env, c->density_lo, c->density_hi)
+                                              : (c->density_lo > 0.0f ? c->density_lo : 1.0f);
+    int want = (int)(c->n_snakes * mul + 0.5f);
     if (want < 0)
         want = 0;
     if (want > N_AUTHORED)
         want = N_AUTHORED;
+
+    /* pick n_hot_regions random authored anchors as this episode's dense centers */
+    int hot[16];
+    int n_hot = c->n_hot_regions;
+    if (n_hot > 16)
+        n_hot = 16;
+    for (int h = 0; h < n_hot; h++)
+        hot[h] = (int)(rng_next(env) % (unsigned)N_AUTHORED);
+
+    /* Weighted-without-replacement selection (Efraimidis-Spirakis): key = -log(u)/weight, smaller key
+     * wins. A snake within hot_radius of a hot center is boosted to weight 1+hot_bias; one far from ALL
+     * hot centers is suppressed to 1/(1+hot_bias) (cold). That contrast is what makes WHICH regions are
+     * dense actually shift each episode -- a cold chokepoint goes sparse, a hot one packs in -- instead
+     * of just sprinkling a little extra everywhere. With n_hot=0 or hot_bias=0 every weight is 1 -> a
+     * uniform random subset (the old behavior, the golden-seed identity). */
+    float key[N_AUTHORED];
+    for (int i = 0; i < N_AUTHORED; i++) {
+        float w = 1.0f;
+        if (n_hot > 0 && c->hot_bias > 0.0f) {
+            int near = 0;
+            for (int h = 0; h < n_hot; h++) {
+                const float *hp = AUTHORED_SNAKES[hot[h]];
+                if (dist_ff(AUTHORED_SNAKES[i][0], AUTHORED_SNAKES[i][1], hp[0], hp[1]) <= c->hot_radius) {
+                    near = 1;
+                    break;
+                }
+            }
+            w = near ? 1.0f + c->hot_bias : 1.0f / (1.0f + c->hot_bias);
+        }
+        float u = frand(env);
+        if (u < 1e-7f)
+            u = 1e-7f;
+        key[i] = -logf(u) / w;
+    }
+
+    /* partial selection of the `want` smallest keys (one pass picks each next-smallest remaining) */
     int order[N_AUTHORED];
     for (int i = 0; i < N_AUTHORED; i++)
         order[i] = i;
     for (int s = 0; s < want; s++) {
+        int best = s;
+        for (int i = s + 1; i < N_AUTHORED; i++)
+            if (key[order[i]] < key[order[best]])
+                best = i;
+        int tmp = order[s];
+        order[s] = order[best];
+        order[best] = tmp;
         if (env->n_snake >= MAX_SNAKES)
             break;
-        int j = s + (int)(rng_next(env) % (unsigned)(N_AUTHORED - s));
-        int tmp = order[s];
-        order[s] = order[j];
-        order[j] = tmp;
-        const float *a = AUTHORED_SNAKES[order[s]];
+        int ai = order[s];
+        const float *a = AUTHORED_SNAKES[ai];
         int type = (int)a[2];
-        Snake sn = {a[0], a[1], SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
-        env->snake_anchor[env->n_snake] = order[s];          /* remember the anchor for grate replenishment */
-        env->active_authored[env->n_active_authored++] = order[s]; /* the curriculum subset to re-stock */
+        float sx, sy;
+        jitter_spawn(env, a[0], a[1], c->spawn_jitter, &sx, &sy);
+        int phase = c->fire_phase_jitter > 0 ? (int)(rng_next(env) % (unsigned)c->fire_phase_jitter) : 0;
+        Snake sn = {sx, sy, SNAKE_TYPES[type][ST_HP], (float)phase, (float)type};
+        env->snake_anchor[env->n_snake] = ai;                /* remember the anchor for grate replenishment */
+        env->active_authored[env->n_active_authored++] = ai; /* the curriculum subset to re-stock */
         env->snakes[env->n_snake++] = sn;
     }
 }
@@ -882,7 +991,8 @@ static void spawn_snakes(Dungeon *env) {
 static int spawn_one_snake(Dungeon *env, float gx, float gy, int type, int anchor) {
     if (env->n_snake >= MAX_SNAKES)
         return 0;
-    Snake sn = {gx, gy, SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
+    int phase = env->cfg.fire_phase_jitter > 0 ? (int)(rng_next(env) % (unsigned)env->cfg.fire_phase_jitter) : 0;
+    Snake sn = {gx, gy, SNAKE_TYPES[type][ST_HP], (float)phase, (float)type};
     env->snake_anchor[env->n_snake] = anchor;
     env->snakes[env->n_snake++] = sn;
     return 1;
@@ -908,7 +1018,7 @@ static int count_type_near(Dungeon *env, float cx, float cy, int type, float rad
  * per-type stats; nothing about SNAKE_TYPES changes. enable_grates gates the whole system. */
 static void grates_tick(Dungeon *env) {
     Config *c = &env->cfg;
-    if (!c->enable_grates)
+    if (!env->ep_grates)
         return;
     if (env->grate_timer > 0) {
         env->grate_timer--;
@@ -1104,7 +1214,7 @@ static void compute_obs(Dungeon *env) {
     obs[SCALAR_OFF + 4] = env->confused_timer > 0 ? 1.0f : 0.0f;
     obs[SCALAR_OFF + 5] = env->petrify_timer > 0 ? 1.0f : 0.0f;
     obs[SCALAR_OFF + 6] =
-        env->fight_active ? (float)((env->boss_hp > 0.0 ? env->boss_hp : 0.0) / c->boss_hp_max) : 0.0f;
+        env->fight_active ? (float)((env->boss_hp > 0.0 ? env->boss_hp : 0.0) / env->ep_boss_hp_max) : 0.0f;
     obs[SCALAR_OFF + 7] = env->invuln_timer > 0 ? 1.0f : 0.0f;
 }
 
@@ -1143,7 +1253,17 @@ static void c_reset(Dungeon *env) {
         env->px = ex + 0.5f;
         env->py = ey + 0.5f;
     }
-    env->player_hp = c->player_hp_max;
+    /* Per-episode domain-randomization samples (drawn once here, held for the whole episode). A
+     * sym-jitter helper draws a +/- fraction around 1.0; identity (jitter 0) leaves the value untouched. */
+    env->ep_fire_cd_mul = c->fire_cd_jitter > 0.0f ? uniform_f(env, 1.0f - c->fire_cd_jitter, 1.0f + c->fire_cd_jitter) : 1.0f;
+    env->ep_acq_mul = c->acq_jitter > 0.0f ? uniform_f(env, 1.0f - c->acq_jitter, 1.0f + c->acq_jitter) : 1.0f;
+    env->ep_fspd_mul = c->fspd_jitter > 0.0f ? uniform_f(env, 1.0f - c->fspd_jitter, 1.0f + c->fspd_jitter) : 1.0f;
+    env->ep_player_def =
+        c->player_def_jitter > 0.0f
+            ? c->player_defense * uniform_f(env, 1.0f - c->player_def_jitter, 1.0f + c->player_def_jitter)
+            : c->player_defense;
+    float hp_mul = c->player_hp_jitter > 0.0f ? uniform_f(env, 1.0f - c->player_hp_jitter, 1.0f + c->player_hp_jitter) : 1.0f;
+    env->player_hp = c->player_hp_max * hp_mul;
     env->player_mp = c->player_mp_max;
     env->staff_timer = 0.0;
     env->spell_timer = 0;
@@ -1152,7 +1272,13 @@ static void c_reset(Dungeon *env) {
     env->boss_spawn_x = bx + 0.5;
     env->boss_spawn_y = by + 0.5;
     env->prev_boss_geo = geo_at(env->px, env->py);
-    env->boss_hp = c->boss_hp_max;
+    /* Per-episode boss HP: sample the real ScaleHP2 band (solo..populated) so the fight never overfits
+     * one HP. lo>=hi (or hi<=0) collapses to the fixed boss_hp_max. */
+    env->boss_hp = c->boss_hp_hi > c->boss_hp_lo ? uniform_f(env, c->boss_hp_lo, c->boss_hp_hi) : c->boss_hp_max;
+    env->ep_boss_hp_max = env->boss_hp; /* normalize this episode by its own sampled initial HP */
+    /* Grate replenishment is one density sample: forced on by enable_grates, else on with prob grate_prob
+     * (the SUSTAINED dense-chokepoint end of the distribution) -- sometimes-on, so never a forced hold. */
+    env->ep_grates = c->enable_grates || (c->grate_prob > 0.0f && frand(env) < c->grate_prob);
     env->phase = 0;
     env->fight_active = 0;
     env->invuln_timer = 0;
@@ -1272,7 +1398,7 @@ static void c_step(Dungeon *env) {
     /* Per-step metrics on the post-step (terminal) state, before any auto-reset, so they reflect
      * the just-ended step in the per-step info dict. On a clear step boss_hp<=0 -> boss_hp_frac=0,
      * cleared=1; on a normal step the boss's remaining HP fraction is recorded. */
-    env->log.boss_hp_frac += (env->boss_hp > 0.0f ? env->boss_hp : 0.0f) / c->boss_hp_max;
+    env->log.boss_hp_frac += (env->boss_hp > 0.0f ? env->boss_hp : 0.0f) / env->ep_boss_hp_max;
     env->log.in_room += env->fight_active ? 1.0f : 0.0f;
     env->log.cleared += cleared ? 1.0f : 0.0f;
     env->log.snakes += (float)count_alive_snakes(env);
@@ -1283,7 +1409,7 @@ static void c_step(Dungeon *env) {
 
     /* Per-episode score, recorded once at the episode boundary (before c_reset wipes boss_hp). */
     if (terminated || truncated) {
-        float bhf_end = (env->boss_hp > 0.0 ? (float)env->boss_hp : 0.0f) / c->boss_hp_max;
+        float bhf_end = (env->boss_hp > 0.0 ? (float)env->boss_hp : 0.0f) / env->ep_boss_hp_max;
         env->log.score += cleared ? 1.0f : (1.0f - bhf_end);
         env->log.clear_count += cleared ? 1.0f : 0.0f;
         env->log.player_hp_end_sum += (env->player_hp > 0.0f ? env->player_hp : 0.0f) / c->player_hp_max;

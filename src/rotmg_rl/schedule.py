@@ -41,7 +41,18 @@ def difficulty_config(d: float, n_snakes_max: int = N_SNAKES_MAX) -> dict:
     """Map a single difficulty d in [0,1] to the env-config levers. Monotonic in d, and every lever
     moves a little for each step of d so there is no cliff. The boolean toggles (boss_shoots /
     grenades / minions) fire at LOW d, while the rest of the difficulty is still gentle, so each new
-    threat is met in near-isolation and then grows with d."""
+    threat is met in near-isolation and then grows with d.
+
+    DOMAIN RANDOMIZATION: the enemy-DYNAMICS ranges below WIDEN with d (narrow/easy at low d, full at
+    d=1). The env samples a fresh value in each range every episode, so the policy faces a DISTRIBUTION
+    of enemy configurations -- the real server one in-distribution sample -- and learns a robust transfer
+    skill instead of memorizing one exact layout. The FIXED map (walls/floor/boss/entrance/geodesic) and
+    the per-type archetype identities are NOT randomized. At d=0 every range collapses to its identity
+    (density 1..1, no hot bias, no jitter, fixed boss/player HP), so the easy curriculum is deterministic.
+
+    The old enable_grates anchor-restock (which sustained the whole-map density and pushed a hold-and-
+    clear deadlock) is dropped: the sustained-vs-thinning variation is now just one end of the density
+    distribution (density_hi up to ~1.4 + a few dense hot regions), never a forced hold strategy."""
     d = _clamp01(d)
     n = round(n_snakes_max * d)
     lerp = lambda a, b: a + (b - a) * d  # noqa: E731
@@ -52,18 +63,45 @@ def difficulty_config(d: float, n_snakes_max: int = N_SNAKES_MAX) -> dict:
         "spawn_in_room_prob": lerp(1.0, 0.05),
         "spawn_in_room_radius": lerp(6.0, 14.0),
         "n_snakes": n,
-        "n_snakes_jitter": round(0.35 * n),
+        # 1) density / count: per-episode multiplier on the active count, widening from 1.0 (exact) to
+        #    ~0.5..1.5 at d=1, so the swarm the policy crosses is sometimes thinner, sometimes denser.
+        "density_lo": lerp(1.0, 0.5),
+        "density_hi": lerp(1.0, 1.5),
+        # 1b) WHICH regions are dense: a few random hot anchors per episode boost their neighborhood and
+        #     suppress the rest (cold), so a chokepoint like (38,43) is sometimes packed (~9+) and
+        #     sometimes light (~3). The radius/bias widen with d into a strong per-episode density field.
+        "n_hot_regions": round(lerp(0.0, 4.0)),
+        "hot_radius": lerp(12.0, 18.0),
+        "hot_bias": lerp(0.0, 4.0),
+        # 2) spawn-position jitter: perturb authored tiles by up to a few tiles (still on floor) so
+        #    exact-position memorization fails.
+        "spawn_jitter": round(lerp(0.0, 3.0)),
+        # 3) bullet fire timing/phase: per-enemy phase desync grows, and a per-episode +/-40% cadence
+        #    scale makes the bullet patterns vary (robust dodging, not a memorized rhythm).
+        "fire_phase_jitter": round(lerp(10.0, 20.0)),
+        "fire_cd_jitter": lerp(0.0, 0.4),
+        # 4) aggression / Follow: jitter acquireRange + move speed so convergence density varies.
+        "acq_jitter": lerp(0.0, 0.4),
+        "fspd_jitter": lerp(0.0, 0.3),
+        # 5) boss HP: sample the real ScaleHP2 band (solo 7500 .. populated 16500) so it never overfits
+        #    one HP. At d=0 lo>=hi collapses to the fixed BOSS_HP; the band opens up with d.
+        "boss_hp_lo": lerp(BOSS_HP, 7500.0),
+        "boss_hp_hi": lerp(BOSS_HP, 16500.0),
+        # 6) player HP/DEF: small +/- jitter around the real 670 / 25 for robustness.
+        "player_hp_jitter": lerp(0.0, 0.1),
+        "player_def_jitter": lerp(0.0, 0.1),
         "enable_grenades": 1 if d > 0.15 else 0,
         "enable_minions": 0,  # superseded by the protective swarm
         # the boss's protective, replenishing, bullet-blocking swarm: the defining mechanic the real
         # Stheno is walled by. Ramped in at high d (like the boss/grenade threats) so it is met after
         # the policy has the basics, then becomes the hard wall the retrain must learn to penetrate.
         "enable_swarm": 1 if d > 0.45 else 0,
-        # Snake Grate replenishment: the pit's continuous snake source that keeps the authored clusters
-        # (incl. the converging Greater pack at the boss-approach chokepoint) stocked instead of thinning
-        # by attrition. Ramped in with the swarm at high d, so the early curriculum still faces the gentle
-        # static roster and the hard, sustained-density chokepoint is the d~1 wall the retrain must learn.
-        "enable_grates": 1 if d > 0.45 else 0,
+        # Grate replenishment folded into the density distribution as ONE per-episode sample (never the
+        # old always-on forcing): with prob grate_prob the chokepoint is SUSTAINED dense (~9 converging
+        # Greaters, the real wall), otherwise it THINS by attrition (~3). Sometimes-on at ~0.4 by d=1, so
+        # the policy must handle both ends and can't settle into the hold-and-clear deadlock.
+        "enable_grates": 0,
+        "grate_prob": lerp(0.0, 0.4),
         "boss_shoots": 1 if d > 0.05 else 0,
         "blade_cd": round(15 + (40 - 15) * (1.0 - _clamp01(d / 0.4))),  # 40 (gentle) -> 15 (real) by d=0.4
     }

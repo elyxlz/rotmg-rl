@@ -40,11 +40,25 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     c->spell_speed = unpack(kwargs, "spell_speed");
     c->spell_life = (int)unpack(kwargs, "spell_life");
     c->n_snakes = (int)unpack(kwargs, "n_snakes");
-    c->n_snakes_jitter = (int)unpack(kwargs, "n_snakes_jitter");
     c->snake_speed = unpack(kwargs, "snake_speed");
     c->snake_radius = unpack(kwargs, "snake_radius");
+    c->density_lo = unpack(kwargs, "density_lo");
+    c->density_hi = unpack(kwargs, "density_hi");
+    c->n_hot_regions = (int)unpack(kwargs, "n_hot_regions");
+    c->hot_radius = unpack(kwargs, "hot_radius");
+    c->hot_bias = unpack(kwargs, "hot_bias");
+    c->spawn_jitter = (int)unpack(kwargs, "spawn_jitter");
+    c->fire_phase_jitter = (int)unpack(kwargs, "fire_phase_jitter");
+    c->fire_cd_jitter = unpack(kwargs, "fire_cd_jitter");
+    c->acq_jitter = unpack(kwargs, "acq_jitter");
+    c->fspd_jitter = unpack(kwargs, "fspd_jitter");
+    c->player_hp_jitter = unpack(kwargs, "player_hp_jitter");
+    c->player_def_jitter = unpack(kwargs, "player_def_jitter");
+    c->boss_hp_lo = unpack(kwargs, "boss_hp_lo");
+    c->boss_hp_hi = unpack(kwargs, "boss_hp_hi");
     c->enable_grates = (int)unpack(kwargs, "enable_grates");
     c->grate_cd = (int)unpack(kwargs, "grate_cd");
+    c->grate_prob = unpack(kwargs, "grate_prob");
     c->grate_radius = unpack(kwargs, "grate_radius");
     c->grate_cap = (int)unpack(kwargs, "grate_cap");
     c->boss_hp_max = unpack(kwargs, "boss_hp_max");
@@ -182,7 +196,9 @@ static void set_array(PyObject *dict, const char *key, PyObject *arr) {
  * re-simulation. ep_* latch the just-ended episode's outcome (set before the in-place auto-reset). */
 static PyObject *my_get(PyObject *dict, Env *env) {
     assign_to_dict(dict, "boss_hp", env->boss_hp);
-    assign_to_dict(dict, "boss_hp_max", env->cfg.boss_hp_max);
+    /* the EPISODE's sampled initial HP, the normalizer boss_hp_frac uses (so eval reads a [0,1] frac
+     * even when boss HP is randomized above the nominal boss_hp_max). */
+    assign_to_dict(dict, "boss_hp_max", env->ep_boss_hp_max);
     assign_to_dict(dict, "fight_active", (float)env->fight_active);
     assign_to_dict(dict, "phase", (float)env->phase);
     assign_to_dict(dict, "invuln_timer", (float)env->invuln_timer);
@@ -229,6 +245,17 @@ static PyObject *my_get(PyObject *dict, Env *env) {
                 d[k++] = env->snakes[i].type;
     }
     set_array(dict, "snake_types", snake_types);
+
+    /* Per-snake fire timer (parallel to "snakes"): the per-enemy shoot-cooldown phase, so a probe can
+     * confirm domain randomization desyncs the bullet cadence across enemies/episodes. */
+    PyObject *snake_timers = new_f32(ns, 1, &d);
+    if (snake_timers) {
+        int k = 0;
+        for (int i = 0; i < env->n_snake; i++)
+            if (env->snakes[i].hp > 0.0f)
+                d[k++] = env->snakes[i].timer;
+    }
+    set_array(dict, "snake_timers", snake_timers);
 
     int nsw = 0;
     for (int i = 0; i < env->n_swarm; i++)

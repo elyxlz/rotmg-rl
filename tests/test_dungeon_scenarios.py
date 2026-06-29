@@ -16,13 +16,15 @@ Runs with numpy + the compiled C binding only (no pufferlib / torch), via the si
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
 pytest.importorskip("rotmg_rl.csim.binding")
 from rotmg_rl.config import GRID, DungeonConfig  # noqa: E402
 from rotmg_rl.csim.single import OBS_SIZE, CDungeonSingle  # noqa: E402
-from rotmg_rl.schedule import N_SNAKES_MAX, difficulty_config  # noqa: E402
+from rotmg_rl.schedule import BOSS_HP, N_SNAKES_MAX, difficulty_config  # noqa: E402
 from rotmg_rl.sim.snakepit_map import _nearest_walkable, authored_snakes, geodesic_field, load_jm  # noqa: E402
 
 BOSS_TILE = (16, 73)  # _nearest_walkable(Stheno) on the real map (matches the C env's BOSS_X/Y)
@@ -319,7 +321,12 @@ def test_protective_swarm_replenishes():
     env.close()
 
 
-# --- Snake Grate replenishment (the pit's continuous snake source) ----------------------------------
+# --- Domain randomization (per-episode enemy DYNAMICS distribution; fixed map) -----------------------
+# The policy keeps clearing the sim ~100% but failing live because it memorizes the sim's exact enemy
+# density/positions/bullet-timing. Domain randomization samples a fresh enemy configuration each episode
+# (count, which regions are dense, spawn jitter, fire phase/cadence, aggression, boss/player HP) from
+# ranges that widen with d, while the FIXED map (walls/floor/boss/entrance) stays identical -- so the
+# policy must learn a robust transfer skill, and the real server is just one in-distribution sample.
 
 CHOKEPOINT = (38, 43)  # the boss-approach chokepoint the live policy gets wall-pinned + killed in
 
@@ -335,53 +342,101 @@ def _greaters_in_view(env, cx: float, cy: float, radius: float = 15.0) -> int:
     return int((inv & ((types == 3) | (types == 4))).sum())
 
 
-def _peak_chokepoint_greaters(enable_grates: int, seed: int, ticks: int = 900) -> int:
-    """Peak Greater density in view while the player lingers (wall-pinned) at the chokepoint at d=1.
-    The player is held on the chokepoint tile each tick so the authored Greaters Follow in and converge;
-    the peak is the worst-case volley the policy faces. Idle action (no shooting) so nothing is killed."""
-    m = load_jm()
-    px, py = _nearest_walkable(m.walkable, *CHOKEPOINT)
-    kw = difficulty_config(1.0)
-    kw["enable_grates"] = enable_grates
-    env = CDungeonSingle(DungeonConfig(boss_hp_max=7500.0, **kw), seed=seed)
-    env.reset(seed=seed)
+def _peak_chokepoint_greaters(env, px: float, py: float, ticks: int = 600) -> int:
+    """Peak Greater density in view while the player lingers (wall-pinned) at the chokepoint. The player
+    is held on the tile each tick so the authored Greaters Follow in and converge; the peak is the
+    worst-case volley faced this episode. Idle action (no shooting) so nothing is killed."""
     peak = 0
     for _ in range(ticks):
         env.put(player_x=px + 0.5, player_y=py + 0.5)
         env.step([8, 0, 0, 0])  # 8 > N_MOVE -> idle; the player stays pinned, snakes converge
         peak = max(peak, _greaters_in_view(env, px + 0.5, py + 0.5))
-    env.close()
     return peak
 
 
-def test_grate_replenishment_sustains_chokepoint_greater_density():
-    """The Snake Grate replenishment lifts the SUSTAINED converging Greater density at the (38,43)
-    boss-approach chokepoint to the real ~9, matching the live server. Statically (each authored snake
-    spawned once, no respawn) the pack thins by attrition and the in-view Greater peak sits at ~5; with
-    the grates replenishing the authored anchors on the 2s cadence it climbs to ~8-9 -- the convergent
-    volley that wall-pins and kills the live policy 4/4. Asserts the floor (>=8) AND that grates are
-    strictly denser than the static map, so the fix is the replenishment, not the layout."""
-    seeds = (1, 7, 42, 99, 123, 200)
-    static_peaks = [_peak_chokepoint_greaters(0, s) for s in seeds]
-    grate_peaks = [_peak_chokepoint_greaters(1, s) for s in seeds]
-    static_mean = float(np.mean(static_peaks))
-    grate_mean = float(np.mean(grate_peaks))
-    assert static_mean < 6.0, f"static chokepoint already dense ({static_mean}); the gap this fixes is gone"
-    assert grate_mean >= 8.0, f"grate replenishment must sustain the real ~9 Greaters, got mean {grate_mean}"
-    assert grate_mean > static_mean + 2.0, f"replenishment must add real density: {static_mean} -> {grate_mean}"
+def _wall_channel(env) -> np.ndarray:
+    """The egocentric wall channel (CH_WALL = channel 0) from the current obs -- the FIXED map geometry."""
+    return env.obs[: GRID * GRID].reshape(GRID, GRID).copy()
 
 
-def test_grate_replenishment_off_by_default_leaves_spawn_count_unchanged():
-    """enable_grates defaults off, so a fresh agent + the golden tripwire see the untouched static map:
-    no respawns, exactly the authored subset spawned at reset, the grate timer never fires."""
-    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX, n_snakes_jitter=0), seed=5)
-    env.reset(seed=5)
-    n0 = len(env.get()["snakes"])
-    for _ in range(60):  # > grate_cd (20): with grates off no replenishment ever runs
-        env.step([8, 0, 0, 0])
-    n1 = len(env.get()["snakes"])
+def test_randomization_varies_enemy_config_across_resets_with_fixed_map():
+    """The defining domain-randomization property: across resets at d=1 the enemy configuration VARIES
+    (count, positions, fire phase all differ episode-to-episode) while the FIXED map (wall geometry,
+    boss position, entrance spawn) is byte-for-byte identical. Memorizing one layout is impossible; the
+    fixed map is untouched."""
+    kw = difficulty_config(1.0)
+    kw["spawn_in_room_prob"] = 0.0  # always the real entrance so the wall window is comparable across resets
+    cfg = DungeonConfig(boss_hp_max=BOSS_HP, **kw)
+    env = CDungeonSingle(cfg, seed=0)
+    counts, pos_sets, walls, bosses, spawns = [], [], [], [], []
+    for s in range(5):
+        env.reset(seed=1000 + s)
+        g = env.get()
+        snakes = g["snakes"]
+        counts.append(len(snakes))
+        pos_sets.append(frozenset((round(float(x), 1), round(float(y), 1)) for x, y in snakes))
+        walls.append(_wall_channel(env))
+        bosses.append((round(float(g["boss_x"]), 3), round(float(g["boss_y"]), 3)))
+        spawns.append((round(float(g["px"]), 3), round(float(g["py"]), 3)))
     env.close()
-    assert n1 <= n0  # population only ever falls (attrition), never replenished when grates are off
+    # enemy configuration VARIES: not every episode has the same count, and the spawn-position sets differ
+    assert len(set(counts)) > 1, f"enemy count identical across resets ({counts}) -- not randomized"
+    assert len(set(pos_sets)) == 5, "enemy position sets repeated across resets -- positions not randomized"
+    # the FIXED map is unchanged: identical wall window, boss position, and entrance spawn every reset
+    assert all(np.array_equal(walls[0], w) for w in walls[1:]), "wall geometry drifted across resets"
+    assert len(set(bosses)) == 1, f"boss position moved across resets ({bosses}) -- must stay fixed"
+    assert len(set(spawns)) == 1, f"entrance spawn moved across resets ({spawns}) -- must stay fixed"
+
+
+def _chokepoint_greaters_on_arrival(env, px: float, py: float, ticks: int = 40) -> int:
+    """Greaters locally present at the chokepoint after a short (realistic-transit) convergence -- the
+    density a navigating policy actually faces on arrival, before any long siege builds up."""
+    for _ in range(ticks):
+        env.put(player_x=px + 0.5, player_y=py + 0.5)
+        env.step([8, 0, 0, 0])
+    return _greaters_in_view(env, px + 0.5, py + 0.5)
+
+
+def test_chokepoint_greater_density_varies_across_episodes():
+    """The (38,43) boss-approach chokepoint Greater density now VARIES across episodes instead of sitting
+    at one fixed value. Two ends of the per-episode distribution: on ARRIVAL (a realistic transit) some
+    episodes are light (~<=3 Greaters) -- the density multiplier + a cold (non-hot) chokepoint thinned it
+    -- while if the policy gets PINNED there the worst case packs DENSE (~>=9) on the episodes where grate
+    replenishment is sampled on (the real sustained wall). Both the arrival spread and the dense siege
+    end must appear, so the policy must handle the whole distribution, not one memorized configuration."""
+    m = load_jm()
+    px, py = _nearest_walkable(m.walkable, *CHOKEPOINT)
+    cfg = DungeonConfig(boss_hp_max=BOSS_HP, **difficulty_config(1.0))
+    arrival, peaks = [], []
+    for s in range(24):
+        env = CDungeonSingle(cfg, seed=4000 + s)
+        env.reset(seed=4000 + s)
+        arrival.append(_chokepoint_greaters_on_arrival(env, px, py))
+        peaks.append(_peak_chokepoint_greaters(env, px, py))  # continue the same episode into a siege
+        env.close()
+    # on arrival the density genuinely spreads, dipping light (the chokepoint is sometimes a near-wall,
+    # sometimes thin) -- the exact-density memorization the live policy relied on is gone.
+    assert min(arrival) <= 3, f"chokepoint never light on arrival ({sorted(arrival)}) -- density not randomized"
+    assert max(arrival) - min(arrival) >= 3, f"arrival density barely varies ({sorted(arrival)}) -- not a distribution"
+    # the worst-case pinned siege still samples the lethal dense wall (the sustained ~9+ converging Greaters).
+    assert max(peaks) >= 9, f"chokepoint never reaches the dense wall ({sorted(peaks)}) -- sustained end not sampled"
+    assert max(peaks) - min(peaks) >= 3, f"siege density barely varies ({sorted(peaks)}) -- one fixed value"
+
+
+def test_density_multiplier_scales_active_count():
+    """The per-episode density multiplier scales the active enemy count: density 0.5..0.5 spawns ~half
+    of n_snakes, density 1.5..1.5 ~1.5x (capped at the authored roster), 1..1 exactly n_snakes."""
+
+    def _count(density_lo: float, density_hi: float) -> int:
+        env = CDungeonSingle(replace(DungeonConfig(n_snakes=100), density_lo=density_lo, density_hi=density_hi), seed=1)
+        env.reset(seed=1)
+        n = len(env.get()["snakes"])
+        env.close()
+        return n
+
+    assert _count(1.0, 1.0) == 100  # density 1..1 by default -> exactly n_snakes
+    assert _count(0.5, 0.5) == 50  # 100 * 0.5
+    assert _count(1.5, 1.5) == 150  # 100 * 1.5
 
 
 # --- navigation fidelity (collision footprint + geodesic potential) ---------------------------------
@@ -457,7 +512,7 @@ def test_authored_enemies_spawn_at_real_positions():
     """At d=1 the env spawns every enemy at its AUTHORED .jm tile/type -- the exact real layout, not a
     uniform random scatter. With the full roster active and no density jitter, the set of spawned snake
     tiles is precisely the authored set (every cluster, including the entrance chokepoint, reproduced)."""
-    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX, n_snakes_jitter=0), seed=7)
+    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX), seed=7)
     env.reset(seed=7)
     spawned = {(int(np.floor(x)), int(np.floor(y))) for x, y in env.get()["snakes"]}
     env.close()
@@ -469,7 +524,7 @@ def test_authored_chokepoint_present_at_d1():
     """The lethal entrance chokepoint (Fire Pythons + a Greater Pit Viper around (28-31, 41-44)) is
     actually spawned at d=1 -- the cluster the random-scatter sim never reproduced and the live policy
     dies in."""
-    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX, n_snakes_jitter=0), seed=11)
+    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX), seed=11)
     env.reset(seed=11)
     spawned = {(int(np.floor(x)), int(np.floor(y))) for x, y in env.get()["snakes"]}
     env.close()
@@ -483,7 +538,7 @@ def test_authored_fraction_scales_with_difficulty():
     authored = {(x, y) for x, y, _ in authored_snakes()}
     low = difficulty_config(0.2)["n_snakes"]
     assert 0 < low < N_SNAKES_MAX
-    env = CDungeonSingle(DungeonConfig(n_snakes=low, n_snakes_jitter=0), seed=3)
+    env = CDungeonSingle(DungeonConfig(n_snakes=low), seed=3)
     env.reset(seed=3)
     spawned = {(int(np.floor(x)), int(np.floor(y))) for x, y in env.get()["snakes"]}
     env.close()
@@ -548,10 +603,12 @@ def test_entrance_wall_blocks_westward_shortcut():
 # are a TRIPWIRE, not a spec: regenerate them deliberately if the dynamics intentionally change.
 GOLDEN_SEED = 2024
 GOLDEN_STEPS = 200
-# Regenerated for the authored-map fidelity fix: snake spawning moved from uniform-random tiles to the
-# AUTHORED .jm positions/types (spawn_snakes draws a subset of AUTHORED_SNAKES), so the 30 in-room snakes
-# now sit on real authored tiles with their real archetypes -- the trajectory legitimately moved.
-GOLDEN = {"total_reward": 1.3400, "obs_checksum": 54701.94, "player_hp": 998425.0, "boss_hp": 3293.23}
+# Regenerated for the domain-randomization change: spawn_snakes now selects the authored subset via a
+# weighted draw (Efraimidis-Spirakis), a different RNG consumption pattern than the old Fisher-Yates, so
+# the 30 in-room snakes chosen at this fixed seed differ -- the trajectory legitimately moved. The golden
+# cfg pins every randomization range to its identity (default density 1..1, no hot bias, no spawn/cadence
+# jitter, fixed boss HP), so the run stays deterministic and reproducible bit-for-bit at this seed.
+GOLDEN = {"total_reward": 0.4638, "obs_checksum": 51503.61, "player_hp": 1000000.0, "boss_hp": 6495.45}
 
 
 def _golden_actions(n: int) -> np.ndarray:

@@ -40,7 +40,9 @@ def eval_clear_rate(
     device = next(policy.parameters()).device
     cfg_kw = difficulty_config(d, n_snakes_max)
     cfg_kw["spawn_in_room_prob"] = 0.0 if d >= 1.0 else cfg_kw["spawn_in_room_prob"]
-    cfg_kw["n_snakes_jitter"] = 0  # eval the nominal density, not the training band
+    # Domain randomization: eval across the SAME per-episode distribution the policy will transfer into
+    # (the real server is one in-distribution sample), so the clear rate measures robust transfer, not
+    # performance on a single memorizable layout. Each episode (distinct seed) draws a fresh sample.
     cfg = DungeonConfig(boss_hp_max=boss_hp, **cfg_kw)
     clears = 0
     with torch.no_grad():

@@ -167,6 +167,114 @@ clear/death/timeout counts into one learning-curve CSV; `curve_summary.py` rende
 proven LEARNABLE on the real engine, the curriculum + Protein sweep can drive these difficulty knobs
 toward d=1 (the real conditions) on top of this exact loop.
 
+## Curriculum + d-flow + eval ladder (the Protein objective on the proven loop)
+
+With the per-episode loop proven LEARNABLE, the curriculum drives the difficulty knobs from an easy
+anchor (d=0) to the real conditions (d=1) WITHOUT restarting the server. Three pieces:
+
+**1. d -> config schedule (`src/rotmg_rl/server_difficulty.py`).** `server_difficulty_config(d)` maps one
+`d in [0,1]` to the FOUR real-engine knobs, monotonic in d, every lever moving smoothly, `d=1` == the
+real deliverable conditions exactly. NO synthetic domain randomization -- the real game RNG (snake
+spawn, boss wander, bullet patterns) is the only variation (the deliberate departure from the C-sim
+`schedule.py`, which widens synthetic dynamics ranges with d). The curriculum-depth objective itself
+(`CURRICULUM_RUNGS`, `curriculum_depth`, the cosine `difficulty_at`) is reused UNCHANGED from
+`schedule.py` -- the ladder/depth math is engine-independent (it consumes only per-rung clear rates).
+
+| lever | d=0 (easy) | d=1 (real) | rationale |
+|---|---|---|---|
+| `agent_hp` | 5000 | 670 | the DOMINANT gradient (the diagnosis): as HP falls an undodged bullet is increasingly lethal, so the policy must learn to dodge |
+| `boss_hp` | 1500 | 7500 | more HP == more landed shots == longer in the storm == more dodging |
+| `agent_def` | 40 | 25 | flat per-hit reduction; trims each hit while HP is high, relaxes to real as the rest arrives |
+| `spawn_geo_dist` | 12 | -1 (entrance) | ramps the navigate-in path 12 -> ~150 tiles, then SNAPS to the real entrance sentinel (-1) at d=1 |
+
+The entrance sits **150 geodesic tiles** from the boss (measured: `SIM_SPAWN_GEO_DIST=-1` spawns at
+(110.5,21.5) geo_dist=150, max-reachable 215), so the spawn ramp climbs toward 150 (d=0.99 == 149) before
+the d=1 snap, keeping it continuous.
+
+**2. d-flow: trainer -> running C# server, per-episode, NO restart.** The shm region grew by a
+**5-int32 config block at the very tail** (after the 2 barrier ctrl words, so every existing offset --
+incl. the C-shim's ctrl pointer -- is UNCHANGED): `[valid(MAGIC), spawn_geo_dist, agent_hp, agent_def,
+boss_hp]`. The Python trainer mmaps the SAME `/dev/shm/rotmg_sim_shm` and pokes these 5 ints whenever d
+changes (`src/.../server_shm_config.py::ShmConfigChannel`); the C# `SimRlLoop` reads them at every
+spawn/reset (`ResolveConfig`), preferring the live config over the static `SIM_*` env defaults. `valid !=
+MAGIC` (zeroed) == no live config -> the server falls back to the env defaults, so the existing
+fixed-config proof path is byte-for-byte unchanged. The gate already serializes visibility (the C-shim
+bumps `req` after the page write lands; the world reads the config at its next spawn), so the config tail
+needs no extra sync -- and the C-shim never touches it, so there is zero contention with the lockstep.
+
+This was chosen over a redis key / control file because the shm barrier already shares the page: it is
+one mmap + 5 `struct.pack_into`s on the Python side, no new IPC, no hot-path cost.
+
+*Proof it takes effect server-side:* `verify_dflow.py` writes d=0.0, 0.5, 1.0 while driving the gate; the
+shm readback matches, and the server log shows every world transition the applied config at the next
+episode boundary, e.g.:
+
+```
+[SIM-RL] CONFIG CHANGED world=7 ep=0 -> spawn_geo=12 agent_hp=5000 agent_def=40 boss_hp=1500
+[SIM-RL] CONFIG CHANGED world=7 ep=3 -> spawn_geo=54 agent_hp=2835 agent_def=32 boss_hp=4500
+[SIM-RL] CONFIG CHANGED world=7 ep=6 -> spawn_geo=-1 agent_hp=670  agent_def=25 boss_hp=7500
+```
+
+All N worlds ramp live, mid-run, no restart. Each `[SIM-RL] agent spawned ... | applied cfg: ...` line
+also stamps the applied knobs against the spawn position (`geo_dist=N (max=...)`).
+
+**3. Eval ladder -> curriculum depth (`server_eval.py`).** For each rung `d in 0.1..1.0`, set the live
+config to that rung, drive the SAME PuffeRL eval-rollout path training uses for a step budget, and count
+the ground-truth clear/death/timeout from the server's `EPISODE DONE reason=` lines (the same source
+`server_proof.py` tallies; the server owns episode boundaries, so there is no Python-side reset). The
+per-rung clear rate feeds `curriculum_depth()` -> one number = how far up the ladder the policy clears
+>=50%. The first few episodes after a d-flip are discarded (worlds mid-episode at the old config).
+
+**Curriculum training (`server_train_curriculum.py`).** The same PuffeRL PPO loop as `server_train.py`,
+but d RAMPS over the run (cosine `difficulty_at`, `--ramp-frac`) and the d-config is written to shm each
+update, so the server spawns the d-appropriate episode live.
+
+## Verification run (d ramps, policy climbs, depth works)
+
+A short run (N=16, GPU1, ~1600 SPS) ramping d 0->1 over `ramp-frac=0.6`:
+
+- **d ramped 0 -> 1 server-side.** The trainer log shows `d` climbing with the matching live cfg
+  (`d=1.000 cfg(spawn=-1,hp=670,def=25,boss=7500)` at the top), and the server `CONFIG CHANGED` lines
+  confirm every world applied the ramped config per episode. The d-ramp **takes effect server-side** --
+  not just in Python.
+- **The policy climbs the curriculum.** Ground-truth from the server log over the run: **~3000 clears vs
+  ~40 deaths / ~50 timeouts**, concentrated at low d (done_rate ~0.25 at d~0.03, decaying toward 0 as d
+  rose past what the short budget mastered). The untrained-policy control (the earlier proof) clears 0,
+  so the low-d clears are the LEARNED navigate-in-and-kill skill following the curriculum up.
+- **The eval ladder produces a sensible depth.** On a policy trained at near-fixed low d (a clearing
+  policy), the ladder reads:
+
+  ```
+  d=0.10 clear=1.000   d=0.20 clear=0.000   d=0.30 clear=0.000   d=0.40 clear=0.000
+  d=0.50 clear=0.312   d=0.60 clear=0.312   d=0.70 clear=0.250   d=0.80 clear=0.176
+  d=0.90 clear=0.000   d=1.00 clear=0.000
+  CURRICULUM DEPTH = 0.1500
+  ```
+
+  The median-of-3 smoothing (reused from `schedule.py`) correctly ignores the noisy d=0.5-0.8 partials
+  (a lone spike can't inflate depth) and sets the depth at the d=0.1->0.2 threshold crossing = 0.15. A
+  policy that clears nothing reads depth 0.0; the metric is the Protein objective the sweep maximizes.
+
+**Curriculum-design note surfaced by the run.** The single-pass cosine ramp on a short budget showed
+**catastrophic forgetting** -- the d=1-tuned policy no longer clears d=0 -- which is exactly the kind of
+thing the Protein sweep's reward/ramp levers exist to tune (slower ramp, replay of easy rungs, reward
+cocktail). The mechanism is sound; the depth a given config reaches is the search signal.
+
+## Where the real-engine curriculum DIFFERS from the C-sim's
+
+- **No synthetic domain randomization.** The C-sim `difficulty_config` WIDENS synthetic enemy-dynamics
+  ranges (density, fire-phase/cadence jitter, acquire/speed jitter, boss-HP band, hot regions, grate
+  prob) with d and samples per episode. The server-as-sim schedule does NOT: the real engine's own RNG
+  is the variation, and the dungeon/enemies/AI/boss mechanics stay UNMODIFIED. The only knobs are the
+  four legitimate training aids the server exposes (spawn distance, agent HP, agent DEF, boss HP).
+- **Spawn is a single geodesic distance, snapping to the real entrance at d=1**, not a `spawn_in_room_prob`
+  / radius distribution -- the server has one entrance and a deterministic geodesic field.
+- **Boss/grenade/swarm/grate toggles, n_snakes ramp, blade_cd** (C-sim levers) have no analogue: the real
+  Snake Pit places its full authored roster + mechanics unconditionally; we never add or gate them.
+- **The depth objective + rungs + cosine d(t) are shared verbatim** (`curriculum_depth`,
+  `CURRICULUM_RUNGS`, `difficulty_at` imported from `schedule.py`), so a depth number means the same
+  thing across both sims and the sweep code is identical.
+
 ## Rough edges
 
 - **CPU-bound on the server worlds is the plateau**, not the gate. The shm bridge + futex barrier are

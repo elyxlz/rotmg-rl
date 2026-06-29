@@ -104,6 +104,7 @@ typedef struct {
     volatile int32_t *ctrl_req;  /* &ctrl[0]: we bump to request a tick */
     volatile int32_t *ctrl_done; /* &ctrl[1]: controller bumps when obs are ready */
     int32_t generation;          /* last tick generation we requested */
+    int frame_skip;              /* K: env advances K ticks per policy step (action-repeat) */
 } ServerEnv;
 
 #define Env ServerEnv
@@ -266,6 +267,19 @@ static void srv_connect(Env *env) {
     /* SIM_SHM_BARRIER=1 -> pure-shm futex barrier, no redis on the hot path. */
     const char *bar = getenv("SIM_SHM_BARRIER");
     env->use_barrier = (bar != NULL && bar[0] == '1');
+    /* SIM_FRAME_SKIP=K (default 1): the env advances K ticks per policy step, repeating
+     * the same action, summing reward across the K ticks. K halves the policy/GPU step
+     * rate (the dominant lockstep overhead) at the cost of K*100ms reaction latency.
+     * Action-repeat lives ENTIRELY in the C-shim: the action stays in shm across the K
+     * gate ticks (the C# server re-reads + re-applies it each tick), so the server is
+     * unchanged. An episode end mid-skip breaks early so the policy gets the post-reset
+     * obs[0] (== the single-step auto-reset convention). */
+    const char *fs = getenv("SIM_FRAME_SKIP");
+    env->frame_skip = (fs != NULL) ? atoi(fs) : 1;
+    if (env->frame_skip < 1) env->frame_skip = 1;
+    if (env->frame_skip > 1)
+        fprintf(stderr, "server_env: frame_skip K=%d (policy acts every %d ticks)\n",
+                env->frame_skip, env->frame_skip);
     if (env->use_barrier) {
         fprintf(stderr, "server_env: pure-shm futex barrier ON (redis bypassed)\n");
         return;
@@ -357,8 +371,32 @@ static void c_step(Env *env) {
     int n = env->cfg.n_agents;
     /* push this step's actions (vec-buffer float -> shm float, identical layout) */
     memcpy(env->shm_act, env->actions, (size_t)n * SRV_NUM_ATNS * sizeof(float));
-    srv_gate_tick(env);
-    srv_pull_obs(env);
+
+    int k = env->frame_skip;
+    if (k <= 1) {
+        srv_gate_tick(env);
+        srv_pull_obs(env);
+    } else {
+        /* Action-repeat over K gate ticks. The action stays in shm (the server re-reads
+         * it each tick), so K ticks all use the same action. Reward is SUMMED across the
+         * K ticks; obs/terminals come from the last tick we ran. If any tick ends an
+         * episode, stop early -- the server auto-reset, so its obs is the fresh frame the
+         * policy must see (the single-step auto-reset convention, just K ticks coarser). */
+        float acc[256 * 4]; /* reward accumulator; n*1 <= total_agents, comfortably < 1024 */
+        for (int i = 0; i < n; i++) acc[i] = 0.0f;
+        for (int t = 0; t < k; t++) {
+            srv_gate_tick(env);
+            srv_pull_obs(env);
+            int any_done = 0;
+            for (int i = 0; i < n; i++) {
+                acc[i] += env->rewards[i];
+                if (env->terminals[i] != 0.0f) any_done = 1;
+            }
+            if (any_done) break; /* hand the policy the post-reset obs[0] */
+        }
+        /* overwrite the per-step reward buffer with the summed reward */
+        for (int i = 0; i < n; i++) env->rewards[i] = acc[i];
+    }
     env->steps++;
     /* legible metrics for the boundary */
     float r = 0.0f, d = 0.0f;

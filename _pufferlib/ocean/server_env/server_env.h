@@ -22,7 +22,11 @@
 #define ROTMG_SERVER_ENV_H
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +51,13 @@
 /* shm header (matches SimShmBridge.cs): magic, n_agents, obs_len, n_atns. */
 #define SHM_HEADER_INTS 4
 #define SHM_MAGIC 0x52544D47 /* 'RTMG' */
+
+/* Pure-shm barrier control words (SIM_SHM_BARRIER=1): two atomic uint32 generation
+ * counters at the TAIL of the region (after [obs][act][rew][done]). req: this side bumps
+ * == 'actions ready, tick'; done: the C# controller bumps == 'obs/reward/done are in shm'.
+ * A monotonic generation (never reused) means we never read a stale obs frame. */
+#define SHM_CTRL_INTS 2
+#define SRV_SPIN_BUDGET 2000
 
 /* Per-episode legible metrics, divided by n in vecenv. Kept tiny: the C# server
  * owns the real game telemetry; here we log only what crosses the boundary. */
@@ -89,6 +100,10 @@ typedef struct {
     float *shm_done;
     int redis_fd;   /* TCP socket to the sim redis (RESP) */
     long tick;      /* monotonic tick token sent to the gate */
+    int use_barrier;            /* 1 == pure-shm futex barrier, 0 == redis gate */
+    volatile int32_t *ctrl_req;  /* &ctrl[0]: we bump to request a tick */
+    volatile int32_t *ctrl_done; /* &ctrl[1]: controller bumps when obs are ready */
+    int32_t generation;          /* last tick generation we requested */
 } ServerEnv;
 
 #define Env ServerEnv
@@ -235,11 +250,26 @@ static void srv_open_shm(Env *env) {
     env->shm_act = env->shm_obs + (size_t)n * OBS_SIZE;
     env->shm_rew = env->shm_act + (size_t)n * SRV_NUM_ATNS;
     env->shm_done = env->shm_rew + n;
+    /* barrier control words sit right after the done array (region tail). */
+    int32_t *ctrl = (int32_t *)(env->shm_done + n);
+    env->ctrl_req = (volatile int32_t *)&ctrl[0];
+    env->ctrl_done = (volatile int32_t *)&ctrl[1];
+    /* Continue the shared generation sequence: req/done live in shm and persist across
+     * client processes, so seed from the live req (not 0) or a reconnecting C-shim would
+     * drive the counter backwards and desync the controller. */
+    env->generation = __atomic_load_n(env->ctrl_req, __ATOMIC_ACQUIRE);
 }
 
 static void srv_connect(Env *env) {
     if (env->shm == NULL)
         srv_open_shm(env);
+    /* SIM_SHM_BARRIER=1 -> pure-shm futex barrier, no redis on the hot path. */
+    const char *bar = getenv("SIM_SHM_BARRIER");
+    env->use_barrier = (bar != NULL && bar[0] == '1');
+    if (env->use_barrier) {
+        fprintf(stderr, "server_env: pure-shm futex barrier ON (redis bypassed)\n");
+        return;
+    }
     if (env->redis_fd <= 0) {
         int fd = srv_redis_connect(env->cfg.redis_port);
         if (fd < 0) {
@@ -251,10 +281,41 @@ static void srv_connect(Env *env) {
     }
 }
 
+/* ---- pure-shm futex barrier (no redis on the hot path) --------------------- */
+
+static long srv_futex(volatile int32_t *uaddr, int op, int val) {
+    return syscall(SYS_futex, (void *)uaddr, op, val, NULL, NULL, 0);
+}
+
+/* Advance all N C# worlds one tick over the shm barrier: bump req to the next
+ * generation, wake the C# controller parked on req, then wait until done catches
+ * up to that generation (obs/reward/done are now in shm). Adaptive spin first
+ * (the controller usually flips done within microseconds), then futex-park. */
+static void srv_barrier_tick(Env *env) {
+    int32_t gen = ++env->generation;
+    __atomic_store_n(env->ctrl_req, gen, __ATOMIC_RELEASE);
+    srv_futex(env->ctrl_req, FUTEX_WAKE, 1);
+
+    for (int spin = 0; spin < SRV_SPIN_BUDGET; spin++) {
+        if (__atomic_load_n(env->ctrl_done, __ATOMIC_ACQUIRE) >= gen) return;
+        __builtin_ia32_pause(); /* PAUSE: busy-spin without yielding to the GPU sweep */
+    }
+    for (;;) {
+        int32_t cur = __atomic_load_n(env->ctrl_done, __ATOMIC_ACQUIRE);
+        if (cur >= gen) return;
+        /* FUTEX_WAIT(&done, cur): block until done != cur (a wake or value change). */
+        srv_futex(env->ctrl_done, FUTEX_WAIT, cur);
+    }
+}
+
 /* ---- the lockstep barrier: one gated tick --------------------------------- */
 
 /* Advance all N C# worlds one tick: LPUSH cmd -> BLPOP ack (obs now in shm). */
 static void srv_gate_tick(Env *env) {
+    if (env->use_barrier) {
+        srv_barrier_tick(env);
+        return;
+    }
     env->tick++;
     if (srv_gate_push(env, "sim:step:cmd", env->tick) < 0) {
         fprintf(stderr, "server_env: gate LPUSH failed\n");

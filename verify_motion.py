@@ -11,6 +11,8 @@ wrong slot) the minimap player cell would never move. Run against a live SIM_SHM
 from __future__ import annotations
 
 import argparse
+import ctypes
+import ctypes.util
 import os
 import socket
 import sys
@@ -51,20 +53,43 @@ def main() -> None:
     obs = np.frombuffer(raw, dtype=np.float32, count=n * OBS_LEN, offset=HEADER).reshape(n, OBS_LEN)
     act = np.frombuffer(raw, dtype=np.float32, count=n * 4, offset=HEADER + n * OBS_LEN * 4).reshape(n, 4)
 
-    s = socket.create_connection(("127.0.0.1", a.redis_port))
-    s.sendall(f"*2\r\n$6\r\nSELECT\r\n$1\r\n{a.redis_db}\r\n".encode())
-    s.recv(64)
+    use_barrier = os.environ.get("SIM_SHM_BARRIER", "0") == "1"
 
-    def gate_tick(tok: int):
-        s.sendall(f"*3\r\n$5\r\nLPUSH\r\n$12\r\nsim:step:cmd\r\n${len(str(tok))}\r\n{tok}\r\n".encode())
+    if use_barrier:
+        # Pure-shm futex barrier: bump req, FUTEX_WAKE it, wait until done catches up.
+        # The two ctrl int32s sit at the region tail (after [obs][act][rew][done]).
+        ctrl_off = HEADER + n * OBS_LEN * 4 + n * 4 * 4 + n * 4 + n * 4
+        ctrl = np.frombuffer(raw, dtype=np.int32, count=2, offset=ctrl_off)
+        ctrl_addr = raw.ctypes.data + ctrl_off
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        SYS_futex, FUTEX_WAIT, FUTEX_WAKE = 202, 0, 1
+        gen = [int(ctrl[0])]
+
+        def gate_tick(_tok: int):
+            gen[0] += 1
+            ctrl[0] = gen[0]  # req
+            libc.syscall(SYS_futex, ctypes.c_void_p(ctrl_addr), FUTEX_WAKE, 1, None, None, 0)
+            done_addr = ctrl_addr + 4
+            while int(ctrl[1]) < gen[0]:
+                cur = int(ctrl[1])
+                if cur >= gen[0]:
+                    break
+                libc.syscall(SYS_futex, ctypes.c_void_p(done_addr), FUTEX_WAIT, cur, None, None, 0)
+    else:
+        s = socket.create_connection(("127.0.0.1", a.redis_port))
+        s.sendall(f"*2\r\n$6\r\nSELECT\r\n$1\r\n{a.redis_db}\r\n".encode())
         s.recv(64)
-        s.sendall(b"*3\r\n$5\r\nBLPOP\r\n$12\r\nsim:step:ack\r\n$1\r\n0\r\n")
-        buf = b""
-        while buf.count(b"\r\n") < 5:
-            chunk = s.recv(256)
-            if not chunk:
-                break
-            buf += chunk
+
+        def gate_tick(tok: int):
+            s.sendall(f"*3\r\n$5\r\nLPUSH\r\n$12\r\nsim:step:cmd\r\n${len(str(tok))}\r\n{tok}\r\n".encode())
+            s.recv(64)
+            s.sendall(b"*3\r\n$5\r\nBLPOP\r\n$12\r\nsim:step:ack\r\n$1\r\n0\r\n")
+            buf = b""
+            while buf.count(b"\r\n") < 5:
+                chunk = s.recv(256)
+                if not chunk:
+                    break
+                buf += chunk
 
     start = None
     for t in range(a.ticks):
@@ -87,7 +112,8 @@ def main() -> None:
         if i < 8 or m != (c0 != c1 or d1 > d0):
             print(f"  agent {i}: player_mm_cell {c0}->{c1}  discovered_tiles {d0}->{d1}  {'MOVED' if m else 'static'}", flush=True)
     print(f"\nRESULT: {moved}/{n} agents MOVED in-world from the forced action (obs evolves -> actions reach the real game)", flush=True)
-    s.close()
+    if not use_barrier:
+        s.close()
     sys.exit(0 if moved > 0 else 1)
 
 

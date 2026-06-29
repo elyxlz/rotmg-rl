@@ -35,6 +35,10 @@ void my_init(Env *env, Dict *kwargs) {
     env->shm_fd = 0;
     env->redis_fd = 0;
     env->tick = 0;
+    env->use_barrier = 0;
+    env->ctrl_req = NULL;
+    env->ctrl_done = NULL;
+    env->generation = 0;
     init_globals();
 }
 

@@ -23,8 +23,14 @@ from rotmg_rl.schedule import (  # noqa: F401  (re-exported so the trainer/eval 
 # ---- the REAL deliverable conditions (d=1). These are the live-server values the proven loop must
 # reach; every lever interpolates from an easy anchor (d=0) to exactly these at d=1. -----------------
 REAL_SPAWN_GEO_DIST = -1  # -1 == the real pit ENTRANCE (the full maze; the C# server's sentinel)
-REAL_AGENT_HP = 670  # the real solo char HP the deploy uses
-REAL_AGENT_DEF = 25  # the real solo char DEF
+# The DECIDED deploy loadout: a maxed Wizard with a T7 Staff of Destruction + a T7 Burning
+# Retribution Spell and NOTHING else -- NO armor, NO ring. So d=1 is the real FRAGILE char:
+#   HP  = base maxed Wizard 670 + the spell slot's ActivateOnEquip +40 = 710 (no ring).
+#   DEF = 0 (no armor; the earlier 25 was a leather-armor char we no longer deploy).
+#   MP  = base maxed Wizard 385 + the spell's +40 = 425 (env-only SIM_AGENT_MP, not ramped).
+# The boss + spawn are unchanged (real Stheno HP, real entrance).
+REAL_AGENT_HP = 710  # maxed Wizard base 670 + spell-slot +40 HP (no ring)
+REAL_AGENT_DEF = 0   # no armor -> 0 flat reduction (the fragile no-armor Wizard)
 REAL_BOSS_HP = 7500  # real solo Stheno HP on the live server (== schedule.BOSS_HP)
 
 # ---- the EASY anchors (d=0): the gentlest honest config in which the proven loop already clears
@@ -53,11 +59,11 @@ def server_difficulty_config(d: float) -> dict:
     (the shm config region + the server env vars are integer-typed).
 
     Lever rationale (survivability is the dominant gradient, per the diagnosis):
-      - agent_hp:  5000 (very tanky) -> 670 (real). The primary difficulty axis: as HP falls, an
+      - agent_hp:  5000 (very tanky) -> 710 (real, no-ring Wizard). The primary difficulty axis: as HP falls, an
                    undodged bullet is increasingly lethal, so the policy MUST learn to dodge.
       - boss_hp:   1500 (soft) -> 7500 (real). More HP == more landed shots == longer in the bullet
                    storm == more dodging required. Moves with d so ticks-to-kill rises smoothly.
-      - agent_def: 40 (extra) -> 25 (real). Flat per-hit reduction; trims each hit while HP is high,
+      - agent_def: 40 (extra) -> 0 (real, no armor). Flat per-hit reduction; trims each hit while HP is high,
                    relaxes to the real value as the rest of the difficulty arrives.
       - spawn:     12 geodesic tiles (near-boss, near-isolation) -> the entrance maze. Ramps the
                    navigate-in path length, then SNAPS to the real entrance (-1) at d=1.

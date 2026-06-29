@@ -23,7 +23,7 @@ import struct
 HEADER_INTS = 4
 MAGIC = 0x52544D47  # 'RTMG', == SimShmBridge.MAGIC
 OBS_LEN = 9807
-N_ATNS = 4
+N_ATNS = 5  # move, staff_aim, shoot, cast, spell_aim
 CTRL_INTS = 2
 CONFIG_INTS = 5
 

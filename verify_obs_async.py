@@ -25,7 +25,7 @@ from pufferlib import _C, pufferl
 from pufferlib.torch_pufferl import PuffeRL, load_policy
 
 OBS_LEN = 9807
-N_ATNS = 4
+N_ATNS = 5  # move, staff_aim, shoot, cast, spell_aim
 HEADER_INTS = 4
 CTRL_INTS = 2
 CONFIG_INTS = 5

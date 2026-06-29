@@ -4,7 +4,7 @@
  * the C# server; this env only shuttles the PufferLib vec-buffers across two
  * boundaries each step:
  *
- *   - SHARED MEMORY (/dev/shm/rotmg_sim_shm): N*OBS obs, N*4 actions, N reward,
+ *   - SHARED MEMORY (/dev/shm/rotmg_sim_shm): N*OBS obs, N*SRV_NUM_ATNS actions, N reward,
  *     N done, fixed float32 layout written by SimShmBridge.cs. We write actions,
  *     read obs/reward/done.
  *   - REDIS LOCKSTEP GATE (sim:step:cmd / sim:step:ack on the sim redis): one
@@ -46,7 +46,7 @@
 #define GRID_SIZE (NUM_CH * GRID * GRID)
 #define MM_SIZE (NUM_MM_CH * MM * MM)
 #define OBS_SIZE (GRID_SIZE + MM_SIZE + NUM_SCALARS) /* 9807 */
-#define SRV_NUM_ATNS 4
+#define SRV_NUM_ATNS 5 /* move, staff_aim, shoot, cast, spell_aim */
 
 /* shm header (matches SimShmBridge.cs): magic, n_agents, obs_len, n_atns. */
 #define SHM_HEADER_INTS 4
@@ -88,7 +88,7 @@ typedef struct {
 typedef struct {
     Log log;
     float *observations; /* N*OBS_SIZE float32 (slot-0 base) */
-    float *actions;      /* N*4 float32 */
+    float *actions;      /* N*SRV_NUM_ATNS float32 */
     float *rewards;      /* N float32 */
     float *terminals;    /* N float32 */
     int num_agents;      /* N: this env owns all N agents */

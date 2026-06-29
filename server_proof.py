@@ -73,6 +73,10 @@ def main() -> None:
     ]
     env = {"SIM_SHM_BARRIER": "1", "CUDA_VISIBLE_DEVICES": "1"}
     import os
+    # pass SIM_ASYNC through so the same proof harness measures the async-overlap loop
+    # (the trainer reads SIM_ASYNC; the server must be launched with it too).
+    if os.environ.get("SIM_ASYNC") == "1":
+        env["SIM_ASYNC"] = "1"
     full_env = dict(os.environ, **env)
     print(f"== proof: {' '.join(cmd)} (server log {a.server_log}) ==", flush=True)
     t0 = time.time()

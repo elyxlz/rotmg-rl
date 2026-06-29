@@ -68,7 +68,9 @@ def main() -> None:
             print(
                 f"[server-sim] step={trainer.global_step} updates={updates} "
                 f"SPS={flat.get('SPS', 0):.0f} reward={flat.get('env/reward', 0):.4f} "
-                f"done_rate={flat.get('env/done_rate', 0):.4f}",
+                f"done_rate={flat.get('env/done_rate', 0):.4f} "
+                f"perf[roll={flat.get('perf/rollout',0):.3f} gpu={flat.get('perf/eval_gpu',0):.3f} "
+                f"env={flat.get('perf/eval_env',0):.3f} train={flat.get('perf/train',0):.3f}]",
                 flush=True,
             )
 

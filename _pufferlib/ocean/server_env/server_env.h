@@ -57,6 +57,14 @@
  * == 'actions ready, tick'; done: the C# controller bumps == 'obs/reward/done are in shm'.
  * A monotonic generation (never reused) means we never read a stale obs frame. */
 #define SHM_CTRL_INTS 2
+/* Live difficulty-config block (SimShmBridge.cs CONFIG_INTS): [valid, spawn_geo, agent_hp,
+ * agent_def, boss_hp]. It sits after the 2 ctrl words; the async seq block is after IT. */
+#define SHM_CONFIG_INTS 5
+/* Async-overlap seq block (SIM_ASYNC, SimShmBridge.cs): per-slot int32 act_seq[N] + obs_seq[N]
+ * at the region tail (after the config block). act_seq[i]: this side bumps when it posts a fresh
+ * action for slot i; obs_seq[i]: the C# free-run world bumps when it consumed that action AND
+ * wrote the resulting obs/reward. c_step posts seq S then waits obs_seq[i] >= S -> exactly one
+ * consistent transition per agent per step (the reward+next_obs that resulted from action S). */
 #define SRV_SPIN_BUDGET 2000
 
 /* Per-episode legible metrics, divided by n in vecenv. Kept tiny: the C# server
@@ -105,6 +113,10 @@ typedef struct {
     volatile int32_t *ctrl_done; /* &ctrl[1]: controller bumps when obs are ready */
     int32_t generation;          /* last tick generation we requested */
     int frame_skip;              /* K: env advances K ticks per policy step (action-repeat) */
+    int use_async;               /* 1 == SIM_ASYNC free-run overlap (no lockstep barrier) */
+    volatile int32_t *act_seq;   /* &act_seq[0]: we bump per slot to post a fresh action */
+    volatile int32_t *obs_seq;   /* &obs_seq[0]: the C# world bumps when its transition is ready */
+    int32_t *agent_seq;          /* per-slot last action seq we posted (host-side, n ints) */
 } ServerEnv;
 
 #define Env ServerEnv
@@ -255,6 +267,10 @@ static void srv_open_shm(Env *env) {
     int32_t *ctrl = (int32_t *)(env->shm_done + n);
     env->ctrl_req = (volatile int32_t *)&ctrl[0];
     env->ctrl_done = (volatile int32_t *)&ctrl[1];
+    /* async seq block sits after the ctrl words AND the config block (region tail). */
+    int32_t *seq = ctrl + SHM_CTRL_INTS + SHM_CONFIG_INTS;
+    env->act_seq = (volatile int32_t *)&seq[0];
+    env->obs_seq = (volatile int32_t *)&seq[n];
     /* Continue the shared generation sequence: req/done live in shm and persist across
      * client processes, so seed from the live req (not 0) or a reconnecting C-shim would
      * drive the counter backwards and desync the controller. */
@@ -267,6 +283,19 @@ static void srv_connect(Env *env) {
     /* SIM_SHM_BARRIER=1 -> pure-shm futex barrier, no redis on the hot path. */
     const char *bar = getenv("SIM_SHM_BARRIER");
     env->use_barrier = (bar != NULL && bar[0] == '1');
+    /* SIM_ASYNC=1 -> free-run overlap: worlds tick continuously, c_step posts actions +
+     * collects transitions non-blocking via the per-slot seq handshake, so the GPU saturates
+     * (no strict lockstep turns). The barrier/redis gate is bypassed entirely on the hot path. */
+    const char *async = getenv("SIM_ASYNC");
+    env->use_async = (async != NULL && async[0] == '1');
+    if (env->use_async) {
+        env->agent_seq = (int32_t *)calloc((size_t)env->cfg.n_agents, sizeof(int32_t));
+        /* seed each slot's host counter from the live act_seq so a reconnecting C-shim
+         * continues the shared sequence (never drives a slot's seq backwards). */
+        for (int i = 0; i < env->cfg.n_agents; i++)
+            env->agent_seq[i] = __atomic_load_n(&env->act_seq[i], __ATOMIC_ACQUIRE);
+        fprintf(stderr, "server_env: SIM_ASYNC free-run overlap ON (worlds free-run, c_step non-blocking)\n");
+    }
     /* SIM_FRAME_SKIP=K (default 1): the env advances K ticks per policy step, repeating
      * the same action, summing reward across the K ticks. K halves the policy/GPU step
      * rate (the dominant lockstep overhead) at the cost of K*100ms reaction latency.
@@ -322,6 +351,101 @@ static void srv_barrier_tick(Env *env) {
     }
 }
 
+/* ---- async overlap: post actions + collect transitions (no lockstep) ------- */
+
+static void srv_pull_obs(Env *env); /* forward decl: defined below, used by srv_async_step */
+
+/* Wait until obs_seq[slot] >= want (the C# free-run world consumed our action seq AND wrote
+ * the resulting obs/reward). Adaptive spin (the world usually publishes within microseconds
+ * once the pipeline is full), then a futex park on the slot's obs_seq word. Per-slot only --
+ * no global barrier, so other slots are never blocked and the worlds keep free-running. */
+static void srv_async_wait_obs(Env *env, int slot, int32_t want) {
+    volatile int32_t *p = &env->obs_seq[slot];
+    /* SHORT spin only (a world tick is ~hundreds of us, far longer than a useful spin, and the
+     * worlds are CPU-bound -- a long trainer spin starves them). Then futex-PARK, yielding the
+     * core to the worlds so they can tick + publish. This is what makes the overlap real: while
+     * the trainer is parked the worlds get the cores. */
+    for (int spin = 0; spin < 64; spin++) {
+        if (__atomic_load_n(p, __ATOMIC_ACQUIRE) >= want) return;
+        __builtin_ia32_pause();
+    }
+    for (;;) {
+        int32_t cur = __atomic_load_n(p, __ATOMIC_ACQUIRE);
+        if (cur >= want) return;
+        srv_futex(p, FUTEX_WAIT, cur);
+    }
+}
+
+/* One async policy step: the actions are already in shm (c_step memcpy'd them). Bump act_seq
+ * for every slot (release the next free-run policy tick on each world), wake any worlds parked
+ * on act_seq with ONE shared FUTEX_WAKE on the contiguous block, then collect: wait per slot
+ * until obs_seq catches the seq we just posted, so the obs/reward we then read is EXACTLY the
+ * transition that resulted from this step's action (a 1-tick-delayed-action MDP, deploy-faithful).
+ * The overlap: the worlds tick + publish while pufferl's GPU forward/backward runs -- the GPU is
+ * fed continuously instead of alternating strict turns with the worlds. */
+/* DEPTH-1 PIPELINE step (post-then-collect-previous). Post THIS step's action seq S for every
+ * slot + wake the free-run worlds, then collect the PREVIOUS action's transition (S-1), which the
+ * worlds already produced while the GPU computed this step's action. So the world tick of action S
+ * overlaps the GPU forward + PPO bookkeeping for action S+1 -- the GPU stays fed and the boundary
+ * stall (the lockstep wall) collapses. The action lands one policy-step later == one tick (1:1
+ * pacing) == the live deploy 1-tick action delay, so training timing matches deploy.
+ *
+ * Torn-read safety: the worlds publish obs/reward BEFORE bumping obs_seq, so a per-slot read that
+ * sees obs_seq[i] >= S-1 AND, after copying the slot, still sees obs_seq[i] == S-1 (not yet S) read
+ * a consistent S-1 frame. With 1:1 pacing the world needs a full ~ms tick to advance S-1 -> S while
+ * the copy is sub-microsecond, so the retry virtually never fires; it is the correctness guard. */
+/* Boundary integrity self-check (SIM_ASYNC_VERIFY=1). After a version-stable copy of slot i at
+ * version v0, re-read shm for that slot; while obs_seq is still v0 (no writer touched it) the copy
+ * MUST be byte-identical -> proves a torn-free, faithful copy across the shm boundary AT COLLECT
+ * TIME (the only place bit-identity is well-defined under the free-run pipeline, where vec_obs is
+ * legitimately one tick behind the live shm frame). Counts torn/corrupt copies; should stay 0. */
+static void srv_async_selfcheck(Env *env, int i, int32_t v0) {
+    static long chk = -1, bad = 0, tot = 0;
+    if (chk < 0) { const char *d = getenv("SIM_ASYNC_VERIFY"); chk = (d && d[0] == '1') ? 1 : 0; }
+    if (!chk) return;
+    const float *src = env->shm_obs + (size_t)i * OBS_SIZE;
+    const float *dst = env->observations + (size_t)i * OBS_SIZE;
+    int torn = 0;
+    if (__atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE) == v0)
+        for (int k = 0; k < OBS_SIZE; k++) if (src[k] != dst[k]) { torn = 1; break; }
+    tot++;
+    if (torn) bad++;
+    if (tot % 20000 == 0)
+        fprintf(stderr, "[async-verify] boundary copies checked=%ld torn/corrupt=%ld\n", tot, bad);
+}
+
+static void srv_async_step(Env *env) {
+    int n = env->cfg.n_agents;
+    /* COLLECT-THEN-POST (torn-free + overlapping). The free-run worlds are parked on act_seq
+     * waiting for the NEXT action, having already published the PREVIOUS action's transition. So
+     * we first COLLECT that transition while no world is writing it (parked == stable == torn-free),
+     * THEN post this step's action + wake the worlds. The world then ticks this action WHILE the GPU
+     * computes the next step's action from the obs we just returned -> the world tick overlaps the
+     * GPU forward + PPO bookkeeping (the GPU stays fed; the lockstep boundary stall collapses). The
+     * action lands one policy-step later == one tick (1:1 pacing) == the live deploy 1-tick action
+     * delay, so training timing matches deploy. (The previous post-then-collect ordering tore ~0.05%
+     * of frames: posting first woke the world, which then overwrote the slot while we read it.) */
+    for (int i = 0; i < n; i++) {
+        /* collect the previous transition: wait until it is published (obs_seq caught the last
+         * posted seq), then copy. The worlds are parked, so a version re-check is belt-and-braces. */
+        srv_async_wait_obs(env, i, env->agent_seq[i]);
+        for (;;) {
+            int32_t v0 = __atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE);
+            memcpy(env->observations + (size_t)i * OBS_SIZE, env->shm_obs + (size_t)i * OBS_SIZE, OBS_SIZE * sizeof(float));
+            env->rewards[i] = env->shm_rew[i];
+            env->terminals[i] = env->shm_done[i];
+            int32_t v1 = __atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE);
+            if (v0 == v1) { srv_async_selfcheck(env, i, v0); break; }
+        }
+    }
+    /* post this step's action + wake the worlds to tick it (overlaps the next GPU forward). */
+    for (int i = 0; i < n; i++) {
+        env->agent_seq[i] += 1;
+        __atomic_store_n(&env->act_seq[i], env->agent_seq[i], __ATOMIC_RELEASE);
+        srv_futex(&env->act_seq[i], FUTEX_WAKE, 1);
+    }
+}
+
 /* ---- the lockstep barrier: one gated tick --------------------------------- */
 
 /* Advance all N C# worlds one tick: LPUSH cmd -> BLPOP ack (obs now in shm). */
@@ -360,8 +484,29 @@ static void c_reset(Env *env) {
      * harmless and the policy's first real action lands once agents are in. */
     int n = env->cfg.n_agents;
     memset(env->shm_act, 0, (size_t)n * SRV_NUM_ATNS * sizeof(float));
+    if (env->use_async) {
+        /* prime the free-run handshake: bump act_seq for every slot + wake the worlds, then
+         * give them a moment to lazily spawn the agent and publish obs[0]. We don't hard-block
+         * per slot here (an un-spawned world never publishes), so spin a bounded budget then
+         * read whatever obs is in shm -- the first real c_step completes the handshake once the
+         * agents are in (the warm-up zeros are harmless, identical to the lockstep reset). */
+        for (int i = 0; i < n; i++) {
+            env->agent_seq[i] += 1;
+            __atomic_store_n(&env->act_seq[i], env->agent_seq[i], __ATOMIC_RELEASE);
+            srv_futex(&env->act_seq[i], FUTEX_WAKE, 1); /* per-slot wake (see srv_async_step) */
+        }
+        for (int w = 0; w < 5000; w++) {
+            int ready = 0;
+            for (int i = 0; i < n; i++)
+                if (__atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE) >= env->agent_seq[i]) ready++;
+            if (ready == n) break;
+            usleep(1000);
+        }
+        srv_pull_obs(env);
+    } else {
     srv_gate_tick(env);
     srv_pull_obs(env);
+    }
     /* a reset is not a terminal step */
     memset(env->terminals, 0, (size_t)n * sizeof(float));
     memset(&env->log, 0, sizeof(Log));
@@ -372,6 +517,20 @@ static void c_step(Env *env) {
     /* push this step's actions (vec-buffer float -> shm float, identical layout) */
     memcpy(env->shm_act, env->actions, (size_t)n * SRV_NUM_ATNS * sizeof(float));
 
+    if (env->use_async) {
+        /* free-run overlap: post this step's actions + collect one consistent transition per
+         * agent, non-blocking against the worlds (they tick in parallel -> the GPU saturates).
+         * frame_skip is ignored under async: the 1-tick delay already matches the deploy. */
+        srv_async_step(env);
+        env->steps++;
+        float ra = 0.0f, da = 0.0f;
+        for (int i = 0; i < n; i++) { ra += env->rewards[i]; da += env->terminals[i]; }
+        env->log.reward += ra / (float)n;
+        env->log.done_count += da;
+        env->log.episodes += da;
+        env->log.n += 1.0f;
+        return;
+    }
     int k = env->frame_skip;
     if (k <= 1) {
         srv_gate_tick(env);
@@ -422,6 +581,10 @@ static void c_close(Env *env) {
     if (env->redis_fd > 0) {
         close(env->redis_fd);
         env->redis_fd = 0;
+    }
+    if (env->agent_seq != NULL) {
+        free(env->agent_seq);
+        env->agent_seq = NULL;
     }
 }
 

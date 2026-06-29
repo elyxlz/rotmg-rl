@@ -39,6 +39,10 @@ void my_init(Env *env, Dict *kwargs) {
     env->ctrl_req = NULL;
     env->ctrl_done = NULL;
     env->generation = 0;
+    env->use_async = 0;
+    env->act_seq = NULL;
+    env->obs_seq = NULL;
+    env->agent_seq = NULL;
     init_globals();
 }
 

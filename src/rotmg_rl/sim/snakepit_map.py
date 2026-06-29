@@ -137,6 +137,16 @@ SNAKE_TYPE_BY_ID = {
 }
 
 
+def snake_grates(dmap: DungeonMap | None = None) -> list[tuple[int, int]]:
+    """Every Snake Grate tile the real .jm places, as (x, y). The Snake Grate is the Snake Pit's
+    continuous snake source (BehaviorDb.SnakePit "Snake Grate"): an Idle->Spawn->wait-2000ms->Idle
+    loop that, whenever no child of a type exists within a small radius, drops one Pit Snake and one
+    Pit Viper at the grate tile. The env replenishes from these tiles so the snake population is
+    SUSTAINED across an episode rather than thinning by attrition (every authored snake spawned once)."""
+    m = dmap if dmap is not None else load_jm()
+    return find_objects(m, "Snake Grate")
+
+
 def authored_snakes(dmap: DungeonMap | None = None) -> list[tuple[int, int, int]]:
     """Every enemy the real .jm authors, as (x, y, snake_type_index) with exact id matching (NOT the
     substring match of find_objects, so "Pit Snake" never absorbs "Greater Pit Snake"). These are the

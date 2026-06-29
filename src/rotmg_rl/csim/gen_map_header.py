@@ -12,7 +12,7 @@ import sys
 
 import numpy as np
 
-from rotmg_rl.sim.snakepit_map import _nearest_walkable, authored_snakes, find_objects, geodesic_field, load_jm
+from rotmg_rl.sim.snakepit_map import _nearest_walkable, authored_snakes, find_objects, geodesic_field, load_jm, snake_grates
 
 # Unreachable tiles get this sentinel geodesic value (finite, so the C reward arithmetic never sees
 # inf/NaN). The player only spawns/navigates on reachable walkable tiles, so it is never read in
@@ -58,6 +58,15 @@ def main() -> None:
     for i in range(0, len(snakes), 8):
         chunk = "".join(f"{{{x + 0.5:.1f}f,{y + 0.5:.1f}f,{t}.0f}}," for x, y, t in snakes[i : i + 8])
         out.write(chunk + "\n")
+    out.write("};\n\n")
+    # GRATES: the real Snake Grate tiles (BehaviorDb.SnakePit "Snake Grate"), the dungeon's continuous
+    # snake source. Each grate respawns its Pit Snake (type 5) + Pit Viper (type 0) children near itself
+    # on a ~2s cadence up to a small local cap, so the pit's weak-snake floor is sustained, not thinned.
+    grates = snake_grates(m)
+    out.write(f"#define N_GRATES {len(grates)}\n")
+    out.write("static const float GRATES[N_GRATES][2] = {\n")
+    for x, y in grates:
+        out.write(f"{{{x + 0.5:.1f}f,{y + 0.5:.1f}f}},\n")
     out.write("};\n\n#endif\n")
 
 

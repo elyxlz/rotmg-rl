@@ -117,6 +117,18 @@ class DungeonConfig:
     n_snakes_jitter: int = 0  # per-episode +/- band around n_snakes (difficulty schedule spreads a batch around d)
     snake_speed: float = 0.15
     snake_radius: float = 0.5
+    # Snake Grate replenishment (BehaviorDb.SnakePit "Snake Grate"): the pit's continuous snake source.
+    # The real grate runs Idle -> (when no child of a type exists within ~5 tiles) -> Spawn one Pit Snake
+    # + one Pit Viper at the grate -> wait 2000ms -> Idle, so a small local population is sustained, not
+    # thinned by attrition. The env generalizes this to every authored anchor: on the grate_cd cadence,
+    # an active authored snake that has died OR drifted beyond grate_radius from its authored tile is
+    # respawned there (capped so each anchor holds only its own snake), so the authored clusters -- incl.
+    # the converging Greater pack at the (38,43) boss-approach chokepoint -- stay stocked instead of
+    # evaporating during the long navigation. enable_grates gates it; the curriculum ramps it in with d.
+    enable_grates: bool = False
+    grate_cd: int = 20  # Spawn TimedTransition(2000ms) = 20 ticks (replenish cadence)
+    grate_radius: float = 5.0  # EntityNotExistsTransition("Pit Snake", 5, ...): the local-density check radius
+    grate_cap: int = 2  # max children per real grate tile within grate_radius (1 Pit Snake + 1 Pit Viper)
     # boss (Stheno the Snake Queen): 7500 HP, DEF 19, phases at 66%/33%.
     boss_hp_max: float = 7500.0
     boss_radius: float = 2.0

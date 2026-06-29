@@ -146,6 +146,12 @@ typedef struct {
     int spell_life;
     int n_snakes, n_snakes_jitter;
     float snake_speed, snake_radius;
+    /* Snake Grate replenishment (the pit's continuous snake source). enable_grates gates it; on the
+     * grate_cd cadence each real grate tops its Pit Snake/Viper children up to grate_cap within
+     * grate_radius, and every active authored anchor whose snake died or strayed past grate_radius is
+     * respawned at its tile -- so the authored clusters (incl. the chokepoint Greaters) stay stocked. */
+    int enable_grates, grate_cd, grate_cap;
+    float grate_radius;
     float boss_hp_max, boss_radius, boss_defense, boss_wander_speed, boss_return_speed;
     int boss_shoots, opening_invuln_ticks, invuln_ticks;
     int blade_cd;
@@ -209,6 +215,12 @@ typedef struct {
     int n_ebul;
     Snake snakes[MAX_SNAKES];
     int n_snake;
+    /* Grate replenishment state: the active authored anchor each snake slot was spawned from (index into
+     * AUTHORED_SNAKES, -1 for a grate-spawned filler with no anchor), the active authored index set (so
+     * the curriculum subset is the only roster replenished), and the shared respawn-cadence timer. */
+    int snake_anchor[MAX_SNAKES];
+    int active_authored[N_AUTHORED], n_active_authored;
+    int grate_timer;
     Swarm swarm[MAX_SWARM];
     int n_swarm, swarm_timer;
     Grenade grenades[MAX_GRENADES];
@@ -835,6 +847,8 @@ static void snakes_tick(Dungeon *env) {
 static void spawn_snakes(Dungeon *env) {
     Config *c = &env->cfg;
     env->n_snake = 0;
+    env->n_active_authored = 0;
+    env->grate_timer = c->grate_cd;
     int want = c->n_snakes;
     if (c->n_snakes_jitter > 0) {
         int span = 2 * c->n_snakes_jitter + 1;
@@ -857,7 +871,76 @@ static void spawn_snakes(Dungeon *env) {
         const float *a = AUTHORED_SNAKES[order[s]];
         int type = (int)a[2];
         Snake sn = {a[0], a[1], SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
+        env->snake_anchor[env->n_snake] = order[s];          /* remember the anchor for grate replenishment */
+        env->active_authored[env->n_active_authored++] = order[s]; /* the curriculum subset to re-stock */
         env->snakes[env->n_snake++] = sn;
+    }
+}
+
+/* Spawn one snake of `type` at (gx, gy) (the grate/anchor tile), carrying its authored anchor index
+ * (or -1 for a grate filler). Returns 0 if the snake table is full. */
+static int spawn_one_snake(Dungeon *env, float gx, float gy, int type, int anchor) {
+    if (env->n_snake >= MAX_SNAKES)
+        return 0;
+    Snake sn = {gx, gy, SNAKE_TYPES[type][ST_HP], (float)(rng_next(env) % SNAKE_TIMER_JITTER), (float)type};
+    env->snake_anchor[env->n_snake] = anchor;
+    env->snakes[env->n_snake++] = sn;
+    return 1;
+}
+
+/* Count live snakes of `type` within `radius` of (cx, cy) -- the grate's EntityNotExistsTransition
+ * local-density gate (so a grate/anchor only respawns when its local population has thinned). */
+static int count_type_near(Dungeon *env, float cx, float cy, int type, float radius) {
+    int n = 0;
+    for (int i = 0; i < env->n_snake; i++)
+        if (env->snakes[i].hp > 0.0f && (int)env->snakes[i].type == type &&
+            dist_ff(env->snakes[i].x, env->snakes[i].y, cx, cy) <= radius)
+            n++;
+    return n;
+}
+
+/* Snake Grate replenishment (BehaviorDb.SnakePit "Snake Grate" + the authored-anchor generalization).
+ * Every grate_cd ticks (the real 2000ms Spawn cadence): each real grate tops its Pit Snake (5) +
+ * Pit Viper (0) children back up to grate_cap within grate_radius; and every active authored anchor
+ * whose snake has died OR drifted past grate_radius is respawned at its authored tile (so the pit's
+ * authored clusters -- including the converging Greater pack at the boss-approach chokepoint -- stay
+ * stocked instead of evaporating). The respawned snakes use the existing Follow/Wander AI + faithful
+ * per-type stats; nothing about SNAKE_TYPES changes. enable_grates gates the whole system. */
+static void grates_tick(Dungeon *env) {
+    Config *c = &env->cfg;
+    if (!c->enable_grates)
+        return;
+    if (env->grate_timer > 0) {
+        env->grate_timer--;
+        return;
+    }
+    env->grate_timer = c->grate_cd;
+
+    /* The two literal Snake Grates: sustain their weak Pit Snake/Viper floor near each grate tile. */
+    static const int GRATE_CHILD_TYPES[2] = {5, 0}; /* Pit Snake, Pit Viper */
+    for (int g = 0; g < N_GRATES; g++) {
+        for (int k = 0; k < 2; k++) {
+            int type = GRATE_CHILD_TYPES[k];
+            if (count_type_near(env, GRATES[g][0], GRATES[g][1], type, c->grate_radius) < c->grate_cap)
+                spawn_one_snake(env, GRATES[g][0], GRATES[g][1], type, -1);
+        }
+    }
+
+    /* Authored anchors: re-stock any active anchor that has gone empty (snake dead or strayed). One
+     * snake per anchor tile (its authored archetype), matching the .jm's one-per-tile placement. */
+    for (int s = 0; s < env->n_active_authored; s++) {
+        int ai = env->active_authored[s];
+        const float *a = AUTHORED_SNAKES[ai];
+        int type = (int)a[2];
+        int present = 0;
+        for (int i = 0; i < env->n_snake; i++)
+            if (env->snakes[i].hp > 0.0f && env->snake_anchor[i] == ai &&
+                dist_ff(env->snakes[i].x, env->snakes[i].y, a[0], a[1]) <= c->grate_radius) {
+                present = 1;
+                break;
+            }
+        if (!present)
+            spawn_one_snake(env, a[0], a[1], type, ai);
     }
 }
 
@@ -1156,6 +1239,7 @@ static void c_step(Dungeon *env) {
         reward += c->rew_reach;
     }
 
+    grates_tick(env);
     snakes_tick(env);
     if (env->fight_active) {
         boss_tick(env);

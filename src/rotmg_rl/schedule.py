@@ -59,6 +59,11 @@ def difficulty_config(d: float, n_snakes_max: int = N_SNAKES_MAX) -> dict:
         # Stheno is walled by. Ramped in at high d (like the boss/grenade threats) so it is met after
         # the policy has the basics, then becomes the hard wall the retrain must learn to penetrate.
         "enable_swarm": 1 if d > 0.45 else 0,
+        # Snake Grate replenishment: the pit's continuous snake source that keeps the authored clusters
+        # (incl. the converging Greater pack at the boss-approach chokepoint) stocked instead of thinning
+        # by attrition. Ramped in with the swarm at high d, so the early curriculum still faces the gentle
+        # static roster and the hard, sustained-density chokepoint is the d~1 wall the retrain must learn.
+        "enable_grates": 1 if d > 0.45 else 0,
         "boss_shoots": 1 if d > 0.05 else 0,
         "blade_cd": round(15 + (40 - 15) * (1.0 - _clamp01(d / 0.4))),  # 40 (gentle) -> 15 (real) by d=0.4
     }

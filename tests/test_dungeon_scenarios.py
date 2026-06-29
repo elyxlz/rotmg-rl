@@ -319,6 +319,71 @@ def test_protective_swarm_replenishes():
     env.close()
 
 
+# --- Snake Grate replenishment (the pit's continuous snake source) ----------------------------------
+
+CHOKEPOINT = (38, 43)  # the boss-approach chokepoint the live policy gets wall-pinned + killed in
+
+
+def _greaters_in_view(env, cx: float, cy: float, radius: float = 15.0) -> int:
+    """Live Greater Pit Snake/Viper (types 3, 4) within `radius` of (cx, cy) -- the convergent volley
+    the wall-pinned policy eats. Counted from the read-only snake snapshot (positions + types)."""
+    g = env.get()
+    snakes, types = g["snakes"], g["snake_types"].reshape(-1)
+    if len(snakes) == 0:
+        return 0
+    inv = (np.abs(snakes[:, 0] - cx) <= radius) & (np.abs(snakes[:, 1] - cy) <= radius)
+    return int((inv & ((types == 3) | (types == 4))).sum())
+
+
+def _peak_chokepoint_greaters(enable_grates: int, seed: int, ticks: int = 900) -> int:
+    """Peak Greater density in view while the player lingers (wall-pinned) at the chokepoint at d=1.
+    The player is held on the chokepoint tile each tick so the authored Greaters Follow in and converge;
+    the peak is the worst-case volley the policy faces. Idle action (no shooting) so nothing is killed."""
+    m = load_jm()
+    px, py = _nearest_walkable(m.walkable, *CHOKEPOINT)
+    kw = difficulty_config(1.0)
+    kw["enable_grates"] = enable_grates
+    env = CDungeonSingle(DungeonConfig(boss_hp_max=7500.0, **kw), seed=seed)
+    env.reset(seed=seed)
+    peak = 0
+    for _ in range(ticks):
+        env.put(player_x=px + 0.5, player_y=py + 0.5)
+        env.step([8, 0, 0, 0])  # 8 > N_MOVE -> idle; the player stays pinned, snakes converge
+        peak = max(peak, _greaters_in_view(env, px + 0.5, py + 0.5))
+    env.close()
+    return peak
+
+
+def test_grate_replenishment_sustains_chokepoint_greater_density():
+    """The Snake Grate replenishment lifts the SUSTAINED converging Greater density at the (38,43)
+    boss-approach chokepoint to the real ~9, matching the live server. Statically (each authored snake
+    spawned once, no respawn) the pack thins by attrition and the in-view Greater peak sits at ~5; with
+    the grates replenishing the authored anchors on the 2s cadence it climbs to ~8-9 -- the convergent
+    volley that wall-pins and kills the live policy 4/4. Asserts the floor (>=8) AND that grates are
+    strictly denser than the static map, so the fix is the replenishment, not the layout."""
+    seeds = (1, 7, 42, 99, 123, 200)
+    static_peaks = [_peak_chokepoint_greaters(0, s) for s in seeds]
+    grate_peaks = [_peak_chokepoint_greaters(1, s) for s in seeds]
+    static_mean = float(np.mean(static_peaks))
+    grate_mean = float(np.mean(grate_peaks))
+    assert static_mean < 6.0, f"static chokepoint already dense ({static_mean}); the gap this fixes is gone"
+    assert grate_mean >= 8.0, f"grate replenishment must sustain the real ~9 Greaters, got mean {grate_mean}"
+    assert grate_mean > static_mean + 2.0, f"replenishment must add real density: {static_mean} -> {grate_mean}"
+
+
+def test_grate_replenishment_off_by_default_leaves_spawn_count_unchanged():
+    """enable_grates defaults off, so a fresh agent + the golden tripwire see the untouched static map:
+    no respawns, exactly the authored subset spawned at reset, the grate timer never fires."""
+    env = CDungeonSingle(DungeonConfig(n_snakes=N_SNAKES_MAX, n_snakes_jitter=0), seed=5)
+    env.reset(seed=5)
+    n0 = len(env.get()["snakes"])
+    for _ in range(60):  # > grate_cd (20): with grates off no replenishment ever runs
+        env.step([8, 0, 0, 0])
+    n1 = len(env.get()["snakes"])
+    env.close()
+    assert n1 <= n0  # population only ever falls (attrition), never replenished when grates are off
+
+
 # --- navigation fidelity (collision footprint + geodesic potential) ---------------------------------
 
 

@@ -3,7 +3,7 @@
 import collections
 
 from rotmg_rl.schedule import N_SNAKES_MAX
-from rotmg_rl.sim.snakepit_map import authored_snakes, load_jm
+from rotmg_rl.sim.snakepit_map import authored_snakes, load_jm, snake_grates
 
 
 def test_map_loads_with_expected_dims_and_floor():
@@ -50,3 +50,13 @@ def test_authored_chokepoint_cluster_reproduced():
     fire_pythons = {(x, y) for x, y, t in cluster if t == 1}  # Fire Python (200 HP, 3-shot)
     assert {(30, 43), (30, 44), (26, 46)} <= fire_pythons
     assert (28, 41, 6) in cluster  # Brown Python (DEF 20)
+
+
+def test_snake_grates_match_real_placement():
+    """The real .jm places exactly two Snake Grates (the pit's continuous Pit Snake/Viper source), both
+    on walkable floor. These are the anchor tiles the env replenishes from to sustain the snake density."""
+    m = load_jm()
+    grates = snake_grates(m)
+    assert set(grates) == {(61, 101), (47, 114)}  # the two authored Snake Grate tiles
+    for x, y in grates:
+        assert m.walkable[y, x]  # a grate sits on floor so its spawned children are reachable

@@ -43,6 +43,10 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     c->n_snakes_jitter = (int)unpack(kwargs, "n_snakes_jitter");
     c->snake_speed = unpack(kwargs, "snake_speed");
     c->snake_radius = unpack(kwargs, "snake_radius");
+    c->enable_grates = (int)unpack(kwargs, "enable_grates");
+    c->grate_cd = (int)unpack(kwargs, "grate_cd");
+    c->grate_radius = unpack(kwargs, "grate_radius");
+    c->grate_cap = (int)unpack(kwargs, "grate_cap");
     c->boss_hp_max = unpack(kwargs, "boss_hp_max");
     c->boss_radius = unpack(kwargs, "boss_radius");
     c->boss_defense = unpack(kwargs, "boss_defense");
@@ -214,6 +218,17 @@ static PyObject *my_get(PyObject *dict, Env *env) {
             }
     }
     set_array(dict, "snakes", snakes);
+
+    /* Per-snake type index (parallel to "snakes"), so a probe/test can count a specific archetype
+     * (e.g. the convergent Greater density at the chokepoint) without re-deriving it. */
+    PyObject *snake_types = new_f32(ns, 1, &d);
+    if (snake_types) {
+        int k = 0;
+        for (int i = 0; i < env->n_snake; i++)
+            if (env->snakes[i].hp > 0.0f)
+                d[k++] = env->snakes[i].type;
+    }
+    set_array(dict, "snake_types", snake_types);
 
     int nsw = 0;
     for (int i = 0; i < env->n_swarm; i++)

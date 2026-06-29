@@ -56,6 +56,10 @@ void my_init(Env *env, Dict *kwargs) {
     c->n_snakes_jitter = (int)dict_get(kwargs, "n_snakes_jitter")->value;
     c->snake_speed = dict_get(kwargs, "snake_speed")->value;
     c->snake_radius = dict_get(kwargs, "snake_radius")->value;
+    c->enable_grates = (int)dict_get(kwargs, "enable_grates")->value;
+    c->grate_cd = (int)dict_get(kwargs, "grate_cd")->value;
+    c->grate_radius = dict_get(kwargs, "grate_radius")->value;
+    c->grate_cap = (int)dict_get(kwargs, "grate_cap")->value;
     c->boss_hp_max = dict_get(kwargs, "boss_hp_max")->value;
     c->boss_radius = dict_get(kwargs, "boss_radius")->value;
     c->boss_defense = dict_get(kwargs, "boss_defense")->value;

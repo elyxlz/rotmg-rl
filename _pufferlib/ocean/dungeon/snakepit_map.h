@@ -1142,4 +1142,10 @@ static const float AUTHORED_SNAKES[N_AUTHORED][3] = {
 {50.5f,38.5f,3.0f},{17.5f,45.5f,3.0f},{49.5f,84.5f,3.0f},{43.5f,67.5f,5.0f},{66.5f,103.5f,5.0f},
 };
 
+#define N_GRATES 2
+static const float GRATES[N_GRATES][2] = {
+{61.5f,101.5f},
+{47.5f,114.5f},
+};
+
 #endif

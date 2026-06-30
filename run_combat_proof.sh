@@ -37,7 +37,7 @@ echo "[proof] server ready:"; grep -E 'region|barrier|created Snake Pit|difficul
 # run the proof harness (trainer + server-log tailer -> learning curve)
 cd /home/audiogen/rotmg-rl
 export PATH="$HOME/.local/bin:$PATH" UV_LINK_MODE=copy
-CUDA_VISIBLE_DEVICES=1 SIM_SHM_BARRIER=1 .venv/bin/python server_proof.py \
+CUDA_VISIBLE_DEVICES=1 SIM_SHM_BARRIER=1 .venv/bin/python -m rotmg_rl.trainer.proof \
   --agents $N --steps $STEPS --server-log $SRV_LOG --out $CURVE 2>&1 | tee /tmp/combat_proof_train.log
 
 echo "[proof] DONE; curve -> $CURVE"

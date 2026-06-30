@@ -22,7 +22,7 @@ cd "$RL"; source .venv/bin/activate; source buildenv.sh
 ASYNC_ENV=""; [ "$MODE" = "async" ] && ASYNC_ENV="SIM_ASYNC=1"
 env $ASYNC_ENV SIM_SHM_PATH="$SHM" SIM_SHM_BARRIER=$([ "$MODE" = lockstep ] && echo 1 || echo 0) \
   CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=4 SIM_RL_SEED=0 \
-  taskset -c 28-31 python server_train.py --agents "$N" --steps "$STEPS" --hidden 1024 \
+  taskset -c 28-31 python -m rotmg_rl.trainer.train --agents "$N" --steps "$STEPS" --hidden 1024 \
   --redis-port 6390 --redis-db 5 --out /tmp/learn_${MODE}.pt > "$TLOG" 2>&1
 pkill -9 -f WorldServer.dll 2>/dev/null; sleep 1; rm -f "$SHM"
 echo "=== $MODE done_rate curve (every ~10k steps) ==="

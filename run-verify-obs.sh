@@ -1,5 +1,5 @@
 #!/bin/bash
-# Boot the async server-as-sim + run verify_obs_async.py (bit-identical, torn-free obs proof).
+# Boot the async server-as-sim + run rotmg_rl.tools.verify_obs_async (bit-identical, torn-free obs proof).
 set -u
 N="${1:-24}"
 SHM=/dev/shm/rotmg_sim_vobs
@@ -16,7 +16,7 @@ for i in $(seq 1 120); do [ -f "$SHM" ] && grep -q "region '" "$LOG" && break; s
 sleep 2
 cd "$RL"; source .venv/bin/activate; source buildenv.sh
 SIM_SHM_PATH="$SHM" SIM_ASYNC=1 CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=4 \
-  taskset -c 28-31 python verify_obs_async.py --agents "$N" --warmup 150 2>&1 | grep -vE "^\s*$"
+  taskset -c 28-31 python -m rotmg_rl.tools.verify_obs_async --agents "$N" --warmup 150 2>&1 | grep -vE "^\s*$"
 RC=${PIPESTATUS[0]:-$?}
 pkill -9 -f WorldServer.dll 2>/dev/null; sleep 1; rm -f "$SHM"
 echo "verify_obs_async exit: $RC"

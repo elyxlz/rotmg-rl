@@ -1,7 +1,7 @@
 #!/bin/bash
 # ONE long server-as-sim curriculum run -> a clearing policy at d=1. Boots the throwaway server in
 # server-as-sim mode (SIM_ASYNC=1, N=48, CPU-partitioned worlds 0-27 / trainer 28-31, GPU 0), then
-# runs server_longrun.py (curriculum d 0->1, warm-start hparams, periodic eval ladder + wandb). The
+# runs rotmg_rl.trainer.longrun (curriculum d 0->1, warm-start hparams, periodic eval ladder + wandb). The
 # two WIRED reward knobs go in as server env vars. Isolated: sim redis 6390 db5, shm rotmg_longrun.
 # NEVER touches live :2050 / redis 6379.
 set -u
@@ -36,7 +36,7 @@ sleep 3
 cd "$RL"; source .venv/bin/activate; source buildenv.sh
 SIM_SHM_PATH="$SHM" SIM_ASYNC=1 SIM_SHM_BARRIER=0 \
   CUDA_VISIBLE_DEVICES="$GPU" OMP_NUM_THREADS=4 \
-  taskset -c 28-31 python server_longrun.py \
+  taskset -c 28-31 python -m rotmg_rl.trainer.longrun \
     --agents "$N" --steps "$STEPS" --hidden "$HIDDEN" --ramp-frac "$RAMP" \
     --eval-every "$EVAL_EVERY" --server-log "$SRVLOG" \
     --redis-port 6390 --redis-db 5 --out-dir checkpoints/longrun \

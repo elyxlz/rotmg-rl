@@ -24,7 +24,7 @@ for i in $(seq 1 120); do [ -f "$SHM" ] && grep -q "region '" "$LOG" && break; s
 sleep 2
 cd "$RL"; source .venv/bin/activate; source buildenv.sh
 SIM_SHM_PATH="$SHM" SIM_SHM_BARRIER=1 CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS="$TORCH_THREADS" \
-  taskset -c "$TRAINER_CPUS" python server_train.py --agents "$N" --steps 100000000 --hidden "$HIDDEN" \
+  taskset -c "$TRAINER_CPUS" python -m rotmg_rl.trainer.train --agents "$N" --steps 100000000 --hidden "$HIDDEN" \
   --redis-port 6390 --redis-db 5 --out /tmp/lock_tput.pt > "$TLOG" 2>&1 &
 TRN=$!
 sleep 12

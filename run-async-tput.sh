@@ -38,7 +38,7 @@ source buildenv.sh
 export OMP_NUM_THREADS="$TORCH_THREADS"
 # run a big step budget, kill after SECONDS_RUN; SPS is read from the steady-state tail
 SIM_SHM_PATH="$SHM" SIM_ASYNC=1 CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS="$TORCH_THREADS" \
-  taskset -c "$TRAINER_CPUS" python server_train.py --agents "$N" --steps 100000000 --hidden "$HIDDEN" \
+  taskset -c "$TRAINER_CPUS" python -m rotmg_rl.trainer.train --agents "$N" --steps 100000000 --hidden "$HIDDEN" \
   --redis-port 6390 --redis-db 5 --out /tmp/async_tput.pt > "$TLOG" 2>&1 &
 TRN_PID=$!
 

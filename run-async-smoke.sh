@@ -40,7 +40,7 @@ source .venv/bin/activate
 source buildenv.sh
 RC=0
 SIM_SHM_PATH="$SHM" SIM_ASYNC=1 SIM_ASYNC_VERIFY="$VERIFY" CUDA_VISIBLE_DEVICES=1 \
-  python server_train.py --agents "$N" --steps "$STEPS" --hidden "$HIDDEN" \
+  python -m rotmg_rl.trainer.train --agents "$N" --steps "$STEPS" --hidden "$HIDDEN" \
   --redis-port 6390 --redis-db 5 --out /tmp/async_smoke.pt 2>&1
 RC=$?
 echo "[smoke] trainer exit code: $RC"

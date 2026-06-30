@@ -33,6 +33,20 @@ THE RECORDING IS INVALID IF ANY CHEAT OCCURS:
 Failed attempts along the way are expected and fine. The deliverable is ONE genuine, clean,
 cheat-free successful run, recorded.
 
+CLARIFICATIONS (setup vs. the run -- the bans apply to the RUN, not to ordinary character setup):
+- CHARACTER: an ordinary maxed Wizard with ordinary gear ONLY -- a T7 staff + T7 spell, no armor,
+  no ring -- plus a Snake Pit Key. Stats are the normal class cap (no god-stats). This ordinary
+  loadout MAY be provisioned via admin BEFORE the run (give the ordinary items, /max to the class
+  cap); that is loadout setup, not a cheat. Banned is god-stats and any admin command DURING the
+  recorded run. No provenance is hidden -- nothing is laundered to "look" organic.
+- PORTAL: opened the ordinary way -- the Wizard uses the Snake Pit Key (Activate -> CreatePortal)
+  to open a REAL Snake Pit and walks in. Never /spawn. The dungeon inside is the real unmodified one.
+- DISCLOSURE: the recording is openly an RL agent's play -- a disclosed AI demonstration in the
+  AlphaStar / OpenAI Five tradition, NOT presented as a human clear. The policy controls the real
+  client via ordinary input (move/aim/shoot/cast) like any player; nothing about the agent's
+  control is hidden. The integrity requirement is that the agent GENUINELY plays (no scripted
+  navigation/aiming/dodging), shown openly as an AI -- not that an AI run is disguised as human.
+
 DONE only when that .mp4 exists, is verified to be a legitimate cheat-free clear on the live
 server, and is copied to the user's machine. Never claim success without evidence; if it is not a
 real, clean, cheat-free clear, it is not done.

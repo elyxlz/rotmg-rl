@@ -33,6 +33,8 @@ def main() -> None:
     p.add_argument("--redis-port", type=int, default=6390)
     p.add_argument("--redis-db", type=int, default=5)
     p.add_argument("--out", default="checkpoints/server_sim.pt")
+    p.add_argument("--hidden", type=int, default=None, help="policy hidden size (overrides the ini; throughput runs use 1024)")
+    p.add_argument("--num-layers", type=int, default=None, help="policy LSTM layers (overrides the ini)")
     a = p.parse_args()
 
     # load_config parses sys.argv (an argparse over every ini key); clear our flags first.
@@ -44,6 +46,10 @@ def main() -> None:
     args["env"]["redis_port"] = a.redis_port
     args["env"]["redis_db"] = a.redis_db
     args["train"]["total_timesteps"] = a.steps * a.agents
+    if a.hidden is not None:
+        args["policy"]["hidden_size"] = a.hidden
+    if a.num_layers is not None:
+        args["policy"]["num_layers"] = a.num_layers
 
     print(f"== server-as-sim PPO: N={a.agents} agents, ~{a.steps} steps/agent, redis 127.0.0.1:{a.redis_port} db{a.redis_db} ==", flush=True)
     print(f"   gpu={_C.gpu}  obs_size(server_env)={args['env']}", flush=True)

@@ -11,8 +11,8 @@
 #define PUFFER4
 #include "server_env.h" /* OBS_SIZE, NUM_CH, GRID, NUM_SCALARS, ServerEnv, c_step/c_reset/c_close, init_globals */
 
-#define NUM_ATNS 5
-#define ACT_SIZES {9, 32, 2, 2, 32} /* MultiDiscrete: move, staff_aim, shoot, cast, spell_aim */
+#define NUM_ATNS 4
+#define ACT_SIZES {9, 32, 2, 2} /* MultiDiscrete: move, aim, shoot, cast (staff+spell share the aim) */
 #define OBS_TENSOR_T FloatTensor /* float32 obs */
 
 /* one env holds all N agents -> we own buffer layout */

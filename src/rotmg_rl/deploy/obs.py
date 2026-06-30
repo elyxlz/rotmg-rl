@@ -187,14 +187,15 @@ class RealObsBuilder:
         return np.concatenate([grid.ravel(), self._minimap(px, py, boss_pos).ravel(), scalars]).astype(np.float32)
 
 
-SPELL_CAST_RANGE = 4.0  # tiles: the BulletNova lands this far along the spell-aim from the agent
-                        # (== SimActionApply SIM_SPELL_RANGE); the cast target is agent + unit*range.
+SPELL_CAST_RANGE = 4.0  # tiles: the BulletNova lands this far along the SHARED staff aim from the agent
+                        # (== SimActionApply SIM_SPELL_RANGE); the cast target is agent + staff_aim_unit*range.
 
 
 def action_to_intent(action: dict, player_speed: float = 0.55) -> dict:
-    """Decode the 5-head MultiDiscrete action into a game intent (mirrors the env step decode):
-    move 0=stand / 1..8=MOVE_DIRS, staff-aim=AIM_DIRS unit vector, shoot/cast bools, spell-aim=
-    a SEPARATE AIM_DIRS unit vector for the spell cast TARGET (independent of the staff aim)."""
+    """Decode the 4-head MultiDiscrete action into a game intent (mirrors the env step decode):
+    move 0=stand / 1..8=MOVE_DIRS, aim=AIM_DIRS unit vector, shoot/cast bools. The staff and the
+    spell SHARE the single aim (one mouse): the BulletNova cast target is agent + staff_aim*range,
+    along the SAME direction the staff fires, so the policy turns the aim between ticks to retarget."""
     mv = action["move"]
     if mv == 0:
         dx, dy = 0.0, 0.0
@@ -202,10 +203,6 @@ def action_to_intent(action: dict, player_speed: float = 0.55) -> dict:
         d = MOVE_DIRS[mv - 1]
         dx, dy = float(d[0]) * player_speed, float(d[1]) * player_speed
     aim = AIM_DIRS[action["aim"]]
-    # spell-aim: a separate aim head for the cast target. Falls back to the staff aim for a
-    # legacy 4-head action dict (no spell_aim key).
-    spell_aim_idx = action["spell_aim"] if "spell_aim" in action else action["aim"]
-    spell_aim = AIM_DIRS[spell_aim_idx]
     return {
         "dx": dx,
         "dy": dy,
@@ -213,7 +210,5 @@ def action_to_intent(action: dict, player_speed: float = 0.55) -> dict:
         "aim_y": float(aim[1]),
         "shoot": bool(action["shoot"]),
         "cast": bool(action["cast"]),
-        "spell_aim_x": float(spell_aim[0]),
-        "spell_aim_y": float(spell_aim[1]),
         "spell_range": SPELL_CAST_RANGE,
     }

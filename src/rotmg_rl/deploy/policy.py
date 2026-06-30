@@ -31,9 +31,7 @@ class PolicyRunner:
         x = torch.tensor(np.asarray(flat, np.float32), device=self.device).unsqueeze(0)
         logits, _, self.state = self.policy.forward_eval(x, self.state)
         a = [int(lg.argmax(dim=1)) if greedy else int(torch.distributions.Categorical(logits=lg).sample()) for lg in logits]
-        # 5-head action space: move, staff-aim, shoot, cast, spell-aim. The spell-aim is a
-        # SEPARATE aim head -- where the BulletNova lands -- independent of the staff aim, so
-        # the live agent fires the staff at one target while dropping the spell on another.
-        # Fall back to the staff aim for a legacy 4-head checkpoint (no spell-aim head).
-        spell_aim = a[4] if len(a) > 4 else a[1]
-        return {"move": a[0], "aim": a[1], "shoot": a[2], "cast": a[3], "spell_aim": spell_aim}
+        # 4-head action space: move, aim, shoot, cast. The staff and the spell SHARE the single
+        # aim head (one mouse) -- the BulletNova is cast along the same direction the staff fires,
+        # so to drop the spell on a different target the policy turns the aim between ticks.
+        return {"move": a[0], "aim": a[1], "shoot": a[2], "cast": a[3]}

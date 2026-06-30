@@ -46,7 +46,7 @@
 #define GRID_SIZE (NUM_CH * GRID * GRID)
 #define MM_SIZE (NUM_MM_CH * MM * MM)
 #define OBS_SIZE (GRID_SIZE + MM_SIZE + NUM_SCALARS) /* 9807 */
-#define SRV_NUM_ATNS 5 /* move, staff_aim, shoot, cast, spell_aim */
+#define SRV_NUM_ATNS 4 /* move, aim, shoot, cast (staff+spell share the aim) */
 
 /* shm header (matches SimShmBridge.cs): magic, n_agents, obs_len, n_atns. */
 #define SHM_HEADER_INTS 4

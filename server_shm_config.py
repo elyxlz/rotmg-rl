@@ -5,7 +5,7 @@ writes ONLY the difficulty-config block at the region tail (after the 2 ctrl int
 never touches, so there is no contention with the lockstep gate.
 
 Region layout (must match SimShmBridge.cs / server_env.h byte-for-byte):
-    [HEADER_INTS int32][N*OBS float32][N*4 float32][N float32][N float32][CTRL_INTS int32][CONFIG_INTS int32]
+    [HEADER_INTS int32][N*OBS float32][N*N_ATNS float32][N float32][N float32][CTRL_INTS int32][CONFIG_INTS int32]
 The config block is 5 int32s: [valid(MAGIC), spawn_geo_dist, agent_hp, agent_def, boss_hp]. The C# side
 treats valid==MAGIC as "a live config is present" and falls back to its SIM_* env defaults otherwise, so
 writing the block here is what switches the server from the fixed proof config to the live d-curriculum.
@@ -23,7 +23,7 @@ import struct
 HEADER_INTS = 4
 MAGIC = 0x52544D47  # 'RTMG', == SimShmBridge.MAGIC
 OBS_LEN = 9807
-N_ATNS = 5  # move, staff_aim, shoot, cast, spell_aim
+N_ATNS = 4  # move, aim, shoot, cast (staff+spell share the aim)
 CTRL_INTS = 2
 CONFIG_INTS = 5
 

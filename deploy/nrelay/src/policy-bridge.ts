@@ -15,7 +15,7 @@ const SNAKE_PIT_PORTAL_TYPE = 0x0718;
 const SPELL_MP_COST = 20;
 const CAST_COOLDOWN_MS = 350;
 
-interface Intent { dx: number; dy: number; aim_x: number; aim_y: number; shoot: boolean; cast: boolean; spell_aim_x?: number; spell_aim_y?: number; spell_range?: number; }
+interface Intent { dx: number; dy: number; aim_x: number; aim_y: number; shoot: boolean; cast: boolean; spell_range?: number; }
 interface Reply { intent?: Intent; reset_ok?: boolean; ok?: boolean; ready?: boolean; }
 
 @Library({ name: "policy-bridge", author: "bot" })
@@ -203,14 +203,12 @@ class PolicyBridge {
       ui.slotObject.objectId = client.objectId;
       ui.slotObject.slotId = 1;
       ui.slotObject.objectType = spell;
-      // Cast the BulletNova at the SEPARATE spell-aim target: the policy's spell-aim head
-      // (independent of the staff aim) picks where the nova lands. Target = player +
-      // spell_aim_unit * spell_range (== SimActionApply's aimed cast in the sim). Falls back
-      // to the staff aim for a legacy policy that emits no spell-aim.
-      const spellAx = intent.spell_aim_x !== undefined ? intent.spell_aim_x : intent.aim_x;
-      const spellAy = intent.spell_aim_y !== undefined ? intent.spell_aim_y : intent.aim_y;
+      // Cast the BulletNova along the SHARED staff aim (one mouse): the nova target is
+      // player + staff_aim_unit * spell_range, the SAME direction the staff fires this tick
+      // (== SimActionApply's aimed cast in the sim). The policy retargets the spell by turning
+      // the aim between ticks, like a human moving the mouse -- never two directions at once.
       const spellRange = intent.spell_range !== undefined ? intent.spell_range : 1;
-      ui.itemUsePos = new WorldPosData(wp.x + spellAx * spellRange, wp.y + spellAy * spellRange);
+      ui.itemUsePos = new WorldPosData(wp.x + intent.aim_x * spellRange, wp.y + intent.aim_y * spellRange);
       ui.useType = 0;
       this.sendPacket(client, ui);
       this.castCount++;

@@ -24,11 +24,17 @@ runs/
 videos/
 *.mp4
 *.gif
+*.png
+
+# sim-server: the pinned upstream checkout fetch.sh produces (only the overlay is tracked)
+sim-server/upstream/
 
 # C build artifacts
 *.o
 *.so
 *.out
+deploy/**/*.so
+deploy/flash/miniwm
 
 # OS / editor
 .DS_Store

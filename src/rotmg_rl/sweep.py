@@ -1,25 +1,12 @@
-"""Protein hyperparameter sweep (cost-aware Bayesian over CURRICULUM DEPTH -- how far up the difficulty
-ladder the policy clears) + the hparam plumbing the training entry shares.
+"""Protein sweep search space + the hparam plumbing the server-as-sim trainer shares.
 
-`run_sweep` drives the continuous-difficulty training loop (rotmg_rl.training) over a Protein search
-space and returns the best hyperparameter dict. `python3 train.py` calls it then trains the winner;
-this module's `main` is the sweep-alone entry (find + print the best config, no full run):
-
-    python -m rotmg_rl.sweep --sweep-trials 16
+`build_sweep_config` defines the Protein search space (cost-aware Bayesian over CURRICULUM DEPTH -- how
+far up the difficulty ladder the policy clears); `_hparams_from_args` / `apply_hparams` move the swept
+knobs between the flat hp dict and the pufferl config sections. The server-as-sim driver lives in
+`rotmg_rl.trainer.sweep`; this module owns only the shared search-space definition.
 """
 
 from __future__ import annotations
-
-import argparse
-import pathlib
-import sys
-import time
-from copy import deepcopy
-
-import pufferlib.sweep  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
-from pufferlib import pufferl  # ty: ignore[unresolved-import]  pufferlib is pip-installed only on the GPU box
-
-from rotmg_rl.schedule import LADDER_EPISODES, N_SNAKES_MAX
 
 # Swept hyperparameters, by the pufferl-config section they live in. ramp_frac is schedule-only
 # (PuffeRL ignores it; train_continuous reads it). Every key here is verified to be read by 4.0
@@ -92,101 +79,3 @@ def build_sweep_config(metric: str = "curriculum_depth") -> dict:
             "rew_step": _space("uniform", -0.003, 0.0, -0.001),
         },
     }
-
-
-def run_sweep(
-    num_envs, sweep_trials, trial_steps, sweep_boss_hp, eval_episodes, n_snakes_max, out, ladder_episodes=LADDER_EPISODES
-) -> dict | None:
-    """Protein sweep maximizing CURRICULUM DEPTH -- how far up the difficulty ladder the policy clears
-    (eval'd every eval_every steps -> the observed cost-aware uptime trajectory). Depth gives gradient on
-    the authored map where the d=1 clear rate is 0 for every config at a sweep budget. The objective is
-    purely clear-based (per-rung clear rate only); the reward cocktail stays a search variable Protein
-    tunes to maximize it. Returns the best hyperparameter dict (None if every trial failed)."""
-    from rotmg_rl.training import train_continuous  # deferred: training imports this module at top
-
-    args = pufferl.load_config("dungeon")
-    args["vec"]["total_agents"] = num_envs
-    args["vec"]["num_buffers"] = 1
-    args["train"]["ramp_frac"] = 0.6  # schedule-only knob (not an ini key); seed it so trial 1 (defaults) carries it through observe
-    sweep_config = build_sweep_config()
-    method = sweep_config.pop("method")
-    sweep_obj = getattr(pufferlib.sweep, method)(sweep_config)
-    eval_every = max(1, trial_steps // 5)
-
-    best = {"depth": -1.0, "hp": None}
-    for i in range(sweep_trials):
-        if i > 0:  # the first trial uses the config defaults; Protein suggests thereafter
-            sweep_obj.suggest(args)
-        hp = _hparams_from_args(args)
-        print(f"\n=== TRIAL {i + 1}/{sweep_trials} === { {k: round(v, 6) for k, v in hp.items()} }", flush=True)
-
-        trial = deepcopy(args)
-        trial["train"]["total_timesteps"] = trial_steps
-        trial["env"]["boss_hp_max"] = sweep_boss_hp
-        t0 = time.time()
-        try:
-            trainer, _, evals = train_continuous(
-                trial,
-                trial_steps,
-                hp["ramp_frac"],
-                hp["rew_approach"],
-                n_snakes_max,
-                out,
-                use_wandb=False,
-                eval_every=eval_every,
-                eval_episodes=eval_episodes,
-                ladder_episodes=ladder_episodes,
-                boss_hp=sweep_boss_hp,
-            )
-            trainer.close()
-        except Exception as exc:
-            print(f"TRIAL {i + 1} FAILED: {exc}", flush=True)
-            sweep_obj.observe(args, 0.0, max(time.time() - t0, 1.0), is_failure=True)
-            continue
-
-        if not evals:
-            sweep_obj.observe(args, 0.0, max(time.time() - t0, 1.0), is_failure=True)
-            continue
-        peak = max(e["depth"] for e in evals)
-        print(
-            f"TRIAL {i + 1}: depth final={evals[-1]['depth']:.3f} peak={peak:.3f} (d=1 clear final={evals[-1]['clear_d1']:.3f})",
-            flush=True,
-        )
-        for e in evals:  # cost-aware trajectory: curriculum depth at uptime e['uptime'], cost in timesteps
-            args["train"]["total_timesteps"] = e["step"]
-            sweep_obj.observe(args, float(e["depth"]), float(e["uptime"]))
-        args["train"]["total_timesteps"] = trial_steps
-        if peak > best["depth"]:
-            best = {"depth": peak, "hp": hp}
-            print(f"  >> new best curriculum depth {peak:.3f}", flush=True)
-
-    print(f"\n==== SWEEP DONE. best curriculum depth (boss_hp={sweep_boss_hp:g}): {best['depth']:.3f} ====", flush=True)
-    print(f"==== BEST CONFIG: {best['hp']} ====", flush=True)
-    return best["hp"]
-
-
-def main() -> None:
-    p = argparse.ArgumentParser(description="Protein sweep only (no full run). For the one-command flow use train.py.")
-    p.add_argument("--sweep-trials", type=int, default=16)
-    p.add_argument("--trial-steps", type=int, default=35_000_000)
-    p.add_argument("--num-envs", type=int, default=1024)
-    p.add_argument("--sweep-boss-hp", type=float, default=7500.0)
-    p.add_argument("--eval-episodes", type=int, default=24)
-    p.add_argument("--n-snakes-max", type=int, default=N_SNAKES_MAX)
-    p.add_argument("--out-dir", default="checkpoints/sweep")
-    a = p.parse_args()
-    repo = pathlib.Path(__file__).resolve().parents[2]
-    sys.argv = [sys.argv[0]]  # keep pufferl.load_config's argparse out of our args
-
-    out = repo / a.out_dir
-    out.mkdir(parents=True, exist_ok=True)
-    best = run_sweep(a.num_envs, a.sweep_trials, a.trial_steps, a.sweep_boss_hp, a.eval_episodes, a.n_snakes_max, out)
-    print(
-        f"\n== BEST CONFIG: {best} ==\n   run it full: python3 train.py --wandb --no-sweep "
-        + " ".join(f"--{k.replace('_', '-')} {v}" for k, v in (best or {}).items()),
-        flush=True,
-    )
-
-
-if __name__ == "__main__":
-    main()

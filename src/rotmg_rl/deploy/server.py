@@ -22,7 +22,7 @@ import json
 import signal
 import sys
 
-from rotmg_rl.deploy.obs import RealObsBuilder, action_to_intent
+from rotmg_rl.obs import RealObsBuilder, action_to_intent
 from rotmg_rl.deploy.policy import PolicyRunner
 
 

@@ -12,6 +12,15 @@ dependencies = [
     "imageio-ffmpeg>=0.5",
 ]
 
+[project.scripts]
+rotmg-train = "rotmg_rl.trainer.train:main"
+rotmg-curriculum = "rotmg_rl.trainer.curriculum:main"
+rotmg-longrun = "rotmg_rl.trainer.longrun:main"
+rotmg-eval = "rotmg_rl.trainer.eval:main"
+rotmg-trial = "rotmg_rl.trainer.trial:main"
+rotmg-sweep = "rotmg_rl.trainer.sweep:main"
+rotmg-proof = "rotmg_rl.trainer.proof:main"
+
 [dependency-groups]
 dev = ["pytest>=8.0"]
 

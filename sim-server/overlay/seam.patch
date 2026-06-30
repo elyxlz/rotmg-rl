@@ -1,0 +1,585 @@
+--- a/WorldServer/core/GameServer.cs
++++ b/WorldServer/core/GameServer.cs
+@@ -119,6 +119,13 @@
+             MerchantLists.Initialize(this);
+             WorldManager.Initialize();
+             InterServerManager.Initialize();
++
++            // THROWAWAY sim-mode harness (no-op unless SIM_UNCAPPED=1).
++            WorldServer.core.worlds.SimRunner.Start(this);
++            // THROWAWAY step-on-command lockstep controller (no-op unless SIM_STEP_DRIVEN=1).
++            WorldServer.core.worlds.SimStepGate.Start();
++            // THROWAWAY pure-shm futex lockstep controller (no-op unless SIM_SHM_BARRIER=1).
++            WorldServer.core.worlds.SimShmBarrier.Start();
+             ChatManager.Initialize();
+             ConnectionListener.Initialize();
+             MarketSweeper.Start();
+--- a/WorldServer/core/objects/Enemy.cs
++++ b/WorldServer/core/objects/Enemy.cs
+@@ -35,7 +35,18 @@
+         public bool IsEpic { get; set; }
+         public bool IsLegendary { get; set; }
+         public bool IsRare { get; set; }
+-        
++
++        // SIM_RNG_SEED proof: the enemy-classification rolls (rarity + size) use
++        // Random.Shared, which is seeded from process entropy and so shifts the
++        // whole fight between processes. In sim proof mode route them through a
++        // thread-static SEEDED RNG so the fight is reproducible run-to-run; the
++        // stock (training/live) path stays on Random.Shared, unchanged.
++        [ThreadStatic]
++        private static Random _simRand;
++        private static Random ClasifyRng => WorldServer.core.worlds.SimMode.RngSeeded
++            ? (_simRand ??= new Random(WorldServer.core.worlds.SimMode.RngSeed + 2))
++            : Random.Shared;
++
+         public Enemy(GameServer manager, ushort objType)
+             : base(manager, objType)
+         {
+@@ -78,10 +89,10 @@
+ 
+         public void ClasifyEnemy()
+         {
+-            var chance = Random.Shared.NextDouble();
++            var chance = ClasifyRng.NextDouble();
+             if (chance < 0.2)
+             {
+-                var type = Random.Shared.Next(0, 3);
++                var type = ClasifyRng.Next(0, 3);
+                 switch (type)
+                 {
+                     case 2:
+@@ -118,7 +129,7 @@
+             {
+                 IsLegendary = true;
+ 
+-                Size = Size <= 0 ? Size : Random.Shared.Next(Size + 200, Size + 300);
++                Size = Size <= 0 ? Size : ClasifyRng.Next(Size + 200, Size + 300);
+ 
+                 MaxHealth *= 2;
+                 Health = MaxHealth;
+@@ -129,7 +140,7 @@
+             {
+                 IsEpic = true;
+ 
+-                Size = Size <= 0 ? Size : Random.Shared.Next(Size + 100, Size + 200);
++                Size = Size <= 0 ? Size : ClasifyRng.Next(Size + 100, Size + 200);
+ 
+                 MaxHealth = (int)Math.Round(MaxHealth * 1.5, 0);
+                 Health = MaxHealth;
+@@ -140,7 +151,7 @@
+             {
+                 IsRare = true;
+ 
+-                Size = Size <= 0 ? Size : Random.Shared.Next(Size, Size + 100);
++                Size = Size <= 0 ? Size : ClasifyRng.Next(Size, Size + 100);
+ 
+                 MaxHealth = (int)Math.Round(MaxHealth * 1.25, 0);
+                 Defense += 3;
+--- a/WorldServer/core/objects/Entity.cs
++++ b/WorldServer/core/objects/Entity.cs
+@@ -287,7 +287,7 @@
+         public void Move(float x, float y)
+         {
+             if (World != null && !(this is Pet) && (!(this is StaticObject) || (this as StaticObject).Hittestable))
+-                (this is Enemy || this is StaticObject && !(this is Decoy) ? World.EnemiesCollision : World.PlayersCollision).Move(this, x, y);
++                (this is Enemy || this is StaticObject && !(this is Decoy) && !(this is SimProbe) && !(this is SimAgent) ? World.EnemiesCollision : World.PlayersCollision).Move(this, x, y);
+ 
+             var prevX = X;
+             var prevY = Y;
+--- a/WorldServer/core/worlds/census/CollisionMap.cs
++++ b/WorldServer/core/worlds/census/CollisionMap.cs
+@@ -19,6 +19,14 @@
+         private int h;
+         private int w;
+ 
++        // Reused result set for GetActiveChunks: the consumer iterates it once per
++        // tick and never retains it, so a per-map buffer (cleared, not reallocated)
++        // removes a HashSet allocation per world per tick. Insertion order is
++        // identical to the old freshly-allocated set (same keys added in the same
++        // grid-scan sequence), so the enemy Tick order -- and thus the shared
++        // thread-static RNG draw sequence -- is byte-for-byte unchanged.
++        private readonly HashSet<T> _activeBuffer = new HashSet<T>();
++
+         public CollisionMap(byte type, int w, int h)
+         {
+             this.type = type;
+@@ -35,18 +43,21 @@
+             if (from.w != w || from.h != h)
+                 throw new ArgumentException("from");
+ 
+-            var ret = new HashSet<T>();
++            var ret = _activeBuffer;
++            ret.Clear();
+ 
++            var fromChunks = from.chunks;
+             for (var y = 0; y < cH; y++)
+                 for (var x = 0; x < cW; x++)
+-                    if (from.chunks[x, y] != null)
++                    if (fromChunks[x, y] != null)
+                     {
+-                        for (var i = -ACTIVE_RADIUS; i <= ACTIVE_RADIUS; i++)
+-                            for (var j = -ACTIVE_RADIUS; j <= ACTIVE_RADIUS; j++)
++                        var iLo = Math.Max(-ACTIVE_RADIUS, -y);
++                        var iHi = Math.Min(ACTIVE_RADIUS, cH - 1 - y);
++                        var jLo = Math.Max(-ACTIVE_RADIUS, -x);
++                        var jHi = Math.Min(ACTIVE_RADIUS, cW - 1 - x);
++                        for (var i = iLo; i <= iHi; i++)
++                            for (var j = jLo; j <= jHi; j++)
+                             {
+-                                if (x + j < 0 || x + j >= cW || y + i < 0 || y + i >= cH)
+-                                    continue;
+-
+                                 var node = chunks[x + j, y + i];
+                                 while (node != null)
+                                 {
+--- a/WorldServer/core/worlds/RootWorldThread.cs
++++ b/WorldServer/core/worlds/RootWorldThread.cs
+@@ -1,6 +1,7 @@
+-﻿using System;
++using System;
+ using System.Collections.Generic;
+ using System.Diagnostics;
++using System.IO;
+ using System.Threading;
+ using System.Threading.Tasks;
+ 
+@@ -8,7 +9,7 @@
+ {
+     public sealed class RootWorldThread
+     {
+-        public const int TICK_TIME_MS = 100; // set this to 200 for 5tps 50 for 20 and 100 for 10 tps, never touch the deltatime value 
++        public const int TICK_TIME_MS = 100; // set this to 200 for 5tps 50 for 20 and 100 for 10 tps, never touch the deltatime value
+ 
+         private readonly WorldManager WorldManager;
+         private World World;
+@@ -24,6 +25,22 @@
+ 
+         private void Run()
+         {
++            if (SimMode.Uncapped)
++            {
++                RunUncapped();
++                return;
++            }
++            RunRealtime();
++        }
++
++        // Stock real-time loop: wall-clock gated to TICK_TIME_MS (10 TPS), sleeps
++        // when the world has no players. Mechanics unchanged from the original;
++        // the only addition is the (harness-gated) measurement hook, which runs
++        // exactly once per logical Update so the real-time timeline is comparable
++        // to the fixed-dt one. The harness is the measurement reference, not a
++        // gameplay change.
++        private void RunRealtime()
++        {
+             Task.Factory.StartNew(() =>
+             {
+                 var watch = Stopwatch.StartNew();
+@@ -35,6 +52,10 @@
+ 
+                 var realmTime = new TickTime();
+ 
++                SimHarness harness = null;
++                if (SimMode.Harness)
++                    harness = SimRunner.AttachHarness(World);
++
+                 var elapsed = 0L;
+                 while (!Stopped)
+                 {
+@@ -63,6 +84,7 @@
+                             Console.WriteLine($"[{World.IdName} {World.Id}] Tick: {e.StackTrace}");
+                         }
+ 
++                        harness?.OnTick();
+                         elapsed = 0;
+                     }
+ 
+@@ -73,6 +95,136 @@
+                 WorldManager.RemoveWorld(World);
+ 
+             }, TaskCreationOptions.LongRunning);
++        }
++
++        // THROWAWAY sim mode: runs as fast as the CPU allows (no wall-clock gate,
++        // no empty-world sleep) and feeds a CONSTANT synthetic ElapsedMsDelta per
++        // tick. Because every dt-scaled mechanic (movement via BehaviourTickTime =
++        // DeltaTime*5, projectile cooldowns, TimedTransitions, grenade fuses) keys
++        // off ElapsedMsDelta, a constant SIM_FIXED_DT_MS makes each iteration
++        // advance exactly one logical step, decoupled from real time. At 100ms
++        // this reproduces the real-time 10 TPS step, just without waiting for it.
++        private void RunUncapped()
++        {
++            Task.Factory.StartNew(() =>
++            {
++                var realmTime = new TickTime();
++                var dt = SimMode.FixedDtMs;
++
++                // In-process RL loop: the obs/action/reward all run on THIS world
++                // thread around World.Update, with no nrelay/packets/redis. Only the
++                // Snake Pit world gets one (SimRunner only creates Snake Pit worlds).
++                // It OWNS the agent + boss-HP pin, so the measurement SimHarness
++                // (its stationary probe + scripted CSV damage) is skipped in-proc to
++                // avoid two drivers fighting over the same world.
++                SimRlLoop rl = null;
++                var isPit = World.IdName == "Snake Pit";
++
++                // Server-as-sim (SIM_SHM=1): the in-process RL loop is driven by the
++                // PufferLib C-shim over shared memory AND gated by the redis lockstep
++                // (read action <- shm, apply, advance one gated tick, write obs/reward/
++                // done -> shm, ack). This is the COMBINED mode: in-proc + step-driven.
++                // Each Snake Pit world claims one shm agent slot (0..N-1).
++                var shm = SimShmBridge.Enabled && isPit;
++                // Stand-alone in-proc benchmark (SIM_INPROC=1, no shm): the loop owns
++                // its own clock + a stub policy, never gated.
++                var inProc = (SimMode.InProc && isPit) || shm;
++                if (inProc)
++                    rl = new SimRlLoop(World, shm ? SimRunner.NextShmSlot() : -1);
++
++                SimHarness harness = null;
++                if (SimMode.Harness && !inProc)
++                    harness = SimRunner.AttachHarness(World);
++                var tickStopwatch = inProc ? new Stopwatch() : null;
++
++                // Lockstep: when SIM_STEP_DRIVEN=1 this world joins the step gate and
++                // advances exactly one tick per external command. The stand-alone
++                // in-proc benchmark owns its own clock (never gated); the shm server-as-
++                // sim loop IS gated (the C-shim drives the ticks).
++                // Lockstep can run over the redis gate (SimStepGate) OR the pure-shm
++                // futex barrier (SimShmBarrier, SIM_SHM_BARRIER=1). The barrier wins when
++                // set; the per-world WaitForGo/SignalDone rendezvous is identical either way.
++                var useBarrier = SimShmBarrier.Enabled;
++                // ASYNC overlap: the shm pit free-runs (no barrier rendezvous) so the worlds
++                // and the GPU policy overlap instead of taking strict lockstep turns. The
++                // per-world action/obs sequence handshake (SimRlLoop, SIM_ASYNC) keeps each
++                // transition consistent under the overlap. With SIM_ASYNC unset the strict
++                // futex barrier path below is UNCHANGED.
++                var asyncFreeRun = SimMode.Async && shm;
++                var stepDriven = (SimStepGate.Enabled || useBarrier) && (!inProc || shm) && !asyncFreeRun;
++                var barrierGen = 0; // per-world last-served barrier generation
++                if (stepDriven)
++                {
++                    if (useBarrier) barrierGen = SimShmBarrier.Register(World.Id);
++                    else SimStepGate.Register(World.Id);
++                }
++                if (asyncFreeRun)
++                    Console.WriteLine($"[SIM-ASYNC] world={World.Id} FREE-RUN (no barrier; overlap with the GPU policy)");
++
++                while (!Stopped)
++                {
++                    if (stepDriven)
++                    {
++                        if (useBarrier) SimShmBarrier.WaitForGo(World.Id, ref barrierGen);
++                        else SimStepGate.WaitForGo(World.Id);
++                    }
++                    if (asyncFreeRun)
++                        rl.WaitForAction();
++
++                    World.ProcessPlayerIO(ref realmTime);
++
++                    realmTime.TickCount++;
++                    realmTime.ElapsedMsDelta = dt;
++                    realmTime.TotalElapsedMs += dt;
++
++                    // In-proc: read obs + apply this tick's action BEFORE the world
++                    // advances (so action and obs align to the same tick).
++                    rl?.PreTick();
++
++                    try
++                    {
++                        tickStopwatch?.Restart();
++                        var ended = World.Update(ref realmTime);
++                        if (tickStopwatch != null)
++                            rl.AddTickTime(tickStopwatch.ElapsedTicks);
++                        if (ended)
++                        {
++                            Stopped = true;
++                            if (stepDriven)
++                            {
++                                if (useBarrier) SimShmBarrier.SignalDone(World.Id);
++                                else SimStepGate.SignalDone(World.Id);
++                            }
++                            break;
++                        }
++                    }
++                    catch (Exception e)
++                    {
++                        Console.WriteLine($"[{World.IdName} {World.Id}] Tick: {e.StackTrace}");
++                    }
++
++                    harness?.OnTick();
++
++                    // In-proc: compute reward/done from the post-tick live objects.
++                    rl?.PostTick(ref realmTime);
++                    if (rl != null && rl.Done)
++                        Stopped = true;
++
++                    if (stepDriven)
++                    {
++                        if (useBarrier) SimShmBarrier.SignalDone(World.Id);
++                        else SimStepGate.SignalDone(World.Id);
++                    }
++                }
++
++                if (stepDriven)
++                {
++                    if (useBarrier) SimShmBarrier.Unregister(World.Id);
++                    else SimStepGate.Unregister(World.Id);
++                }
++                WorldManager.RemoveWorld(World);
++
++            }, TaskCreationOptions.LongRunning);
+         }
+ 
+         public void Stop()
+--- a/WorldServer/core/worlds/WorldBranch.cs
++++ b/WorldServer/core/worlds/WorldBranch.cs
+@@ -7,6 +7,10 @@
+     {
+         private readonly World World;
+         private readonly Dictionary<int, World> SubWorlds = new Dictionary<int, World>();
++        // THROWAWAY sim harness per Snake Pit sub-world (lockstep proof). Branch
++        // worlds (the agent's portal-created pit) tick here, not in a RootWorldThread,
++        // so the probe + HP-pin + boss-coord + CSV harness must be driven from here.
++        private readonly Dictionary<int, SimHarness> SubHarness = new Dictionary<int, SimHarness>();
+ 
+         public WorldBranch(World world)
+         {
+@@ -34,17 +38,36 @@
+         {
+             var toRemove = new List<World>();
+             foreach (var world in SubWorlds.Values)
++            {
+                 if (world.Update(ref time))
++                {
+                     toRemove.Add(world);
++                    continue;
++                }
++                if (SimMode.Harness)
++                    DriveHarness(world);
++            }
+ 
+             foreach (var world in toRemove)
+             {
+                 world.ParentWorld = null;
++                _ = SubHarness.Remove(world.Id);
+                 World.GameServer.WorldManager.RemoveWorld(world);
+                 _ = SubWorlds.Remove(world.Id);
+             }
+             toRemove.Clear();
+         }
++
++        // Lazily attach + tick the sim harness for a Snake Pit sub-world.
++        private void DriveHarness(World world)
++        {
++            if (!SubHarness.TryGetValue(world.Id, out var harness))
++            {
++                harness = SimRunner.AttachHarness(world);
++                SubHarness[world.Id] = harness; // may be null for non-Snake-Pit; cached so we only probe once
++            }
++            harness?.OnTick();
++        }
+     }
+ 
+ }
+--- a/WorldServer/core/worlds/World.cs
++++ b/WorldServer/core/worlds/World.cs
+@@ -2,6 +2,7 @@
+ using Shared.database;
+ using Shared.resources;
+ using System;
++using System.Diagnostics;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+@@ -68,6 +69,14 @@
+ 
+         private readonly List<WorldTimer> Timers = new List<WorldTimer>();
+ 
++        // THROWAWAY profiling (SIM_WORLD_PROF=1): per-phase ms accumulators for the
++        // per-tick UpdateLogic breakdown. Static so a single-world run reports clean.
++        private static readonly bool WorldProf = System.Environment.GetEnvironmentVariable("SIM_WORLD_PROF") == "1";
++        private long _pPlayers, _pSellable, _pStatic, _pPortal, _pContainer, _pPet, _pEnemy, _pActive, _pTimers, _pAddRem, _pState;
++        private long _pTicks, _pEnemyN;
++        private static readonly Stopwatch _pSw = Stopwatch.StartNew();
++        private static readonly double _pToMs = 1000.0 / Stopwatch.Frequency;
++
+         public WorldBranch WorldBranch { get; private set; }
+         public World ParentWorld { get; set; }
+ 
+@@ -152,6 +161,16 @@
+ 
+         public void BroadcastEnemyShootIfVisible(EnemyShootMessage enemyShoot, Entity host)
+         {
++            // THROWAWAY in-proc obs + collision: capture the burst directly here so the
++            // SimObsBuilder's EBULLET channels reconstruct enemy bullets from the SAME
++            // firing bursts the nrelay obs path reads from the packet stream, AND so
++            // SimProjectiles can step + collide them against the agent (the agent loses
++            // HP to undodged bullets). Fires in BOTH the in-proc benchmark (SIM_INPROC)
++            // and the server-as-sim training path (SIM_SHM) -- == any sim-harness world.
++            // No-op in stock builds.
++            if (SimMode.Harness)
++                SimEnemyShoots.Record(Id, enemyShoot);
++
+             foreach (var player in Players.Values)
+                 if (player.SqDistTo(host) < CULL_RANGE * CULL_RANGE)
+                 {
+@@ -366,7 +385,7 @@
+             else if (entity is StaticObject)
+             {
+                 StaticObjects.TryAdd(entity.Id, entity as StaticObject);
+-                if (entity is Decoy)
++                if (entity is Decoy || entity is SimProbe || entity is SimAgent)
+                     PlayersCollision.Insert(entity, entity.X, entity.Y);
+                 else
+                     EnemiesCollision.Insert(entity, entity.X, entity.Y);
+@@ -408,7 +427,7 @@
+             else if (entity is StaticObject)
+             {
+                 StaticObjects.Remove(entity.Id);
+-                if (entity is Decoy)
++                if (entity is Decoy || entity is SimProbe || entity is SimAgent)
+                     PlayersCollision.Remove(entity);
+                 else
+                     EnemiesCollision.Remove(entity);
+@@ -533,6 +552,55 @@
+ 
+         protected virtual void UpdateLogic(ref TickTime time)
+         {
++            if (!WorldProf) { UpdateLogicCore(ref time); return; }
++            long t0 = _pSw.ElapsedTicks;
++            foreach (var player in Players.Values) { player.Tick(ref time); if (player.Dead) EntitiesToRemove.Add(player); }
++            long t1 = _pSw.ElapsedTicks; _pPlayers += t1 - t0;
++            foreach (var sellable in SellableObjects.Values) { sellable.Tick(ref time); if (sellable.Dead) EntitiesToRemove.Add(sellable); }
++            long t2 = _pSw.ElapsedTicks; _pSellable += t2 - t1;
++            foreach (var stat in StaticObjects.Values) { stat.Tick(ref time); if (stat.Dead) EntitiesToRemove.Add(stat); }
++            long t3 = _pSw.ElapsedTicks; _pStatic += t3 - t2;
++            foreach (var portal in Portals.Values) { portal.Tick(ref time); if (portal.Dead) EntitiesToRemove.Add(portal); }
++            long t4 = _pSw.ElapsedTicks; _pPortal += t4 - t3;
++            foreach (var container in Containers.Values) { container.Tick(ref time); if (container.Dead) EntitiesToRemove.Add(container); }
++            long t5 = _pSw.ElapsedTicks; _pContainer += t5 - t4;
++            foreach (var pet in Pets.Values) { pet.Tick(ref time); if (pet.Dead) EntitiesToRemove.Add(pet); }
++            long t6 = _pSw.ElapsedTicks; _pPet += t6 - t5;
++            int enemyN = 0;
++            if (EnemiesCollision != null)
++            {
++                var active = EnemiesCollision.GetActiveChunks(PlayersCollision);
++                long ta = _pSw.ElapsedTicks; _pActive += ta - t6;
++                foreach (var entity in active) { enemyN++; entity.Tick(ref time); if (entity.Dead) EntitiesToRemove.Add(entity); }
++                _pEnemy += _pSw.ElapsedTicks - ta;
++            }
++            else
++            {
++                foreach (var entity in Enemies.Values) { enemyN++; entity.Tick(ref time); if (entity.Dead) EntitiesToRemove.Add(entity); }
++                _pEnemy += _pSw.ElapsedTicks - t6;
++            }
++            long t7 = _pSw.ElapsedTicks;
++            for (var i = Timers.Count - 1; i >= 0; i--)
++                try { if (Timers[i].Tick(this, ref time)) Timers.RemoveAt(i); }
++                catch (Exception e) { StaticLogger.Instance.Error($"{e.Message}\n{e.StackTrace}"); Timers.RemoveAt(i); }
++            long t8 = _pSw.ElapsedTicks; _pTimers += t8 - t7;
++            foreach (var entity in EntitiesToAdd) AddToWorld(entity);
++            EntitiesToAdd.Clear();
++            foreach (var removed in EntitiesToRemove) RemoveFromWorld(removed);
++            EntitiesToRemove.Clear();
++            long t9 = _pSw.ElapsedTicks; _pAddRem += t9 - t8;
++            foreach (var player in Players.Values) player.UpdateState(time.ElapsedMsDelta);
++            _pState += _pSw.ElapsedTicks - t9;
++            _pTicks++; _pEnemyN = enemyN;
++            if (IdName == "Snake Pit" && _pTicks % 1000 == 0)
++            {
++                double d = _pTicks;
++                Console.WriteLine($"[WORLD-PROF] ticks={_pTicks} enemies={_pEnemyN} | players={_pPlayers*_pToMs/d:F4} static={_pStatic*_pToMs/d:F4} active={_pActive*_pToMs/d:F4} enemyTick={_pEnemy*_pToMs/d:F4} timers={_pTimers*_pToMs/d:F4} addrem={_pAddRem*_pToMs/d:F4} state={_pState*_pToMs/d:F4} sellable={_pSellable*_pToMs/d:F4} portal={_pPortal*_pToMs/d:F4} container={_pContainer*_pToMs/d:F4} pet={_pPet*_pToMs/d:F4} (ms/tick)");
++            }
++        }
++
++        private void UpdateLogicCore(ref TickTime time)
++        {
+             foreach (var player in Players.Values)
+             {
+                 player.Tick(ref time);
+@@ -627,6 +695,12 @@
+ 
+         private bool IsPastLifetime(ref TickTime time)
+         {
++            // THROWAWAY sim mode: measured Snake Pit worlds are kept by a SimProbe
++            // (not a real Player), so the empty-world lifetime would close them at
++            // logical-tick 600. Keep them alive for the duration of measurement.
++            if (SimMode.Harness && IdName == "Snake Pit")
++                return false;
++
+             if (WorldBranch.HasBranches())
+                 return false;
+ 
+--- a/WorldServer/logic/Behavior.cs
++++ b/WorldServer/logic/Behavior.cs
+@@ -14,7 +14,11 @@
+ 
+         [ThreadStatic]
+         private static Random rand;
+-        protected static Random Random => rand ?? (rand = new Random());
++        // SIM_RNG_SEED proof: seed the per-thread RNG deterministically so the fight
++        // is reproducible (see SimMode.RngSeed). Stock path stays an unseeded Random.
++        protected static Random Random => rand ?? (rand = WorldServer.core.worlds.SimMode.RngSeeded
++            ? new Random(WorldServer.core.worlds.SimMode.RngSeed)
++            : new Random());
+ 
+         public static ushort GetObjType(string id)
+         {
+--- a/WorldServer/logic/behaviors/Grenade.cs
++++ b/WorldServer/logic/behaviors/Grenade.cs
+@@ -39,7 +39,6 @@
+ 
+         protected override void TickCore(Entity host, TickTime time, ref object state)
+         {
+-            var pkts = new List<OutgoingMessage>();
+             var cool = (int)state;
+ 
+             if (cool <= 0)
+--- a/WorldServer/logic/Transition.cs
++++ b/WorldServer/logic/Transition.cs
+@@ -12,7 +12,11 @@
+ 
+         [ThreadStatic]
+         private static Random _rand;
+-        protected static Random Random => _rand ??= new Random();
++        // SIM_RNG_SEED proof: seed deterministically so transitions are reproducible
++        // run-to-run (see SimMode.RngSeed). Stock path stays an unseeded Random.
++        protected static Random Random => _rand ??= SimMode.RngSeeded
++            ? new Random(SimMode.RngSeed + 1)
++            : new Random();
+ 
+         public Transition(params string[] targetStates)
+         {
+--- a/WorldServer/utils/EntityUtils.cs
++++ b/WorldServer/utils/EntityUtils.cs
+@@ -368,12 +368,23 @@
+ 
+         public static Entity GetNearestEntity(this Entity entity, double dist, ushort? objType, bool seeInvis = false)   //Null for entity
+         {
+-            var entities = entity.GetNearestEntities(dist, objType, seeInvis).ToArray();
+-
+-            if (entities.Length <= 0)
+-                return null;
+-
+-            return entities.Aggregate((curmin, x) => curmin == null || x.SqDistTo(entity) < curmin.SqDistTo(entity) ? x : curmin);
++            // Allocation-free min over the SAME candidate sequence GetNearestEntities
++            // yields (identical filter + order), folding the nearest-by-SqDist inline.
++            // Replaces ToArray()+Aggregate (one array alloc + two SqDistTo per element).
++            // Strict '<' keeps the first-seen winner on a tie, exactly as Aggregate did,
++            // so the chosen target -- and thus all downstream behavior -- is unchanged.
++            Entity ret = null;
++            var bestSq = double.MaxValue;
++            foreach (var candidate in entity.GetNearestEntities(dist, objType, seeInvis))
++            {
++                var sq = candidate.SqDistTo(entity);
++                if (sq < bestSq)
++                {
++                    bestSq = sq;
++                    ret = candidate;
++                }
++            }
++            return ret;
+         }
+ 
+         public static Entity GetNearestEntity(this Entity entity, double dist, bool players, Predicate<Entity> predicate = null)

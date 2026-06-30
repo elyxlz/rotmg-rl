@@ -1,0 +1,9 @@
+# Upstream pin for the server-as-sim overlay
+# Verified by blob-hash match (962/984 exact path+content) + clean dotnet build (.NET 8.0.422)
+UPSTREAM_REPO=https://github.com/Honeybee5151/betterSkillys_SERVER_BANNERSYSTEM
+UPSTREAM_BRANCH=master
+UPSTREAM_COMMIT=cf125dd8cfc39667e4f3bb4f8baab85ef345ca9d
+# Lineage: betterSkillys network -> fork of Slendergo/TKR-Source (TK-Reborn). .NET 8 / net8.0.
+# NOTE: the fork imported from a now-deleted betterSkillys variant (reported shilohdynasty7142/runes02);
+# Honeybee5151 is the closest surviving public mirror. Layout differs only by a source/ prefix
+# (fork: source/WorldServer/...  upstream: WorldServer/...). Apply overlay with paths relative to repo root (-p1).

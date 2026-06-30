@@ -1,72 +1,114 @@
 # rotmg-rl
 
-Cold-start reinforcement learning agent that clears one ROTMG (Realm of the Mad God)
-dungeon — **Snake Pit** — trained entirely in a fast custom simulator, then deployed on the
-real game.
+A reinforcement-learning agent that learns, from scratch, to clear a **real Snake Pit dungeon on a live RotMG server** — walk in through the portal, navigate the maze, dodge a swarm at zero defense, and kill the boss — and records the whole thing as one continuous, cheat-free, first-person video.
 
-- **No supervised data / no behavioral cloning.** Pure cold-start RL.
-- **PufferLib 4.0** (recurrent CNN-LSTM PPO) over a custom **C** simulator of the dungeon.
-- **Sim-to-real via a shared observation schema**: the policy only ever sees a world-agnostic
-  egocentric tensor, produced identically from the sim's ground truth and from the real game's
-  network packets, so a sim-trained policy can drive the real client.
+No scripted navigation, no aim-assist, no invincibility. The policy chooses every move, aim, shot, and ability itself, plays the real game client live against the real server, and survives only by playing well.
 
-See [`GOAL.md`](GOAL.md) for the autonomous build loop, [`PROGRESS.md`](PROGRESS.md) for the
-current state, and [`docs/snakepit-spec.md`](docs/snakepit-spec.md) +
-[`docs/real-game-analysis.md`](docs/real-game-analysis.md) for the env / real-game references.
+> **Result:** ~99% clear rate at the *real* fragile-Wizard difficulty (base HP, **0 defense**, real boss HP, spawn at the entrance), trained cold-start.
 
-## Layout
+---
 
-One flat stack:
+## The idea: the game *is* the simulator
+
+The hard part of RL-on-a-real-game is the sim-to-real gap: you build a fast simulator, train in it, and the policy falls apart on the real game because your sim got the physics subtly wrong.
+
+We delete the gap. Instead of reimplementing the dungeon, **we turn the real game server into the RL environment.** The actual betterSkillys C# `WorldServer` — the same code that runs the live game — is driven tick-by-tick by the trainer over shared memory. Real collision, real projectiles, real enemy AI, the real authored map. The policy trains against the exact dynamics it will face at deploy time.
+
+The one invariant tying training and deployment together is the **observation vector** — a 9807-float view of the world (a `7×31×31` egocentric grid + a `3×32×32` fog-of-war minimap + 8 scalars). It is produced *bit-for-bit identically* by the C# engine during training and by a passive packet parser at deploy time, so a policy that clears in the "sim" is playing the real game.
+
+---
+
+## Architecture
 
 ```
-_pufferlib/       # vendored PufferLib 4.0 (pinned, pruned); our env edited IN PLACE in ocean/dungeon/
-src/rotmg_rl/     # ALL Python logic, importable: training, sweep, eval, video, schedule, csim/, deploy/
-scripts/          # thin shell orchestration only: setup.sh (provision + build), box.sh (single run)
-train.py          # thin entrypoint -> rotmg_rl.training.main
-tests/            # CPU tier: spec-derived scenario tests + a fixed-seed golden tripwire
+                 ┌──────────────────────────── TRAINING ────────────────────────────┐
+   PufferLib PPO  ◄──── /dev/shm ────►  betterSkillys C# WorldServer (real engine)
+   (DungeonEncoder                      SimRlLoop: fixed-dt tick, real projectiles,
+    CNN + recurrent,                    geodesic spawn, the 9807-float obs
+    MultiDiscrete {move,aim,shoot,cast})
+                 └───────────────────────────────────────────────────────────────────┘
+
+                 ┌──────────────────────────── DEPLOY ──────────────────────────────┐
+   trained .pt ──►  policy  ──►  live RotMG client  ──►  real :2050 server
+                       ▲             │  (real input: WASD / mouse / space)
+                       │             ▼
+                 RealObsBuilder ◄── passive packet parse ◄── (same 9807-float obs)
+                       │
+                       └──►  ffmpeg POV recording ──►  clear.mp4
+                 └───────────────────────────────────────────────────────────────────┘
 ```
 
-`_pufferlib/ocean/dungeon/dungeon.h` is the **single source of the Snake Pit dynamics**. It compiles
-into PufferLib's `_C` backend for training and, via the standalone binding in `src/rotmg_rl/csim/`,
-into a numpy-only single-env wrapper for eval + POV rendering. See
-[`_pufferlib/README.md`](_pufferlib/README.md) for the vendored stack and build.
+- **`src/rotmg_rl/trainer/`** — the PPO core: the curriculum, the long run, eval ladders, the Protein sweep. One scalar `d ∈ [0,1]` ramps every difficulty knob jointly (HP, defense, boss HP, spawn distance) so the policy always faces slightly-harder-than-mastered.
+- **`sim-server/`** — the C# engine as an RL env, shipped as a **patch/overlay** on a pinned upstream betterSkillys (only our ~3500 lines of `Sim*.cs`, applied to a fresh checkout — nothing forked-and-buried). With no `SIM_*` env set the server is byte-identical stock.
+- **`src/rotmg_rl/obs.py`** — the obs vector, the single shared contract (its C# twin is `SimObsBuilder.cs`; `src/rotmg_rl/tools/verify_obs.py` proves they agree bit-for-bit).
+- **`deploy/`** — two ways to drive the live game: a headless packet bridge (`deploy/nrelay/`), and a no-root proxy + input-injection path (`deploy/proxy/` + `deploy/flash/`) that plays the *real Flash client* for an authentic recorded POV.
 
-## Usage
+See [`docs/design.md`](docs/design.md) for the shared-memory protocol, the curriculum, and the honest rough edges; [`docs/obs-schema.md`](docs/obs-schema.md) for the exact 9807-float layout.
 
-Training runs on a GPU box. **One command** does everything — a Protein (cost-aware Bayesian)
-hyperparameter sweep, then the full continuous-difficulty schedule with the winning config, as one
-process and one continuous wandb run:
+---
+
+## Reproduce
 
 ```bash
-python3 train.py --wandb              # sweep -> train the winner (~460M steps) -> checkpoints/curriculum/finish.pt
-python3 train.py --wandb --no-sweep   # skip the sweep; train the full schedule directly with the good defaults
+scripts/reproduce.sh   # the one-command path: setup → fetch+build the C# server → boot N worlds
+                       #   → train (d-ramp curriculum) → eval ladder → deploy live → record the clear
 ```
 
-The schedule is a single difficulty `d(t)` in `[0,1]` that cosine-ramps over `--ramp-frac` of training
-then holds at 1.0, driving spawn distance, threat density (snakes/grenades/minions), and boss intensity
-jointly so the policy always faces slightly-harder-than-mastered (no phase cliffs). `train.py`
-self-provisions on first run (`scripts/setup.sh` builds `.venv` + `build.sh dungeon` for the `_C`
-backend). `--dry-run` prints the plan; sweep knobs: `--sweep-trials`, `--trial-steps`,
-`--sweep-boss-hp`, `--full-steps`, `--eval-episodes`. For the sweep alone (find + print the best
-config, no full run): `python -m rotmg_rl.sweep`.
+Or run the stages individually:
 
 ```bash
-# TRUE per-episode clear rate (the >=80% deliverable) of a checkpoint
-.venv/bin/python -m rotmg_rl.eval --checkpoint checkpoints/curriculum/finish.pt \
-    --episodes 100 --boss-hp 7500 --n-snakes 40 --spawn-in-room-prob 0.0
-
-# Single configurable run + observability (curriculum iteration):
-./scripts/box.sh train --boss-hp 7500 --n-snakes 40 --spawn-in-room-prob 1.0   # defaults to --slowly (our CNN)
-./scripts/box.sh follow     # POV rollout videos -> wandb (background)
-./scripts/box.sh status     # procs + wandb URL + latest metrics
-./scripts/box.sh metrics    # latest per-episode (score) + per-step metrics
+scripts/setup.sh                       # python env (torch + PufferLib) + build the server_env C-shim into _C
+sim-server/fetch.sh                    # fetch pinned betterSkillys @ pin, apply the Sim overlay, dotnet build
+sim-server/run-server-sim.sh 32        # boot N=32 Snake Pit worlds (shm + futex barrier; isolated :2060)
+python -m rotmg_rl.trainer.longrun --agents 32 --steps 200000 --server-log logs/server.log  # train
+python -m rotmg_rl.trainer.eval --checkpoint checkpoints/longrun/best.pt --agents 32 --server-log logs/server.log  # ladder
 ```
 
-To follow training live, set `WANDB_API_KEY` (or `wandb login`) on the box.
-
-The CPU test tier (the C single-env path + scenario/golden tests) needs no GPU:
+Deploy + record (needs the live betterSkillys server + a built client; see [`deploy/README.md`](deploy/README.md)):
 
 ```bash
-uv run python -m rotmg_rl.csim.build   # compile the standalone eval binding
-uv run pytest tests/ -q
+( cd deploy/nrelay && npm install && npx tsc -p . && node start-bot.js )   # headless live-play
+deploy/record.sh                       # record the real-Flash-client POV of the clear
 ```
+
+Training reaches a near-perfect clear at the real difficulty in a few hours on a single 3090.
+
+---
+
+## Repo layout
+
+```
+src/rotmg_rl/
+  trainer/        # PPO core: train · curriculum · longrun · eval · trial · sweep · proof · difficulty · shm_config
+  obs.py config.py schedule.py   # the shared obs spine + curriculum schedule
+  deploy/         # policy runner + the live-play harness (server.py, policy.py, render.py)
+  tools/          # verify_obs / verify_motion / verify_dflow / verify_obs_async (executable fidelity proofs)
+sim-server/       # the C# engine-as-env: Sim*.cs overlay + overlay/seam.patch + pinned-upstream fetch.sh
+                  #   run-server-sim.sh + wServer.sim.json (the isolated sim launch)
+_pufferlib/       # vendored PufferLib 4.0 (the server_env Ocean env + DungeonEncoder), pinned
+deploy/           # nrelay bridge · no-root proxy + input injection · flash client · ffmpeg recorder (record.sh)
+docs/             # design.md · obs-schema.md · real-game-analysis.md · snakepit-spec.md
+proof/            # the committed learnability curve (server_proof_curve.csv + summary)
+```
+
+The `[project.scripts]` entry points (also runnable as `python -m rotmg_rl.trainer.<name>`):
+
+| command | module | what |
+|---|---|---|
+| `rotmg-train` | `rotmg_rl.trainer.train` | a single server-as-sim PPO run |
+| `rotmg-curriculum` | `rotmg_rl.trainer.curriculum` | the d-ramp curriculum run |
+| `rotmg-longrun` | `rotmg_rl.trainer.longrun` | the long curriculum run + periodic eval ladders + checkpoints |
+| `rotmg-eval` | `rotmg_rl.trainer.eval` | the eval ladder → curriculum depth |
+| `rotmg-trial` | `rotmg_rl.trainer.trial` | one sweep trial |
+| `rotmg-sweep` | `rotmg_rl.trainer.sweep` | the Protein hyperparameter sweep |
+| `rotmg-proof` | `rotmg_rl.trainer.proof` | the learnability proof harness (the curve in `proof/`) |
+
+## Contributing
+
+- `uv run pytest tests/` — fast, hermetic tests (no Docker, no GPU).
+- The obs vector is the spine: any change to it must keep `src/rotmg_rl/obs.py`, `sim-server/Sim/WorldServer/core/worlds/SimObsBuilder.cs`, and `docs/obs-schema.md` in lockstep, with `src/rotmg_rl/tools/verify_obs.py` green.
+- The shared-memory region layout is documented in exactly one place ([`docs/design.md`](docs/design.md)) and referenced by both the C-shim (`_pufferlib/ocean/server_env/server_env.h`) and `SimShmBridge.cs`.
+
+## The deliverable
+
+The north star is one continuous, unedited, first-person `.mp4` of the policy clearing a real Snake Pit on the live server with zero cheats — a disclosed AI demonstration in the AlphaStar / OpenAI Five tradition. The full integrity spec is in [`GOAL.md`](GOAL.md).

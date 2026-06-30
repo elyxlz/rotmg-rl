@@ -46,8 +46,8 @@ Code: `SimShmBarrier.cs` (C# controller + futex), `SimShmBridge.cs` (region + ct
 | piece | where | what |
 |---|---|---|
 | N-agent + shm bridge (C#) | `rotmg-sim-server` branch `sim/server-as-sim` | `SimShmBridge.cs` (mmap region + ctrl words), `SimShmBarrier.cs` (pure-shm futex lockstep), `SimStepGate.cs` (redis fallback), `SimRlLoop.cs` (shm-driven loop), `RootWorldThread.cs` + `SimRunner.cs` + `SimMode.cs` (combined `SIM_SHM` mode: in-proc + step-gated), one Snake Pit world per agent slot |
-| C-shim native env | `rotmg-rl` branch `sim/server-env` | `_pufferlib/ocean/server_env/{server_env.h,binding.c}` — passthrough `c_step`/`c_reset` (write actions→shm, advance one tick via the shm futex barrier or the redis gate, read obs/reward/done←shm), `config/server_env.ini` (reuses `DungeonEncoder`) |
-| training entry | `rotmg-rl` | `server_train.py` (same `PuffeRL` + `DungeonEncoder` CNN-LSTM, points at `server_env`), `verify_obs.py`, `verify_motion.py` |
+| C-shim native env | `_pufferlib/ocean/server_env/{server_env.h,binding.c}` | passthrough `c_step`/`c_reset` (write actions→shm, advance one tick via the shm futex barrier or the redis gate, read obs/reward/done←shm), `config/server_env.ini` (reuses `DungeonEncoder`) |
+| training entry | `src/rotmg_rl/trainer/` | `longrun.py` (curriculum d-ramp run), `eval.py` (the ladder), `curriculum.py`/`trial.py`/`sweep.py`/`proof.py` — the same `PuffeRL` + `DungeonEncoder` CNN-LSTM, pointed at `server_env`. Obs proofs: `src/rotmg_rl/tools/{verify_obs,verify_motion,verify_dflow}.py` |
 
 `N` is configured in ONE place: `--agents N` on the trainer == `SIM_WORLDS=N` on the server. The
 shm region is sized for N and the binding hard-fails on a header mismatch. `total_agents` in the
@@ -56,18 +56,19 @@ ini sizes everything (shm, N pits, encoder batch). `num_buffers` MUST be 1 (one 
 ## Launch a training run (GPU 1; never GPU 0 = the sweep)
 
 ```bash
-# 1. build the C-shim env into _C (replaces the dungeon _C; rebuild `./build.sh dungeon --float` to switch back)
-cd ~/rotmg-rl/_pufferlib && CUDA_HOME=/usr/local/cuda-12.4 NVCC_ARCH=sm_86 \
-  PATH="$HOME/rotmg-rl/.venv-shim:$HOME/rotmg-rl/.venv/bin:$CUDA_HOME/bin:$PATH" \
-  LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$(.venv/bin/python -c 'import nvidia.cudnn,os;print(os.path.join(nvidia.cudnn.__path__[0],"lib"))'):$(.venv/bin/python -c 'import nvidia.nccl,os;print(os.path.join(nvidia.nccl.__path__[0],"lib"))')" \
+# 1. build the C-shim env into _C (scripts/setup.sh already does this; shown here standalone)
+cd _pufferlib && CUDA_HOME=/usr/local/cuda-12.4 NVCC_ARCH=sm_86 \
+  PATH="../.venv-shim:../.venv/bin:$CUDA_HOME/bin:$PATH" \
+  LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$(../.venv/bin/python -c 'import nvidia.cudnn,os;print(os.path.join(nvidia.cudnn.__path__[0],"lib"))'):$(../.venv/bin/python -c 'import nvidia.nccl,os;print(os.path.join(nvidia.nccl.__path__[0],"lib"))')" \
   ./build.sh server_env --float
 
-# 2. start the C# server in server-as-sim mode (N worlds, shm + futex barrier). Isolated: port 2060,
-#    redis 6390. SIM_SHM_BARRIER defaults to 1 (pure-shm); set SIM_SHM_BARRIER=0 for the redis-gate fallback.
-cd ~/rotmg-sim-server && nohup setsid ./run-server-sim.sh 32 > /tmp/server_sim.log 2>&1 < /dev/null &
+# 2. fetch + build the C# server, then boot it in server-as-sim mode (N worlds, shm + futex barrier).
+#    Isolated: port 2060, redis 6390. SIM_SHM_BARRIER defaults to 1 (pure-shm); 0 = the redis-gate fallback.
+sim-server/fetch.sh
+cd sim-server && nohup setsid ./run-server-sim.sh 32 > /tmp/server_sim.log 2>&1 < /dev/null &
 
 # 3. run pufferl PPO against it on GPU 1 (N must match; SIM_SHM_BARRIER must match the server's mode)
-cd ~/rotmg-rl && SIM_SHM_BARRIER=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python server_train.py --agents 32 --steps 200000
+SIM_SHM_BARRIER=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -m rotmg_rl.trainer.longrun --agents 32 --steps 200000
 ```
 
 A real training run: N≈32 is the throughput sweet spot on this box (see the table), so launch the server
@@ -76,7 +77,7 @@ region is sized for it; the binding hard-fails on a header mismatch), and `SIM_S
 (the server registers worlds to whichever gate is on; the C-shim reads the same env var).
 
 Proofs (run with the matching `SIM_SHM_BARRIER`): `SIM_SHM_BARRIER=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python
-verify_obs.py --agents 16` (bit-identical obs), `SIM_SHM_BARRIER=1 .venv/bin/python verify_motion.py --agents 16`.
+-m rotmg_rl.tools.verify_obs --agents 16` (bit-identical obs), `SIM_SHM_BARRIER=1 .venv/bin/python -m rotmg_rl.tools.verify_motion --agents 16`.
 
 ## Measured (GPU 1, nice -19 server vs the GPU0 Protein sweep)
 
@@ -137,7 +138,7 @@ walkable tile this many geodesic-tiles from the boss; −1 == the real entrance)
 ```bash
 SIM_SPAWN_GEO_DIST=25 SIM_AGENT_HP=5000 SIM_AGENT_DEF=40 SIM_BOSS_HP=1500 \
   SIM_APPROACH_SCALE=0.02 SIM_EP_TIMEOUT=1500 ./run-server-sim.sh 32
-# then: nohup .venv/bin/python server_proof.py --agents 32 --steps 1500000 \
+# then: nohup .venv/bin/python -m rotmg_rl.trainer.proof --agents 32 --steps 1500000 \
 #         --server-log /tmp/server_proof.log --out logs/server_proof_curve.csv &
 ```
 
@@ -161,7 +162,7 @@ produce 0 reward / 0 clears, so the clears are a LEARNED navigate-in skill, not 
 stationary agent. Per-episode `ep_reward ≈ 6.0–6.4` (5.0 clear + ~1.0 boss-HP-delta + a positive
 geodesic-approach net) confirms the agent reduces geodesic distance, i.e. moves inward.
 
-`server_proof.py` (rotmg-rl) is the proof harness: it runs the real `server_train.py` PPO loop and tails
+`trainer/proof.py` is the proof harness: it runs the real `trainer/train.py` PPO loop and tails
 the server log in parallel to align the trainer's step/reward/done_rate with the ground-truth
 clear/death/timeout counts into one learning-curve CSV; `curve_summary.py` renders it. With the loop
 proven LEARNABLE on the real engine, the curriculum + Protein sweep can drive these difficulty knobs
@@ -172,7 +173,7 @@ toward d=1 (the real conditions) on top of this exact loop.
 With the per-episode loop proven LEARNABLE, the curriculum drives the difficulty knobs from an easy
 anchor (d=0) to the real conditions (d=1) WITHOUT restarting the server. Three pieces:
 
-**1. d -> config schedule (`src/rotmg_rl/server_difficulty.py`).** `server_difficulty_config(d)` maps one
+**1. d -> config schedule (`src/rotmg_rl/trainer/difficulty.py`).** `server_difficulty_config(d)` maps one
 `d in [0,1]` to the FOUR real-engine knobs, monotonic in d, every lever moving smoothly, `d=1` == the
 real deliverable conditions exactly. NO synthetic domain randomization -- the real game RNG (snake
 spawn, boss wander, bullet patterns) is the only variation (the deliberate departure from the C-sim
@@ -195,7 +196,7 @@ the d=1 snap, keeping it continuous.
 **5-int32 config block at the very tail** (after the 2 barrier ctrl words, so every existing offset --
 incl. the C-shim's ctrl pointer -- is UNCHANGED): `[valid(MAGIC), spawn_geo_dist, agent_hp, agent_def,
 boss_hp]`. The Python trainer mmaps the SAME `/dev/shm/rotmg_sim_shm` and pokes these 5 ints whenever d
-changes (`src/.../server_shm_config.py::ShmConfigChannel`); the C# `SimRlLoop` reads them at every
+changes (`src/rotmg_rl/trainer/shm_config.py::ShmConfigChannel`); the C# `SimRlLoop` reads them at every
 spawn/reset (`ResolveConfig`), preferring the live config over the static `SIM_*` env defaults. `valid !=
 MAGIC` (zeroed) == no live config -> the server falls back to the env defaults, so the existing
 fixed-config proof path is byte-for-byte unchanged. The gate already serializes visibility (the C-shim
@@ -205,7 +206,7 @@ needs no extra sync -- and the C-shim never touches it, so there is zero content
 This was chosen over a redis key / control file because the shm barrier already shares the page: it is
 one mmap + 5 `struct.pack_into`s on the Python side, no new IPC, no hot-path cost.
 
-*Proof it takes effect server-side:* `verify_dflow.py` writes d=0.0, 0.5, 1.0 while driving the gate; the
+*Proof it takes effect server-side:* `tools/verify_dflow.py` writes d=0.0, 0.5, 1.0 while driving the gate; the
 shm readback matches, and the server log shows every world transition the applied config at the next
 episode boundary, e.g.:
 
@@ -218,14 +219,14 @@ episode boundary, e.g.:
 All N worlds ramp live, mid-run, no restart. Each `[SIM-RL] agent spawned ... | applied cfg: ...` line
 also stamps the applied knobs against the spawn position (`geo_dist=N (max=...)`).
 
-**3. Eval ladder -> curriculum depth (`server_eval.py`).** For each rung `d in 0.1..1.0`, set the live
+**3. Eval ladder -> curriculum depth (`trainer/eval.py`).** For each rung `d in 0.1..1.0`, set the live
 config to that rung, drive the SAME PuffeRL eval-rollout path training uses for a step budget, and count
 the ground-truth clear/death/timeout from the server's `EPISODE DONE reason=` lines (the same source
-`server_proof.py` tallies; the server owns episode boundaries, so there is no Python-side reset). The
+`trainer/proof.py` tallies; the server owns episode boundaries, so there is no Python-side reset). The
 per-rung clear rate feeds `curriculum_depth()` -> one number = how far up the ladder the policy clears
 >=50%. The first few episodes after a d-flip are discarded (worlds mid-episode at the old config).
 
-**Curriculum training (`server_train_curriculum.py`).** The same PuffeRL PPO loop as `server_train.py`,
+**Curriculum training (`trainer/curriculum.py`).** The same PuffeRL PPO loop as `trainer/train.py`,
 but d RAMPS over the run (cosine `difficulty_at`, `--ramp-frac`) and the d-config is written to shm each
 update, so the server spawns the d-appropriate episode live.
 
@@ -293,8 +294,9 @@ cocktail). The mechanism is sound; the depth a given config reaches is the searc
   game objects, not the stub path.
 - **Determinism**: snake spawn / boss wander use `rand()` (stochastic by design, as in the dungeon env). The
   C# worlds are independent (per-world state), so N agents see decorrelated episodes — good for PPO.
-- **`_C` is shared**: building `server_env` overwrites the dungeon `_C.so`. Rebuild `./build.sh dungeon --float`
-  to return to the native-sim training flow.
+- **`_C` is the single built env**: `scripts/setup.sh` builds `server_env` into `_pufferlib/pufferlib/_C*.so`.
+  It is the only env this repo ships (the old native C-sim `dungeon` env was cut), so a clean checkout has
+  exactly one `_C` to build and nothing to switch between.
 - **Boss damage is a proximity contact model**, not aimed-shot collision: `SimRlLoop._agentBossDamage`
   applies `SIM_PROBE_DPS_TICK` to the boss whenever the agent is within ~8 tiles (the same scripted damage
   model the lockstep proof used). So at the easy config the agent clears by *arriving* and staying close,

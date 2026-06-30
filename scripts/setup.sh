@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Provision the training stack in .venv with our dungeon env compiled into PufferLib 4.0's _C backend.
-# PufferLib 4.0 is vendored in-repo at _pufferlib/ (our env edited IN PLACE in ocean/dungeon/) — this
-# builds it from source; there is no clone or setup-time copy.
+# Provision the server-as-sim training stack in .venv, with the server_env C-shim compiled into
+# PufferLib 4.0's _C backend. PufferLib 4.0 is vendored in-repo at _pufferlib/; this builds it from
+# source (no clone). The server_env env is a PASSTHROUGH to the C# betterSkillys server over shared
+# memory + a redis lockstep gate (see sim-server/, docs/design.md) — there is no native C dungeon env
+# (that flow was cut), so this is the only _C the repo builds.
 #
-# What it does: .venv (torch>=2.9 + deps) -> build.sh dungeon (compiles _C with our env statically
-# linked) -> pip install -e _pufferlib/ + our package. Then train with `python3 train.py` (the
-# one-command flow) or `scripts/box.sh train --slowly ...` (a single configurable run).
+# What it does: .venv (torch>=2.9 + deps) -> build.sh server_env (compiles _C with the shm/redis shim
+# statically linked) -> pip install -e _pufferlib/ + our package. Then boot the C# server
+# (sim-server/fetch.sh + sim-server/run-server-sim.sh) and train with `python -m rotmg_rl.trainer.longrun`.
+# The runtime build/link env (CUDA_HOME, the nvlib path, the ccache passthrough) mirrors buildenv.sh,
+# which the run scripts source; keep the two in step.
 #
 # SAFETY: torch>=2.9 + a CUDA build is several GB + heavy I/O. Run with disk headroom. This script
 # never runs `uv cache clean` (a cache-clean during a live run crashed a job before) — free space
-# manually ONLY when `pgrep -f 'train.py|rotmg_rl'` is empty.
+# manually ONLY when `pgrep -f 'rotmg_rl'` is empty.
 #
 # Usage: scripts/setup.sh
 set -euo pipefail
@@ -17,7 +21,7 @@ export UV_LINK_MODE=copy
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-PUFFER_DIR="$REPO_ROOT/_pufferlib"   # the vendored, committed PufferLib (env edited in place)
+PUFFER_DIR="$REPO_ROOT/_pufferlib"   # the vendored, committed PufferLib (server_env edited in place)
 VENV="$REPO_ROOT/.venv"
 VENV_PY="$VENV/bin/python"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.4}"   # box: nvcc lives here, not on PATH
@@ -47,7 +51,7 @@ echo "Free space on $REPO_ROOT: ${avail_g}G"
 uv pip install --python "$VENV_PY" "torch>=2.9" --index-url https://download.pytorch.org/whl/cu128
 # Pin numpy<2 (the _C extension is built against the numpy-1.x C ABI) and scipy<1.16 — scipy>=1.18
 # requires numpy>=2.0, and an unpinned resolve mixes scipy 1.18 with numpy 1.26 -> the import-time
-# `numpy has no attribute 'long'` crash (training.py imports the sweep deps even under --no-sweep).
+# `numpy has no attribute 'long'` crash (the sweep deps are imported even under --no-sweep).
 uv pip install --python "$VENV_PY" "numpy<2" "scipy<1.16" pybind11 setuptools rich rich_argparse gpytorch scikit-learn wandb
 
 # 2. Link prerequisites: build.sh links `-lcudnn -lnccl -lnvidia-ml`, but the pip nvidia wheels ship
@@ -59,11 +63,11 @@ for so in "$CUDNN_LIB"/libcudnn.so.*; do [ -e "$CUDNN_LIB/libcudnn.so" ] || ln -
 for so in "$NCCL_LIB"/libnccl.so.*; do [ -e "$NCCL_LIB/libnccl.so" ] || ln -sf "$(basename "$so")" "$NCCL_LIB/libnccl.so"; done
 export LIBRARY_PATH="$CUDA_HOME/lib64/stubs:$CUDNN_LIB:$NCCL_LIB${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
-# 3. Build _C with the dungeon env statically linked, in place in the vendored tree. --float (float32)
-# is required for the --slowly torch backend = our CNN + renderable checkpoints, and the native
-# backend still runs on it. Drop --float (set PUFFER_BUILD_FLAGS='') for max native throughput (bf16),
-# but then --slowly won't work.
-( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV/bin:$CUDA_HOME/bin:$PATH" LIBRARY_PATH="$LIBRARY_PATH" ./build.sh dungeon ${PUFFER_BUILD_FLAGS:---float} )
+# 3. Build _C with the server_env shim statically linked, in place in the vendored tree. --float
+# (float32) is required for the torch backend = our DungeonEncoder CNN-LSTM + renderable checkpoints.
+# server_env is a passthrough to the C# server over shm + the redis lockstep gate (no native dynamics
+# in C); it is the ONLY env this repo ships.
+( cd "$PUFFER_DIR" && PATH="$SHIM_DIR:$VENV/bin:$CUDA_HOME/bin:$PATH" LIBRARY_PATH="$LIBRARY_PATH" ./build.sh server_env ${PUFFER_BUILD_FLAGS:---float} )
 # LIBRARY_PATH (CUDA-12.4 stubs) is a LINK-time aid for build.sh only; leaving it set makes torch load
 # the stub cudart at runtime ("undefined symbol cudaGetDriverEntryPointByVersion"). Drop it now.
 unset LIBRARY_PATH
@@ -73,18 +77,13 @@ uv pip install --python "$VENV_PY" --no-build-isolation -e "$PUFFER_DIR"
 uv pip install --python "$VENV_PY" -e "$REPO_ROOT" --no-deps
 uv pip install --python "$VENV_PY" gymnasium imageio imageio-ffmpeg
 
-# 4.5. Build the single-env eval binding (csim/binding.c -> rotmg_rl.csim.binding). This is separate
-# from the _C training backend above; train.py imports rotmg_rl.eval, which imports this binding, so a
-# clean install must compile it or train/eval fail at import.
-"$VENV_PY" -m rotmg_rl.csim.build
-
-# 5. Smoke: the full import chain (training -> eval -> csim binding + _C) loads clean. Import order
-# matters: rotmg_rl.training imports torch FIRST, so torch's CUDA-12.8 cudart loads before pufferlib's
-# _C (built against 12.4) — the reverse order pins the older cudart and breaks torch. This mirrors the
-# real `python3 train.py` order; do NOT front-load `from pufferlib import _C`.
-"$VENV_PY" -c "import rotmg_rl.training; from pufferlib import _C; print('_C OK, env =', getattr(_C, 'env_name', '?'), '| rotmg_rl.training imports clean')"
+# 5. Smoke: the full import chain (the trainer -> pufferlib _C) loads clean. Import order matters:
+# the trainer imports torch FIRST, so torch's CUDA-12.8 cudart loads before pufferlib's _C (built
+# against 12.4) — the reverse order pins the older cudart and breaks torch. Do NOT front-load `_C`.
+"$VENV_PY" -c "import rotmg_rl.trainer.longrun; from pufferlib import _C; print('_C OK, env =', getattr(_C, 'env_name', '?'), '| rotmg_rl.trainer imports clean')"
 echo
-echo "Done. Train the Snake Pit (use --slowly for our CNN + renderable videos):"
-echo "  python3 train.py --wandb                                   # the one-command sweep -> full run"
-echo "  scripts/box.sh train --slowly --boss-hp 300 --total-timesteps 50000000   # a single configurable run"
-echo "  scripts/box.sh follow   # POV rollout videos to wandb"
+echo "Done. The C-shim env (server_env) is built. Next:"
+echo "  sim-server/fetch.sh                                       # fetch + build the C# server (.NET 8)"
+echo "  sim-server/run-server-sim.sh 32                           # boot N=32 Snake Pit worlds (shm + futex barrier)"
+echo "  python -m rotmg_rl.trainer.longrun --agents 32 --steps 200000   # train the curriculum -> a d=1 clearing policy"
+echo "Or run the whole path end-to-end with scripts/reproduce.sh."

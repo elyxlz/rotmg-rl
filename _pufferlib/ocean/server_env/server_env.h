@@ -117,6 +117,10 @@ typedef struct {
     volatile int32_t *act_seq;   /* &act_seq[0]: we bump per slot to post a fresh action */
     volatile int32_t *obs_seq;   /* &obs_seq[0]: the C# world bumps when its transition is ready */
     int32_t *agent_seq;          /* per-slot last action seq we posted (host-side, n ints) */
+    volatile int32_t *obs_idx;   /* &obs_idx[0]: the C# world publishes which double-buffer half is live */
+    float *dbl_obs;              /* obsB[2*N*OBS_SIZE]: async per-slot obs double buffer (two halves) */
+    float *dbl_rew;              /* rewB[2*N]: async reward double buffer */
+    float *dbl_done;             /* doneB[2*N]: async done double buffer */
 } ServerEnv;
 
 #define Env ServerEnv
@@ -216,11 +220,25 @@ static void srv_open_shm(Env *env) {
     if (path == NULL) path = "/dev/shm/rotmg_sim_shm";
 
     int n = env->cfg.n_agents;
+    /* MUST equal SimShmBridge.RegionBytes(n) EXACTLY: header + obs + act + rew + done + ctrl +
+     * config + async tail (seq + obs_idx + the obs/rew/done double buffer). The earlier version
+     * sized this as only header+obs+act+rew+done, then derived ctrl/act_seq/obs_seq pointers PAST
+     * it -- for some N the mmap's page-rounding slack covered the tail, for others (N=24/48/96)
+     * the async seq accesses landed BEYOND the mapped region, writing into adjacent heap and
+     * corrupting it (the non-deterministic CPython GC segfault). Sizing the whole region here
+     * makes every tail access provably in-bounds. */
     size_t bytes = (size_t)SHM_HEADER_INTS * sizeof(int)
         + (size_t)n * OBS_SIZE * sizeof(float)
         + (size_t)n * SRV_NUM_ATNS * sizeof(float)
         + (size_t)n * sizeof(float)
-        + (size_t)n * sizeof(float);
+        + (size_t)n * sizeof(float)
+        + (size_t)SHM_CTRL_INTS * sizeof(int)
+        + (size_t)SHM_CONFIG_INTS * sizeof(int)
+        + (size_t)2 * n * sizeof(int)               /* act_seq[N] + obs_seq[N] */
+        + (size_t)n * sizeof(int)                   /* obs_idx[N] */
+        + (size_t)2 * n * OBS_SIZE * sizeof(float)  /* obs double buffer (two halves) */
+        + (size_t)2 * n * sizeof(float)             /* reward double buffer */
+        + (size_t)2 * n * sizeof(float);            /* done double buffer */
 
     /* The C# server creates + sizes the region first. Spin until it exists and the
      * magic is stamped so a too-early open never maps a short/zeroed file. */
@@ -271,6 +289,15 @@ static void srv_open_shm(Env *env) {
     int32_t *seq = ctrl + SHM_CTRL_INTS + SHM_CONFIG_INTS;
     env->act_seq = (volatile int32_t *)&seq[0];
     env->obs_seq = (volatile int32_t *)&seq[n];
+    /* async double-buffer block sits after the seq block: obs_idx[N], then two halves of
+     * [obs][rew][done]. obs_idx[i] (acquire) selects the half holding slot i's current
+     * consistent frame; the world writes the OTHER half then flips obs_idx, so the half we
+     * read is never being written -> tear-free with no retry. */
+    env->obs_idx = (volatile int32_t *)(seq + 2 * n);
+    float *dbl = (float *)((int32_t *)env->obs_idx + n);
+    env->dbl_obs = dbl;
+    env->dbl_rew = env->dbl_obs + (size_t)2 * n * OBS_SIZE;
+    env->dbl_done = env->dbl_rew + (size_t)2 * n;
     /* Continue the shared generation sequence: req/done live in shm and persist across
      * client processes, so seed from the live req (not 0) or a reconnecting C-shim would
      * drive the counter backwards and desync the controller. */
@@ -394,16 +421,32 @@ static void srv_async_wait_obs(Env *env, int slot, int32_t want) {
  * sees obs_seq[i] >= S-1 AND, after copying the slot, still sees obs_seq[i] == S-1 (not yet S) read
  * a consistent S-1 frame. With 1:1 pacing the world needs a full ~ms tick to advance S-1 -> S while
  * the copy is sub-microsecond, so the retry virtually never fires; it is the correctness guard. */
-/* Boundary integrity self-check (SIM_ASYNC_VERIFY=1). After a version-stable copy of slot i at
- * version v0, re-read shm for that slot; while obs_seq is still v0 (no writer touched it) the copy
- * MUST be byte-identical -> proves a torn-free, faithful copy across the shm boundary AT COLLECT
- * TIME (the only place bit-identity is well-defined under the free-run pipeline, where vec_obs is
- * legitimately one tick behind the live shm frame). Counts torn/corrupt copies; should stay 0. */
+/* Copy slot i's published transition out of the DOUBLE BUFFER into the vec-buffers. obs_idx[i]
+ * (acquire) names the half the C# world last published; the world always writes the OTHER half
+ * before flipping the index, so the half we read here is complete and is not being written. The
+ * acquire on obs_idx pairs with the world's full-fence-before-flip, so every byte of the half is
+ * visible. No retry, no version re-read: tear-freedom is structural, not probabilistic. */
+static void srv_async_copy_slot(Env *env, int i) {
+    int32_t half = __atomic_load_n(&env->obs_idx[i], __ATOMIC_ACQUIRE);
+    size_t obs_off = ((size_t)half * env->cfg.n_agents + (size_t)i) * OBS_SIZE;
+    size_t sc_off = (size_t)half * env->cfg.n_agents + (size_t)i;
+    memcpy(env->observations + (size_t)i * OBS_SIZE, env->dbl_obs + obs_off, OBS_SIZE * sizeof(float));
+    env->rewards[i] = env->dbl_rew[sc_off];
+    env->terminals[i] = env->dbl_done[sc_off];
+}
+
+/* Boundary integrity self-check (SIM_ASYNC_VERIFY=1). After copying slot i's published half at
+ * obs_seq v0, re-read the same half from shm; while obs_seq is still v0 (no new transition
+ * published) the copy MUST be byte-identical -> proves a torn-free, faithful copy across the shm
+ * boundary AT COLLECT TIME (the only place bit-identity is well-defined under the free-run
+ * pipeline, where vec_obs is legitimately one tick behind the live shm frame). Counts torn/corrupt
+ * copies; should stay 0 -- and with the double buffer it is 0 by construction, not by luck. */
 static void srv_async_selfcheck(Env *env, int i, int32_t v0) {
     static long chk = -1, bad = 0, tot = 0;
     if (chk < 0) { const char *d = getenv("SIM_ASYNC_VERIFY"); chk = (d && d[0] == '1') ? 1 : 0; }
     if (!chk) return;
-    const float *src = env->shm_obs + (size_t)i * OBS_SIZE;
+    int32_t half = __atomic_load_n(&env->obs_idx[i], __ATOMIC_ACQUIRE);
+    const float *src = env->dbl_obs + ((size_t)half * env->cfg.n_agents + (size_t)i) * OBS_SIZE;
     const float *dst = env->observations + (size_t)i * OBS_SIZE;
     int torn = 0;
     if (__atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE) == v0)
@@ -418,25 +461,20 @@ static void srv_async_step(Env *env) {
     int n = env->cfg.n_agents;
     /* COLLECT-THEN-POST (torn-free + overlapping). The free-run worlds are parked on act_seq
      * waiting for the NEXT action, having already published the PREVIOUS action's transition. So
-     * we first COLLECT that transition while no world is writing it (parked == stable == torn-free),
-     * THEN post this step's action + wake the worlds. The world then ticks this action WHILE the GPU
-     * computes the next step's action from the obs we just returned -> the world tick overlaps the
-     * GPU forward + PPO bookkeeping (the GPU stays fed; the lockstep boundary stall collapses). The
-     * action lands one policy-step later == one tick (1:1 pacing) == the live deploy 1-tick action
-     * delay, so training timing matches deploy. (The previous post-then-collect ordering tore ~0.05%
-     * of frames: posting first woke the world, which then overwrote the slot while we read it.) */
+     * we first COLLECT that transition (from the published double-buffer half -- never the half a
+     * world is writing), THEN post this step's action + wake the worlds. The world then ticks this
+     * action WHILE the GPU computes the next step's action from the obs we just returned -> the
+     * world tick overlaps the GPU forward + PPO bookkeeping (the GPU stays fed; the lockstep
+     * boundary stall collapses). The action lands one policy-step later == one tick (1:1 pacing) ==
+     * the live deploy 1-tick action delay, so training timing matches deploy. */
     for (int i = 0; i < n; i++) {
         /* collect the previous transition: wait until it is published (obs_seq caught the last
-         * posted seq), then copy. The worlds are parked, so a version re-check is belt-and-braces. */
+         * posted seq), then copy the published half. The double buffer makes the copy tear-free
+         * with no version retry -- the world writes the other half. */
         srv_async_wait_obs(env, i, env->agent_seq[i]);
-        for (;;) {
-            int32_t v0 = __atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE);
-            memcpy(env->observations + (size_t)i * OBS_SIZE, env->shm_obs + (size_t)i * OBS_SIZE, OBS_SIZE * sizeof(float));
-            env->rewards[i] = env->shm_rew[i];
-            env->terminals[i] = env->shm_done[i];
-            int32_t v1 = __atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE);
-            if (v0 == v1) { srv_async_selfcheck(env, i, v0); break; }
-        }
+        int32_t v0 = __atomic_load_n(&env->obs_seq[i], __ATOMIC_ACQUIRE);
+        srv_async_copy_slot(env, i);
+        srv_async_selfcheck(env, i, v0);
     }
     /* post this step's action + wake the worlds to tick it (overlaps the next GPU forward). */
     for (int i = 0; i < n; i++) {
@@ -502,7 +540,11 @@ static void c_reset(Env *env) {
             if (ready == n) break;
             usleep(1000);
         }
-        srv_pull_obs(env);
+        /* copy obs[0] from each slot's published double-buffer half. An un-spawned world has not
+         * published, so its obs_idx is still 0 and half 0 is the Init-zeroed frame -- harmless,
+         * identical to the lockstep reset's warm-up zeros. */
+        for (int i = 0; i < n; i++)
+            srv_async_copy_slot(env, i);
     } else {
     srv_gate_tick(env);
     srv_pull_obs(env);

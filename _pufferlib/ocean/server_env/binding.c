@@ -43,6 +43,10 @@ void my_init(Env *env, Dict *kwargs) {
     env->act_seq = NULL;
     env->obs_seq = NULL;
     env->agent_seq = NULL;
+    env->obs_idx = NULL;
+    env->dbl_obs = NULL;
+    env->dbl_rew = NULL;
+    env->dbl_done = NULL;
     init_globals();
 }
 

@@ -4,7 +4,7 @@
 For each curriculum rung d in 0.1..1.0, set the LIVE difficulty config to that rung (over the shm
 d-flow channel), drive the trained policy for a step budget, and count the ground-truth
 clear/death/timeout episodes from the C# server's `[SIM-RL] EPISODE DONE reason=` log lines. The
-per-rung clear rate feeds curriculum_depth() (reused UNCHANGED from schedule.py via server_difficulty)
+per-rung clear rate feeds curriculum_depth() (reused UNCHANGED from schedule.py via trainer.difficulty)
 -> one depth number in [0,1] = how far up the difficulty ladder the policy still clears >=50%.
 
 Unlike the C-sim eval (CDungeonSingle, a Python-driven per-episode reset), the server owns episode
@@ -33,8 +33,8 @@ from pufferlib import _C, pufferl
 from pufferlib.torch_pufferl import PuffeRL, load_policy
 
 from rotmg_rl.schedule import CURRICULUM_RUNGS
-from rotmg_rl.server_difficulty import curriculum_depth, server_difficulty_config
-from server_shm_config import ShmConfigChannel
+from rotmg_rl.trainer.difficulty import curriculum_depth, server_difficulty_config
+from rotmg_rl.trainer.shm_config import ShmConfigChannel
 
 EP_RE = re.compile(r"EPISODE DONE t=(\d+) world=(\S+) step=(\d+) reason=(\w+)")
 

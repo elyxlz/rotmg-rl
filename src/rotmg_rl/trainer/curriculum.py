@@ -22,8 +22,8 @@ from pufferlib import _C, pufferl
 from pufferlib.pufferl import unroll_nested_dict
 from pufferlib.torch_pufferl import PuffeRL, load_policy
 
-from rotmg_rl.server_difficulty import difficulty_at, server_difficulty_config
-from server_shm_config import ShmConfigChannel
+from rotmg_rl.trainer.difficulty import difficulty_at, server_difficulty_config
+from rotmg_rl.trainer.shm_config import ShmConfigChannel
 
 
 def main() -> None:

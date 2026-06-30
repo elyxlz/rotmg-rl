@@ -2,7 +2,7 @@
 
 The real Flash/AIR client can't run on this box (ARM64 Linux has no Adobe/HARMAN AIR runtime, and only
 the AS3 source ships), so we render the bot playing on the real server with the SAME POV view the sim
-uses (rotmg_rl.csim.render.render_pov), driven by the world the RealObsBuilder reconstructs from
+uses, driven by the world the RealObsBuilder reconstructs from
 the live packet stream. This is honest evidence: it draws exactly what the policy is being fed (explored
 walls + fog-of-war minimap + reconstructed enemy bullets), not a privileged view.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from rotmg_rl.deploy.obs import RealObsBuilder
+from rotmg_rl.obs import RealObsBuilder
 
 _BOSS_RADIUS = 0.8  # DungeonConfig.boss_radius (cosmetic dot size only)
 

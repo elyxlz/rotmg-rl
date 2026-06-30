@@ -31,10 +31,10 @@ from pufferlib.pufferl import unroll_nested_dict
 from pufferlib.torch_pufferl import PuffeRL, load_policy
 
 from rotmg_rl.schedule import CURRICULUM_RUNGS
-from rotmg_rl.server_difficulty import curriculum_depth, difficulty_at, server_difficulty_config
 from rotmg_rl.sweep import SWEEP_POLICY, SWEEP_TRAIN, _INT_HP
-from server_shm_config import ShmConfigChannel
-from server_eval import EP_RE, tail_episodes
+from rotmg_rl.trainer.difficulty import curriculum_depth, difficulty_at, server_difficulty_config
+from rotmg_rl.trainer.eval import EP_RE, tail_episodes
+from rotmg_rl.trainer.shm_config import ShmConfigChannel
 
 
 def apply_ppo_hparams(args: dict, hp: dict) -> None:

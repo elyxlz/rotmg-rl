@@ -35,9 +35,9 @@ from pufferlib.pufferl import unroll_nested_dict
 from pufferlib.torch_pufferl import PuffeRL, load_policy
 
 from rotmg_rl.schedule import CURRICULUM_RUNGS
-from rotmg_rl.server_difficulty import curriculum_depth, difficulty_at, server_difficulty_config
-from server_shm_config import ShmConfigChannel
-from server_eval import tail_episodes
+from rotmg_rl.trainer.difficulty import curriculum_depth, difficulty_at, server_difficulty_config
+from rotmg_rl.trainer.eval import tail_episodes
+from rotmg_rl.trainer.shm_config import ShmConfigChannel
 
 # C-sim trial-11 warm-start basin (the long-run defaults) + the server-as-sim tweaks the wall analysis
 # called for: rew_approach bumped (navigate-in from the entrance needs strong approach shaping) and

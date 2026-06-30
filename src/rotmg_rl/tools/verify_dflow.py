@@ -13,8 +13,8 @@ import torch  # noqa: F401
 from pufferlib import _C, pufferl
 from pufferlib.torch_pufferl import PuffeRL, load_policy
 
-from rotmg_rl.server_difficulty import server_difficulty_config
-from server_shm_config import ShmConfigChannel
+from rotmg_rl.trainer.difficulty import server_difficulty_config
+from rotmg_rl.trainer.shm_config import ShmConfigChannel
 
 
 def main() -> None:

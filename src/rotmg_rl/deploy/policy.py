@@ -1,7 +1,7 @@
 """Load + run the deployed recurrent dungeon policy (PufferLib 4.0) on a flat real-game obs.
 
-Mirrors `rotmg_rl.eval`: the 4.0 policy is `models.Policy(DungeonEncoder, DefaultDecoder, LSTM)` (built
-by `eval.build_policy`); the obs is the flat [grid, minimap, scalars] Box(9807); the LSTM state comes
+The 4.0 policy is `models.Policy(DungeonEncoder, DefaultDecoder, LSTM)` (built by
+`rotmg_rl.policy.build_policy`); the obs is the flat [grid, minimap, scalars] Box(9807); the LSTM state comes
 from `policy.initial_state(...)` and is carried across steps (returned by `forward_eval`), reset per
 episode. Action = one sample per MultiDiscrete head.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import torch  # ty: ignore[unresolved-import]  torch is a GPU-box-only dep, not installed on this CPU dev box
 
-from rotmg_rl.eval import build_policy
+from rotmg_rl.policy import build_policy
 
 
 class PolicyRunner:
